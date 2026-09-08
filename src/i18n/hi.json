@@ -1,0 +1,442 @@
+{
+  "tabs": {
+    "home": "होम",
+    "kundali": "कुंडली",
+    "charts": "चार्ट",
+    "periods": "अवधि",
+    "profile": "प्रोफ़ाइल"
+  },
+  "onboarding": {
+    "welcomeTitle": "वैदिक ज्योतिष, आसान भाषा में।",
+    "welcomeSubtitle": "अपनी कुंडली हिंदी या अंग्रेज़ी में, अपनी सुविधा अनुसार समझें।",
+    "getStarted": "शुरू करें",
+    "authTitle": "अपना खाता बनाएं",
+    "authSubtitleSignup": "अपनी कुंडली पाने के लिए एक मुफ़्त खाता बनाएं।",
+    "authSubtitleLogin": "वापसी पर स्वागत है — अपने खाते में लॉग इन करें।",
+    "loginTab": "लॉग इन करें",
+    "signupTab": "साइन अप करें",
+    "emailLabel": "ईमेल",
+    "passwordLabel": "पासवर्ड",
+    "confirmPasswordLabel": "पासवर्ड की पुष्टि करें",
+    "continueButton": "आगे बढ़ें",
+    "methodEmail": "ईमेल",
+    "methodPhone": "फ़ोन",
+    "phoneLabel": "फ़ोन नंबर",
+    "phonePlaceholder": "+91XXXXXXXXXX",
+    "sendOtpButton": "OTP भेजें",
+    "otpLabel": "6 अंकों का कोड डालें",
+    "otpSentTo": "{{phone}} पर कोड भेजा गया",
+    "verifyOtpButton": "सत्यापित करें और आगे बढ़ें",
+    "resendOtpButton": "कोड फिर भेजें",
+    "devOtpNote": "टेस्ट मोड — अभी SMS सेवा नहीं जुड़ी है, इसलिए आपका कोड है: {{code}}",
+    "errorNameRequired": "कृपया अपना नाम डालें।",
+    "errorEmailInvalid": "कृपया एक मान्य ईमेल पता डालें।",
+    "errorPasswordLength": "पासवर्ड कम से कम 8 अक्षरों का होना चाहिए।",
+    "errorPasswordMismatch": "पासवर्ड मेल नहीं खाते।",
+    "errorPhoneInvalid": "कृपया देश कोड सहित एक मान्य फ़ोन नंबर डालें (जैसे +919999999999)।",
+    "errorOtpInvalid": "कृपया 6 अंकों का कोड डालें।",
+    "errorInvalidCredentials": "गलत ईमेल या पासवर्ड।",
+    "accountExistsTitle": "खाता पहले से मौजूद है",
+    "accountExistsMessage": "इस ईमेल से पहले से एक खाता मौजूद है। क्या आप इसके बजाय लॉग इन करना चाहेंगे?",
+    "birthDataTitle": "आपका जन्म विवरण",
+    "birthDataSubtitle": "इसका उपयोग आपकी कुंडली तैयार करने के लिए होता है। आप इसे बाद में प्रोफ़ाइल से बदल सकते हैं।",
+    "generateKundali": "मेरी कुंडली बनाएं",
+    "aiProcessingTitle": "आपके सितारे पढ़े जा रहे हैं...",
+    "processingMessages": [
+      "जन्म निर्देशांक जांचे जा रहे हैं...",
+      "ग्रहों की स्थिति की गणना हो रही है...",
+      "भावों और दोषों की व्याख्या हो रही है...",
+      "आपका डैशबोर्ड तैयार हो रहा है..."
+    ]
+  },
+  "appInfo": {
+    "skip": "छोड़ें",
+    "continueButton": "आगे बढ़ें",
+    "getStarted": "मेरा खाता बनाएं",
+    "slides": [
+      {
+        "eyebrow": "वास्तविक गणना, अंदाज़ा नहीं",
+        "title": "यहां हर आंकड़ा गणना से आता है, अंदाज़े से नहीं।",
+        "checks": [
+          {
+            "title": "स्विस एफ़ेमेरिस सटीकता",
+            "desc": "लाहिड़ी सिडेरियल स्थिति आर्कमिनट तक सटीक — वही इंजन जो पेशेवर सॉफ़्टवेयर इस्तेमाल करता है।"
+          },
+          {
+            "title": "D1, D9 और D10 चार्ट, असली दशा समयरेखा",
+            "desc": "आपकी राशि, नवमांश और दशमांश कुंडली, साथ ही आपकी पूरी विंशोत्तरी दशा — मौजूदा उप-अवधि तक।"
+          }
+        ]
+      },
+      {
+        "eyebrow": "पांच गाइड, एक कुंडली",
+        "title": "किसी ऋषि से पूछें — जो नज़रिया चाहिए, वह चुनें।",
+        "checks": [
+          {
+            "title": "वशिष्ठ, पराशर, गार्गी, अगस्त्य और भृगु",
+            "desc": "हर ऋषि अपनी अलग बातचीत और अपना फ़ोकस रखता है, पर आपकी एक ही असली कुंडली के आधार पर।"
+          },
+          {
+            "title": "हर दिन एक ताज़ा जानकारी",
+            "desc": "रेटिंग, जोखिम, मौके और बहुत कुछ — हर दिन नई गणना, कभी बना-बनाया संदेश नहीं।"
+          }
+        ]
+      },
+      {
+        "eyebrow": "आपका विवरण आपका ही रहता है",
+        "title": "असली ज्योतिष के लिए असली जन्म विवरण चाहिए — पूरी सावधानी से संभाला गया।",
+        "checks": [
+          {
+            "title": "एन्क्रिप्टेड रूप से सुरक्षित",
+            "desc": "आपका जन्म विवरण हमारे डेटाबेस में एन्क्रिप्टेड है — कभी बेचा या साझा नहीं किया जाता।"
+          },
+          {
+            "title": "सिर्फ़ आपकी कुंडली के लिए इस्तेमाल",
+            "desc": "जो कुछ भी आप देखते हैं वह आपके अपने विवरण से बनता है — कुछ भी सामान्य नहीं।"
+          }
+        ]
+      }
+    ]
+  },
+  "validation": {
+    "title": "क्या यह आपके जैसा लगता है?",
+    "subtitle": "ईमानदारी से जवाब दें — इससे हमें आपकी रीडिंग सटीक बनाने में मदद मिलेगी।",
+    "yes": "हां, यह मैं हूं",
+    "no": "ऐसा नहीं है",
+    "resultTitleHigh": "मज़बूत मेल",
+    "resultTitleLow": "आंशिक मेल",
+    "resultHighMessage": "{{percent}}% सटीक — अब हम आपके आने वाले समय के बारे में भी बताएंगे।",
+    "resultLowMessage": "{{percent}}% सटीक — ऐसा तब हो सकता है जब जन्म समय मिनट तक सटीक न हो।",
+    "continueAnyway": "फिर भी आगे बढ़ें",
+    "editBirthDetails": "जन्म विवरण बदलें",
+    "continueButton": "आगे बढ़ें"
+  },
+  "preferences": {
+    "title": "आप किस बारे में जानना चाहते हैं?",
+    "subtitle": "जो आपके लिए सबसे ज़्यादा मायने रखता है उसे चुनें — हम इस पर नज़र रखेंगे।",
+    "family": "परिवार",
+    "health": "स्वास्थ्य",
+    "career": "करियर",
+    "marriageRelationships": "विवाह और रिश्ते",
+    "friends": "दोस्ती",
+    "continueButton": "आगे बढ़ें",
+    "selectAtLeastOne": "आगे बढ़ने के लिए कम से कम एक चुनें"
+  },
+  "insights": {
+    "screenTitle": "आपकी जानकारियां",
+    "emptyState": "अभी कुछ नया नहीं है — अगली रीडिंग के बाद फिर देखें।",
+    "toneGood": "अच्छा",
+    "toneAverage": "सामान्य",
+    "toneWatch": "ध्यान देने योग्य"
+  },
+  "common": {
+    "appName": "कुंडलीAI",
+    "listenToThisSection": "यह भाग सुनें",
+    "listenToFullExplanation": "पूरी जानकारी सुनें",
+    "listenToThisAnalysis": "यह विश्लेषण सुनें",
+    "play": "चलाएं",
+    "pause": "रोकें",
+    "close": "बंद करें",
+    "premiumFeature": "प्रीमियम सुविधा",
+    "premiumTooltip": "आवाज़ में सुनने की सुविधा इनसाइट प्लान में उपलब्ध है।",
+    "premiumTooltipGeneric": "यह सुविधा इनसाइट प्लान में उपलब्ध है।",
+    "upgrade": "प्लान अपग्रेड करें",
+    "cancel": "रद्द करें",
+    "tryAgain": "फिर से कोशिश करें",
+    "contactSupport": "सहायता से संपर्क करें",
+    "loading": "लोड हो रहा है…",
+    "seeFullKundali": "पूरी कुंडली देखें",
+    "downloadPdf": "पीडीएफ रिपोर्ट डाउनलोड करें",
+    "readLater": "बाद के लिए सहेजें",
+    "language": "English",
+    "back": "वापस",
+    "edit": "बदलें",
+    "save": "सहेजें",
+    "current": "मौजूदा",
+    "locked": "बंद"
+  },
+  "home": {
+    "greeting": "नमस्ते",
+    "todayCardTitle": "आज",
+    "todayCardCta": "पूरी जानकारी देखें",
+    "glanceCardTitle": "आपकी कुंडली एक नज़र में",
+    "glanceCardFree": "मुफ़्त",
+    "lagna": "लग्न",
+    "moonSign": "चंद्र राशि",
+    "coreStrength": "मुख्य शक्ति",
+    "coreChallenge": "मुख्य चुनौती",
+    "manglikStatusLabel": "मंगलिक स्थिति",
+    "youAreManglik": "आप मंगलिक हैं.",
+    "youAreNotManglik": "आप मंगलिक नहीं हैं.",
+    "viewManglikAnalysis": "मंगलिक विश्लेषण देखें",
+    "chartsCardTitle": "चार्ट",
+    "gunaMilanButton": "गुण मिलान",
+    "seePeriods": "अवधि",
+    "profileButtonLabel": "प्रोफ़ाइल और जन्म विवरण",
+    "focusMeaningLabel": "इसका मतलब",
+    "focusAvoidLabel": "आज बचें",
+    "focusDoLabel": "आज इस पर ध्यान दें"
+  },
+  "kundali": {
+    "screenTitle": "पूर्ण कुंडली",
+    "preparingKundali": "आपकी पूर्ण कुंडली तैयार की जा रही है…",
+    "errorTitle": "कुंडली तैयार नहीं हो पाई",
+    "errorMessage": "रिपोर्ट बनाते समय कुछ गड़बड़ी हुई। कृपया फिर से कोशिश करें।",
+    "yourKundaliTitle": "आपकी कुंडली",
+    "basicDetailsTitle": "मूल जानकारी",
+    "personalityNatureTitle": "स्वभाव और व्यक्तित्व",
+    "careerMoneyTitle": "करियर और धन",
+    "relationshipsMarriageTitle": "रिश्ते और विवाह",
+    "manglikStatusSectionTitle": "मंगलिक स्थिति",
+    "healthTemperamentTitle": "स्वास्थ्य और मिज़ाज",
+    "strengthsChallengesTitle": "शक्तियां और चुनौतियां",
+    "timingOverviewTitle": "समय विवरण",
+    "keyPointsLabel": "मुख्य बातें",
+    "brutalTruthLabel": "एक पंक्ति में",
+    "viewFullManglikAnalysis": "पूर्ण मंगलिक विश्लेषण देखें",
+    "sunSign": "सूर्य राशि",
+    "nakshatra": "नक्षत्र",
+    "savedConfirmation": "सहेजा गया। यह आपकी सहेजी गई रिपोर्ट में मिलेगा।",
+    "pdfPreparingMessage": "आपकी पीडीएफ रिपोर्ट तैयार की जा रही है। तैयार होते ही आपको सूचित किया जाएगा।",
+    "planetaryPositionsTitle": "ग्रह स्पष्ट (ग्रहों की सटीक स्थिति)",
+    "lagnaDegreeLabel": "लग्न अंश",
+    "houseLabel": "भाव",
+    "dignity": {
+      "exalted": "उच्च का",
+      "debilitated": "नीच का",
+      "own_sign": "स्वराशि",
+      "neutral": "सामान्य"
+    }
+  },
+  "manglik": {
+    "screenTitle": "मंगलिक विश्लेषण",
+    "youAreManglik": "आप मंगलिक हैं.",
+    "youAreNotManglik": "आप मंगलिक नहीं हैं.",
+    "marsHouseFromLagnaLabel": "लग्न से मंगल का भाव",
+    "marsHouseFromMoonLabel": "चंद्रमा से मंगल का भाव",
+    "explanationTitle": "यह निष्कर्ष कैसे निकाला गया",
+    "cancellationsTitle": "राहत के कारक (कैंसिलेशन)",
+    "relationshipImplicationsTitle": "विवाह के लिए इसका क्या अर्थ है",
+    "noCancellations": "इस कुंडली में कोई विशेष राहत कारक नहीं मिला।",
+    "remediesTitle": "सुझाए गए उपाय (वैकल्पिक)",
+    "remediesDisclaimer": "ये सामान्य पारंपरिक सुझाव हैं, चिकित्सीय या वित्तीय सलाह नहीं।"
+  },
+  "plans": {
+    "screenTitle": "प्लान",
+    "currentPlan": "मौजूदा प्लान",
+    "choosePlan": "यह प्लान चुनें",
+    "free": "मुफ़्त",
+    "insight": "इनसाइट",
+    "strategy": "स्ट्रैटेजी",
+    "freeFeatures": [
+      "आज का राशिफल",
+      "मूल कुंडली (D1)",
+      "मूल मंगलिक स्थिति (हां/नहीं + 1-2 पंक्ति)",
+      "सीमित गहन अवधि विश्लेषण"
+    ],
+    "insightFeatures": [
+      "D9 और D10 चार्ट",
+      "असीमित अवधि विश्लेषण",
+      "पूर्ण कुंडली रिपोर्ट (टेक्स्ट)",
+      "मंगलिक की विस्तृत जानकारी",
+      "चार्ट और कुंडली भागों की आवाज़ में जानकारी"
+    ],
+    "strategyFeatures": [
+      "सभी इनसाइट सुविधाएं",
+      "AI के साथ आवाज़ में बातचीत",
+      "निर्णय योजनाकार",
+      "उन्नत अलर्ट"
+    ]
+  },
+  "charts": {
+    "screenTitle": "जन्म कुंडली चार्ट",
+    "lagnaCellLabel": "लग्न भाव, रंग में दिखाया गया",
+    "keyPointsLabel": "मुख्य बातें",
+    "listenToThisChart": "यह चार्ट सुनें",
+    "lockedMessage": "यह चार्ट इनसाइट प्लान में उपलब्ध है।",
+    "unlockButton": "इनसाइट प्लान से अनलॉक करें",
+    "yogasTitle": "पाए गए योग और दोष",
+    "yogasSubtitle": "इस कुंडली में मिले वास्तविक स्थिति-आधारित संयोग — हर कुंडली में नहीं मिलते।",
+    "noYogasFound": "इस कुंडली में इस शुरुआती सूची का कोई शास्त्रीय योग या दोष नहीं मिला।",
+    "houseByHouseTitle": "भाव-दर-भाव विवरण",
+    "houseByHouseSubtitle": "हर भाव में क्या स्थित है, और इसका सरल भाषा में क्या मतलब है।"
+  },
+  "gunaMilan": {
+    "screenTitle": "गुण मिलान",
+    "formSubtitle": "अपनी कुंडली से अष्टकूट (गुण मिलान) अनुकूलता जांचने के लिए साथी का जन्म विवरण डालें।",
+    "matchButton": "अनुकूलता जांचें",
+    "matchAnother": "किसी और से मिलान करें",
+    "matching": "कुंडलियों की तुलना हो रही है...",
+    "yourMoon": "आपका चंद्र: {{sign}} ({{nakshatra}})",
+    "partnerMoon": "साथी का चंद्र: {{sign}} ({{nakshatra}})",
+    "kootaBreakdown": "8-बिंदु विवरण",
+    "verdict": {
+      "excellent": "उत्कृष्ट मेल",
+      "good": "अच्छा मेल",
+      "average": "औसत मेल",
+      "not_recommended": "सुझाया नहीं जाता"
+    }
+  },
+  "periods": {
+    "screenTitle": "समय अवधि",
+    "introText": "ये आपकी कुंडली की मुख्य जीवन अवधियां (दशा) हैं, जो एक के बाद एक अलग-अलग ग्रहों द्वारा नियंत्रित होती हैं।",
+    "currentBadge": "मौजूदा अवधि",
+    "rightNowLabel": "अभी",
+    "subPeriodsLabel": "उप-अवधियां",
+    "risksLabel": "जोखिम",
+    "opportunitiesLabel": "अवसर",
+    "remainingFreeAnalyses_one": "इस महीने {{count}} मुफ़्त गहन विश्लेषण बचा है",
+    "remainingFreeAnalyses_other": "इस महीने {{count}} मुफ़्त गहन विश्लेषण बचे हैं",
+    "analysisErrorMessage": "इस अवधि का विश्लेषण लोड नहीं हो पाया। कृपया फिर से कोशिश करें।",
+    "listenToThisPeriod": "यह अवधि सुनें",
+    "lockedMessage": "इस अवधि की पूरी जानकारी इनसाइट प्लान में उपलब्ध है।",
+    "unlockButton": "इनसाइट प्लान से अनलॉक करें"
+  },
+  "profile": {
+    "screenTitle": "प्रोफ़ाइल और जन्म विवरण",
+    "birthDetailsTitle": "जन्म विवरण",
+    "nameLabel": "नाम",
+    "dateOfBirthLabel": "जन्म तिथि (YYYY-MM-DD)",
+    "timeOfBirthLabel": "जन्म समय (HH:mm)",
+    "placeOfBirthLabel": "जन्म स्थान",
+    "planLabel": "मौजूदा प्लान",
+    "savedMessage": "सहेजा गया। इन विवरणों के साथ आपकी कुंडली फिर से तैयार की जाएगी।",
+    "languageLabel": "ऐप की भाषा",
+    "creditsLabel": "चैट क्रेडिट",
+    "unlimitedCredits": "असीमित चैट क्रेडिट",
+    "buyCredits": "और क्रेडिट खरीदें",
+    "logOut": "लॉग आउट करें",
+    "logOutConfirmTitle": "लॉग आउट करें?",
+    "logOutConfirmMessage": "अपनी कुंडली देखने के लिए आपको फिर से लॉग इन करना होगा। आपका खाता और रिपोर्ट सुरक्षित रहेंगे।",
+    "testingSectionTitle": "टेस्टिंग",
+    "restartOnboarding": "ऑनबोर्डिंग फिर से शुरू करें",
+    "restartOnboardingConfirmTitle": "ऑनबोर्डिंग फिर से शुरू करें?",
+    "restartOnboardingConfirmMessage": "इससे आपका जन्म विवरण, प्राथमिकताएं और रिपोर्ट हट जाएंगी ताकि आप दोबारा ऑनबोर्डिंग से गुज़र सकें।"
+  },
+  "rishi": {
+    "unlimitedMessages": "असीमित संदेश",
+    "send": "भेजें",
+    "outOfCreditsTitle": "आपके मुफ़्त संदेश खत्म हो गए",
+    "outOfCreditsMessage": "चैट जारी रखने के लिए पास खरीदें, या असीमित सुविधा के लिए प्लान अपग्रेड करें।",
+    "buyPass": "पास खरीदें",
+    "freeMessagesLeft_one": "आज {{count}} मुफ़्त संदेश बचा है",
+    "freeMessagesLeft_other": "आज {{count}} मुफ़्त संदेश बचे हैं",
+    "promptWeek": "इस हफ़्ते का फ़ोकस",
+    "promptDasha": "मेरी मौजूदा दशा",
+    "promptCareer": "करियर पैटर्न",
+    "promptRemedy": "एक व्यावहारिक उपाय"
+  },
+  "voiceChat": {
+    "promoTitle": "बोलकर अपने सवाल पूछें",
+    "promoSubtitle": "माइक दबाएं और अपनी कुंडली के बारे में कुछ भी पूछें — बोलकर जवाब पाएं।",
+    "promoButton": "किसी ऋषि से पूछें",
+    "tapToAsk": "पूछने के लिए दबाएं",
+    "thinking": "सोच रहा हूं...",
+    "typeInsteadPlaceholder": "या अपना सवाल लिखें...",
+    "comingSoonTitle": "आवाज़ से पूछना जल्द आ रहा है",
+    "comingSoonMessage": "बोलकर AI से पूछने के लिए ऐप अपडेट चाहिए जो अभी उपलब्ध नहीं है — फिलहाल नीचे अपना सवाल लिखें।"
+  },
+  "rishiPicker": {
+    "screenTitle": "किसी ऋषि से पूछें",
+    "subtitle": "एक कुंडली, देखने के पांच तरीके — जो आपके सवाल के अनुकूल हो, वह गाइड चुनें।",
+    "openButton": "बातचीत शुरू करें",
+    "disclaimer": "हर ऋषि एक ही असली कुंडली गणना पर आधारित है — लहजा बदलता है, तथ्य नहीं।",
+    "vasishtha": {
+      "focus": "जीवन दिशा",
+      "tag": "स्थिर और सधा हुआ",
+      "description": "दृष्टिकोण, दीर्घकालिक पैटर्न और शांत स्पष्टता चाहने वाले फैसलों के लिए।",
+      "greeting": "नमस्ते। आपकी कुंडली में वाकई ध्यान देने लायक पैटर्न हैं — आज क्या समझना चाहेंगे?"
+    },
+    "parashara": {
+      "focus": "समय और गोचर",
+      "tag": "सटीक और विश्लेषणात्मक",
+      "description": "ग्रह अवधि, समय की खिड़कियां और मौजूदा घटनाओं के पीछे की गति के लिए।",
+      "greeting": "स्वागत है। समय, गोचर या अपनी मौजूदा दशा के बारे में पूछें।"
+    },
+    "gargi": {
+      "focus": "रिश्ते",
+      "tag": "गर्मजोश और समझदार",
+      "description": "संवाद, अनुकूलता, सीमाएं और भावनात्मक समझ के लिए।",
+      "greeting": "मैं आपको रिश्तों को स्पष्ट रूप से देखने में मदद करने के लिए यहां हूं — कहां से शुरू करें?"
+    },
+    "agastya": {
+      "focus": "आंतरिक संतुलन",
+      "tag": "चिंतनशील और व्यावहारिक",
+      "description": "आदतें, स्वास्थ्य, उपाय और निजी लय बहाल करने के लिए।",
+      "greeting": "चलिए आपकी कुंडली को व्यावहारिक लय पर वापस लाते हैं — आदतें, आराम, और जो वाकई मदद करता है।"
+    },
+    "bhrigu": {
+      "focus": "करियर और संसाधन",
+      "tag": "सीधा और रणनीतिक",
+      "description": "काम, धन, क्षमता और आपके व्यावहारिक भविष्य को आकार देने वाले फैसलों के लिए।",
+      "greeting": "बताएं कि आप कौन सा करियर या आर्थिक फैसला सोच रहे हैं, हम इसे आपकी कुंडली के ज़रिए देखेंगे।"
+    }
+  },
+  "passStore": {
+    "screenTitle": "पास स्टोर",
+    "subtitle": "ज्योतिषी से चैट करने के लिए क्रेडिट खरीदें।",
+    "buyButton": "खरीदें",
+    "creditsSuffix": "चैट क्रेडिट"
+  },
+  "payment": {
+    "screenTitle": "चेकआउट",
+    "demoNotice": "यह एक डेमो चेकआउट है — कोई वास्तविक भुगतान नहीं होता।",
+    "payNow": "भुगतान सिम्युलेट करें",
+    "processing": "भुगतान प्रोसेस हो रहा है...",
+    "successTitle": "भुगतान सफल",
+    "successMessage_one": "आपके खाते में {{count}} क्रेडिट जोड़ा गया।",
+    "successMessage_other": "आपके खाते में {{count}} क्रेडिट जोड़े गए।",
+    "doneButton": "हो गया"
+  },
+  "horoscope": {
+    "screenTitle": "आज की जानकारी",
+    "loadingMessage": "आपकी आज की कुंडली पढ़ी जा रही है…",
+    "errorMessage": "आज की जानकारी लोड नहीं हो पाई। कृपया फिर से कोशिश करें।",
+    "todaysRatingLabel": "आज की रेटिंग",
+    "riskOpportunityTitle": "जोखिम और मौका",
+    "keyRiskLabel": "आज का मुख्य जोखिम",
+    "keyOpportunityLabel": "आज का मुख्य मौका",
+    "currentPeriodTitle": "मौजूदा अवधि",
+    "periodRatingLabel": "अवधि रेटिंग",
+    "periodTypeLabel": "अवधि प्रकार",
+    "dominantLifeAreaLabel": "अभी मुख्य जीवन क्षेत्र",
+    "natalPatternsTitle": "आपकी कुंडली के पैटर्न",
+    "coreStrengthLabel": "मुख्य शक्ति",
+    "coreWeaknessLabel": "मुख्य कमज़ोरी / अनदेखा पक्ष",
+    "stressPatternLabel": "तनाव का पैटर्न",
+    "decisionStyleLabel": "आप फैसले कैसे लेते हैं",
+    "moonAndTransitTitle": "चंद्रमा और गोचर",
+    "moonNakshatraLabel": "चंद्र नक्षत्र और मूड",
+    "transitHighlightLabel": "आज का मुख्य गोचर",
+    "beforeYouLeaveHomeLabel": "घर से निकलने से पहले",
+    "lifeGrowthTaskLabel": "दीर्घकालिक विकास कार्य",
+    "doshasLabel": "दोष",
+    "doshaPresent": "मौजूद",
+    "doshaNotPresent": "मौजूद नहीं",
+    "energyModes": {
+      "grind": "मेहनत",
+      "strategic": "रणनीतिक",
+      "rest": "आराम",
+      "conflict_prone": "टकराव-प्रवण",
+      "creative": "रचनात्मक"
+    },
+    "periodTypes": {
+      "grind": "मेहनत",
+      "instability": "अस्थिरता",
+      "consolidation": "मज़बूती",
+      "growth": "विकास",
+      "testing": "परीक्षा"
+    },
+    "tithiTags": {
+      "start": "नई शुरुआत",
+      "consolidate": "मज़बूती",
+      "effort": "मेहनत",
+      "avoid_starts": "नई शुरुआत टालें",
+      "finish": "समापन"
+    },
+    "paksha": {
+      "shukla": "शुक्ल",
+      "krishna": "कृष्ण"
+    }
+  }
+}

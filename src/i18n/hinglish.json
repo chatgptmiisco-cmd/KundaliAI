@@ -1,0 +1,442 @@
+{
+  "tabs": {
+    "home": "Home",
+    "kundali": "Kundali",
+    "charts": "Charts",
+    "periods": "Periods",
+    "profile": "Profile"
+  },
+  "onboarding": {
+    "welcomeTitle": "Vedic astrology, ab simple bhasha mein.",
+    "welcomeSubtitle": "Apni kundali samjho apni speed se, Hindi ya English mein.",
+    "getStarted": "Shuru Karein",
+    "authTitle": "Apna account banayein",
+    "authSubtitleSignup": "Apni kundali paane ke liye ek free account banayein.",
+    "authSubtitleLogin": "Wapas swagat hai — apne account mein log in karein.",
+    "loginTab": "Log in",
+    "signupTab": "Sign up",
+    "emailLabel": "Email",
+    "passwordLabel": "Password",
+    "confirmPasswordLabel": "Password confirm karein",
+    "continueButton": "Aage Badhein",
+    "methodEmail": "Email",
+    "methodPhone": "Phone",
+    "phoneLabel": "Phone number",
+    "phonePlaceholder": "+91XXXXXXXXXX",
+    "sendOtpButton": "OTP Bhejein",
+    "otpLabel": "6-digit code daalein",
+    "otpSentTo": "{{phone}} par code bhej diya gaya",
+    "verifyOtpButton": "Verify karke aage badhein",
+    "resendOtpButton": "Code dobara bhejein",
+    "devOtpNote": "Test mode — abhi SMS provider nahi hai, isliye aapka code: {{code}}",
+    "errorNameRequired": "Please apna naam daalein.",
+    "errorEmailInvalid": "Please ek valid email address daalein.",
+    "errorPasswordLength": "Password kam se kam 8 characters ka hona chahiye.",
+    "errorPasswordMismatch": "Passwords match nahi kar rahe.",
+    "errorPhoneInvalid": "Please country code ke saath ek valid phone number daalein (jaise +919999999999).",
+    "errorOtpInvalid": "Please 6-digit code daalein.",
+    "errorInvalidCredentials": "Galat email ya password.",
+    "accountExistsTitle": "Account pehle se maujood hai",
+    "accountExistsMessage": "Is email se pehle se ek account maujood hai. Kya aap iske bajaye log in karna chahenge?",
+    "birthDataTitle": "Aapki birth details",
+    "birthDataSubtitle": "Isse aapki kundali banti hai. Baad mein profile se change kar sakte hain.",
+    "generateKundali": "Meri kundali banao",
+    "aiProcessingTitle": "Aapke sitare padhe ja rahe hain...",
+    "processingMessages": [
+      "Birth coordinates verify ho rahe hain...",
+      "Planetary placements calculate ho rahe hain...",
+      "Houses aur doshas interpret ho rahe hain...",
+      "Aapka dashboard taiyaar ho raha hai..."
+    ]
+  },
+  "appInfo": {
+    "skip": "Skip",
+    "continueButton": "Aage Badhein",
+    "getStarted": "Mera account banayein",
+    "slides": [
+      {
+        "eyebrow": "Real calculation, andaza nahi",
+        "title": "Yahan har number calculate hota hai, guess nahi.",
+        "checks": [
+          {
+            "title": "Swiss Ephemeris precision",
+            "desc": "Lahiri sidereal positions arcminute tak accurate — wahi engine jo professional software use karta hai."
+          },
+          {
+            "title": "D1, D9 aur D10 charts, real dasha timeline",
+            "desc": "Aapki Rasi, Navamsa aur Dashamsa kundali, aur aapki poori Vimshottari dasha — current sub-period tak."
+          }
+        ]
+      },
+      {
+        "eyebrow": "Paanch guide, ek kundali",
+        "title": "Kisi Rishi se poochein — jo perspective chahiye wo chunein.",
+        "checks": [
+          {
+            "title": "Vasishtha, Parashara, Gargi, Agastya aur Bhrigu",
+            "desc": "Har Rishi apni alag baatcheet aur apna focus rakhta hai, par aapki ek hi real kundali ke aadhar par."
+          },
+          {
+            "title": "Har din ek fresh reading",
+            "desc": "Rating, risks, opportunities aur bahut kuch — har din nayi calculation, kabhi canned message nahi."
+          }
+        ]
+      },
+      {
+        "eyebrow": "Aapki details aapki hi rehti hain",
+        "title": "Real astrology ke liye real birth details chahiye — poori care ke saath handle ki jaati hain.",
+        "checks": [
+          {
+            "title": "Encrypted at rest",
+            "desc": "Aapka birth data hamare database mein encrypted hai — kabhi becha ya share nahi kiya jaata."
+          },
+          {
+            "title": "Sirf aapki kundali ke liye use",
+            "desc": "Jo bhi aap dekhte hain wo aapki apni details se banta hai — kuch bhi generic nahi."
+          }
+        ]
+      }
+    ]
+  },
+  "validation": {
+    "title": "Kya yeh aap jaise lagta hai?",
+    "subtitle": "Honestly answer karein — isse reading aur sahi ho jayegi.",
+    "yes": "Haan, yeh main hoon",
+    "no": "Aisa nahi hai",
+    "resultTitleHigh": "Strong match",
+    "resultTitleLow": "Partial match",
+    "resultHighMessage": "{{percent}}% accurate — ab hum aapka future bhi bata denge.",
+    "resultLowMessage": "{{percent}}% accurate — aisa tab hota hai jab birth time minute tak exact na ho.",
+    "continueAnyway": "Phir bhi aage badhein",
+    "editBirthDetails": "Birth details badlein",
+    "continueButton": "Aage Badhein"
+  },
+  "preferences": {
+    "title": "Aap kis baare mein jaanna chahte hain?",
+    "subtitle": "Jo aapke liye sabse zaroori hai wo chunein — hum uspar nazar rakhenge.",
+    "family": "Family",
+    "health": "Health",
+    "career": "Career",
+    "marriageRelationships": "Shaadi aur Rishte",
+    "friends": "Dosti",
+    "continueButton": "Aage Badhein",
+    "selectAtLeastOne": "Aage badhne ke liye kam se kam ek chunein"
+  },
+  "insights": {
+    "screenTitle": "Aapki Insights",
+    "emptyState": "Abhi kuch naya nahi hai — agli reading ke baad check karein.",
+    "toneGood": "Accha",
+    "toneAverage": "Theek-thaak",
+    "toneWatch": "Dhyan dene layak"
+  },
+  "common": {
+    "appName": "KundaliAI",
+    "listenToThisSection": "Yeh section suno",
+    "listenToFullExplanation": "Poori jaankari suno",
+    "listenToThisAnalysis": "Yeh analysis suno",
+    "play": "Play",
+    "pause": "Pause",
+    "close": "Band Karein",
+    "premiumFeature": "Premium feature",
+    "premiumTooltip": "Voice explanation Insight plan mein milta hai.",
+    "premiumTooltipGeneric": "Yeh feature Insight plan mein available hai.",
+    "upgrade": "Plan upgrade karein",
+    "cancel": "Cancel",
+    "tryAgain": "Phir try karein",
+    "contactSupport": "Support se contact karein",
+    "loading": "Load ho raha hai…",
+    "seeFullKundali": "Poori kundali dekhein",
+    "downloadPdf": "PDF report download karein",
+    "readLater": "Baad ke liye save karein",
+    "language": "हिंदी",
+    "back": "Wapas",
+    "edit": "Edit",
+    "save": "Save",
+    "current": "Current",
+    "locked": "Locked"
+  },
+  "home": {
+    "greeting": "Namaste",
+    "todayCardTitle": "Aaj",
+    "todayCardCta": "Poori jaankari dekhein",
+    "glanceCardTitle": "Aapki Kundali Ek Nazar Mein",
+    "glanceCardFree": "Free",
+    "lagna": "Lagna (Ascendant)",
+    "moonSign": "Moon Sign",
+    "coreStrength": "Main Taakat",
+    "coreChallenge": "Main Challenge",
+    "manglikStatusLabel": "Manglik Status",
+    "youAreManglik": "Aap Manglik hain.",
+    "youAreNotManglik": "Aap Manglik nahi hain.",
+    "viewManglikAnalysis": "Manglik analysis dekhein",
+    "chartsCardTitle": "Charts",
+    "gunaMilanButton": "Guna Milan",
+    "seePeriods": "Periods",
+    "profileButtonLabel": "Profile aur birth details",
+    "focusMeaningLabel": "Iska matlab",
+    "focusAvoidLabel": "Aaj bachein",
+    "focusDoLabel": "Aaj isme dhyan dein"
+  },
+  "kundali": {
+    "screenTitle": "Complete Kundali",
+    "preparingKundali": "Aapki complete kundali taiyaar ho rahi hai…",
+    "errorTitle": "Kundali taiyaar nahi ho payi",
+    "errorMessage": "Report banate waqt kuch gadbad ho gayi. Please phir try karein.",
+    "yourKundaliTitle": "Aapki Kundali",
+    "basicDetailsTitle": "Basic Details",
+    "personalityNatureTitle": "Personality & Nature",
+    "careerMoneyTitle": "Career & Paisa",
+    "relationshipsMarriageTitle": "Rishte & Shaadi",
+    "manglikStatusSectionTitle": "Manglik Status",
+    "healthTemperamentTitle": "Health & Temperament",
+    "strengthsChallengesTitle": "Strengths & Challenges",
+    "timingOverviewTitle": "Timing Overview",
+    "keyPointsLabel": "Key points",
+    "brutalTruthLabel": "Ek line mein",
+    "viewFullManglikAnalysis": "Poora Manglik analysis dekhein",
+    "sunSign": "Sun Sign",
+    "nakshatra": "Nakshatra",
+    "savedConfirmation": "Saved. Yeh aapki saved reports mein milega.",
+    "pdfPreparingMessage": "Aapki PDF report ban rahi hai. Ready hote hi bata denge.",
+    "planetaryPositionsTitle": "Grah Spashta (Exact Planetary Positions)",
+    "lagnaDegreeLabel": "Lagna degree",
+    "houseLabel": "House",
+    "dignity": {
+      "exalted": "Uchcha (Exalted)",
+      "debilitated": "Neech (Debilitated)",
+      "own_sign": "Swarashi (Own sign)",
+      "neutral": "Neutral"
+    }
+  },
+  "manglik": {
+    "screenTitle": "Manglik Analysis",
+    "youAreManglik": "Aap Manglik hain.",
+    "youAreNotManglik": "Aap Manglik nahi hain.",
+    "marsHouseFromLagnaLabel": "Lagna se Mars ka house",
+    "marsHouseFromMoonLabel": "Moon se Mars ka house",
+    "explanationTitle": "Yeh kaise calculate hota hai",
+    "cancellationsTitle": "Cancellations aur relief factors",
+    "relationshipImplicationsTitle": "Shaadi ke liye iska kya matlab hai",
+    "noCancellations": "Is kundali mein koi specific cancellation nahi mila.",
+    "remediesTitle": "Suggested upaay (optional)",
+    "remediesDisclaimer": "Yeh common traditional suggestions hain, medical ya financial advice nahi."
+  },
+  "plans": {
+    "screenTitle": "Plans",
+    "currentPlan": "Current plan",
+    "choosePlan": "Yeh plan chunein",
+    "free": "Free",
+    "insight": "Insight",
+    "strategy": "Strategy",
+    "freeFeatures": [
+      "Daily horoscope",
+      "Basic chart (D1)",
+      "Basic Manglik status (Haan/Nahi + 1-2 line)",
+      "Limited deep period analysis"
+    ],
+    "insightFeatures": [
+      "D9 aur D10 charts",
+      "Unlimited period analysis",
+      "Complete kundali report (text)",
+      "Manglik ki detailed jaankari",
+      "Charts aur kundali sections ki voice explanation"
+    ],
+    "strategyFeatures": [
+      "Sabhi Insight features",
+      "AI ke saath voice chat",
+      "Decision planner",
+      "Advanced alerts"
+    ]
+  },
+  "charts": {
+    "screenTitle": "Birth Charts",
+    "lagnaCellLabel": "Lagna house, colour mein dikhaya gaya",
+    "keyPointsLabel": "Key points",
+    "listenToThisChart": "Yeh chart suno",
+    "lockedMessage": "Yeh chart Insight plan mein available hai.",
+    "unlockButton": "Insight plan se unlock karein",
+    "yogasTitle": "Mile Yoga aur Dosha",
+    "yogasSubtitle": "Is kundali mein mile real placement-based combinations — har kundali mein nahi milte.",
+    "noYogasFound": "Is kundali mein is starter list ka koi classical yoga ya dosha nahi mila.",
+    "houseByHouseTitle": "Bhaav-dar-Bhaav Vivaran",
+    "houseByHouseSubtitle": "Har house mein kya hai, aur iska simple bhasha mein kya matlab hai."
+  },
+  "gunaMilan": {
+    "screenTitle": "Guna Milan",
+    "formSubtitle": "Apni kundali se Ashtakoot (Guna Milan) compatibility check karne ke liye partner ki birth details daalein.",
+    "matchButton": "Compatibility check karein",
+    "matchAnother": "Kisi aur se match karein",
+    "matching": "Kundaliyon ka comparison ho raha hai...",
+    "yourMoon": "Aapka Moon: {{sign}} ({{nakshatra}})",
+    "partnerMoon": "Partner ka Moon: {{sign}} ({{nakshatra}})",
+    "kootaBreakdown": "8-point breakdown",
+    "verdict": {
+      "excellent": "Excellent match",
+      "good": "Good match",
+      "average": "Average match",
+      "not_recommended": "Recommend nahi kiya jaata"
+    }
+  },
+  "periods": {
+    "screenTitle": "Time Periods",
+    "introText": "Yeh aapki kundali ki major life periods (Dasha) hain, jo ek ke baad ek alag-alag grahon dwara control hoti hain.",
+    "currentBadge": "Current period",
+    "rightNowLabel": "Abhi",
+    "subPeriodsLabel": "Sub-periods",
+    "risksLabel": "Risks",
+    "opportunitiesLabel": "Opportunities",
+    "remainingFreeAnalyses_one": "Is mahine {{count}} free deep analysis bacha hai",
+    "remainingFreeAnalyses_other": "Is mahine {{count}} free deep analyses bache hain",
+    "analysisErrorMessage": "Is period ka analysis load nahi ho paya. Please phir try karein.",
+    "listenToThisPeriod": "Yeh period suno",
+    "lockedMessage": "Is period ki poori details Insight plan mein available hain.",
+    "unlockButton": "Insight plan se unlock karein"
+  },
+  "profile": {
+    "screenTitle": "Profile & Birth Details",
+    "birthDetailsTitle": "Birth Details",
+    "nameLabel": "Naam",
+    "dateOfBirthLabel": "Date of birth (YYYY-MM-DD)",
+    "timeOfBirthLabel": "Time of birth (HH:mm)",
+    "placeOfBirthLabel": "Place of birth",
+    "planLabel": "Current plan",
+    "savedMessage": "Saved. In details ke saath aapki kundali fresh taiyaar hogi.",
+    "languageLabel": "App ki language",
+    "creditsLabel": "chat credits",
+    "unlimitedCredits": "Unlimited chat credits",
+    "buyCredits": "Aur credits khareedein",
+    "logOut": "Log out karein",
+    "logOutConfirmTitle": "Log out karein?",
+    "logOutConfirmMessage": "Apni kundali dekhne ke liye aapko dobara log in karna hoga. Aapka account aur reports safe rahenge.",
+    "testingSectionTitle": "Testing",
+    "restartOnboarding": "Onboarding phir se shuru karein",
+    "restartOnboardingConfirmTitle": "Onboarding restart karein?",
+    "restartOnboardingConfirmMessage": "Isse aapki birth details, preferences aur reports clear ho jayengi taaki aap dobara onboarding se guzar sakein."
+  },
+  "rishi": {
+    "unlimitedMessages": "Unlimited messages",
+    "send": "Send",
+    "outOfCreditsTitle": "Aapke free messages khatam ho gaye",
+    "outOfCreditsMessage": "Chat jaari rakhne ke liye pass khareedein, ya unlimited access ke liye plan upgrade karein.",
+    "buyPass": "Pass khareedein",
+    "freeMessagesLeft_one": "Aaj {{count}} free message bacha hai",
+    "freeMessagesLeft_other": "Aaj {{count}} free messages bache hain",
+    "promptWeek": "Is hafte ka focus",
+    "promptDasha": "Meri current Dasha",
+    "promptCareer": "Career pattern",
+    "promptRemedy": "Ek practical upaay"
+  },
+  "voiceChat": {
+    "promoTitle": "Bolkar apne sawaal poochein",
+    "promoSubtitle": "Mic dabayein aur apni kundali ke baare mein kuch bhi poochein — bolkar jawaab paayein.",
+    "promoButton": "Kisi Rishi se Poochein",
+    "tapToAsk": "Poochne ke liye dabayein",
+    "thinking": "Soch raha hoon...",
+    "typeInsteadPlaceholder": "Ya apna sawaal likhein...",
+    "comingSoonTitle": "Voice input jald aa raha hai",
+    "comingSoonMessage": "Bolkar AI se poochne ke liye ek app update chahiye jo abhi available nahi hai — filhaal neeche apna sawaal likhein."
+  },
+  "rishiPicker": {
+    "screenTitle": "Kisi Rishi se Poochein",
+    "subtitle": "Ek kundali, dekhne ke paanch tareeke — jo aapke sawaal ke anukool ho, wo guide chunein.",
+    "openButton": "Baatcheet shuru karein",
+    "disclaimer": "Har Rishi ek hi asli kundali calculation par based hai — lehja badalta hai, facts nahi.",
+    "vasishtha": {
+      "focus": "Life direction",
+      "tag": "Steady aur grounded",
+      "description": "Perspective, long-term patterns aur calm clarity chahne wale decisions ke liye.",
+      "greeting": "Namaste. Aapki kundali mein wakai dhyan dene layak patterns hain — aaj kya samajhna chahenge?"
+    },
+    "parashara": {
+      "focus": "Timing aur transits",
+      "tag": "Precise aur analytical",
+      "description": "Planetary periods, timing windows aur abhi ho rahi ghatnaon ke peeche ki movement ke liye.",
+      "greeting": "Welcome. Timing, transits ya apni current dasha ke baare mein poochein."
+    },
+    "gargi": {
+      "focus": "Rishte",
+      "tag": "Warm aur discerning",
+      "description": "Communication, compatibility, boundaries aur emotional understanding ke liye.",
+      "greeting": "Main aapko rishte clearly dekhne mein madad karne ke liye hoon — kahan se shuru karein?"
+    },
+    "agastya": {
+      "focus": "Inner balance",
+      "tag": "Reflective aur practical",
+      "description": "Habits, wellbeing, upaay aur personal rhythm restore karne ke liye.",
+      "greeting": "Chaliye aapki kundali ko practical rhythm par wapas laate hain — habits, rest, aur jo wakai madad karta hai."
+    },
+    "bhrigu": {
+      "focus": "Career aur resources",
+      "tag": "Direct aur strategic",
+      "description": "Kaam, paisa, capability aur aapke practical future ko shape karne wale decisions ke liye.",
+      "greeting": "Batayein aap kaunsa career ya financial decision soch rahe hain, hum ise aapki kundali se dekhenge."
+    }
+  },
+  "passStore": {
+    "screenTitle": "Pass Store",
+    "subtitle": "Astrologer se chat karne ke liye credits khareedein.",
+    "buyButton": "Khareedein",
+    "creditsSuffix": "chat credits"
+  },
+  "payment": {
+    "screenTitle": "Checkout",
+    "demoNotice": "Yeh ek demo checkout hai — koi real payment process nahi hota.",
+    "payNow": "Payment Simulate Karein",
+    "processing": "Payment process ho raha hai...",
+    "successTitle": "Payment successful",
+    "successMessage_one": "Aapke account mein {{count}} credit add ho gaya.",
+    "successMessage_other": "Aapke account mein {{count}} credits add ho gaye.",
+    "doneButton": "Done"
+  },
+  "horoscope": {
+    "screenTitle": "Aaj ki Jaankari",
+    "loadingMessage": "Aapki aaj ki kundali padhi ja rahi hai…",
+    "errorMessage": "Aaj ki jaankari load nahi ho payi. Please phir try karein.",
+    "todaysRatingLabel": "Aaj ki rating",
+    "riskOpportunityTitle": "Risk aur Mauka",
+    "keyRiskLabel": "Aaj ka main risk",
+    "keyOpportunityLabel": "Aaj ka main mauka",
+    "currentPeriodTitle": "Current Period",
+    "periodRatingLabel": "Period rating",
+    "periodTypeLabel": "Period type",
+    "dominantLifeAreaLabel": "Abhi ka main life area",
+    "natalPatternsTitle": "Aapki Kundali ke Patterns",
+    "coreStrengthLabel": "Main taakat",
+    "coreWeaknessLabel": "Main kamzori / blind spot",
+    "stressPatternLabel": "Stress pattern",
+    "decisionStyleLabel": "Aap decision kaise lete hain",
+    "moonAndTransitTitle": "Moon aur Transit",
+    "moonNakshatraLabel": "Moon nakshatra aur mood",
+    "transitHighlightLabel": "Aaj ka main transit",
+    "beforeYouLeaveHomeLabel": "Ghar se nikalne se pehle",
+    "lifeGrowthTaskLabel": "Long-term growth task",
+    "doshasLabel": "Dosh",
+    "doshaPresent": "Maujood",
+    "doshaNotPresent": "Maujood nahi",
+    "energyModes": {
+      "grind": "Mehnat",
+      "strategic": "Strategic",
+      "rest": "Aaram",
+      "conflict_prone": "Takraav-prone",
+      "creative": "Creative"
+    },
+    "periodTypes": {
+      "grind": "Mehnat",
+      "instability": "Instability",
+      "consolidation": "Mazbooti",
+      "growth": "Growth",
+      "testing": "Testing"
+    },
+    "tithiTags": {
+      "start": "Nayi shuruaat",
+      "consolidate": "Mazbooti",
+      "effort": "Mehnat",
+      "avoid_starts": "Nayi shuruaat avoid karein",
+      "finish": "Samapan"
+    },
+    "paksha": {
+      "shukla": "Shukla",
+      "krishna": "Krishna"
+    }
+  }
+}

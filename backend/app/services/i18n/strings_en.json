@@ -1,0 +1,8 @@
+{
+  "account_deleted": "Your account and all associated data have been permanently deleted.",
+  "otp_sent": "A verification code has been sent to your phone.",
+  "otp_invalid": "That code is incorrect or has expired.",
+  "quota_exceeded": "You have used all your free deep period analyses for this month. Upgrade to Insight for unlimited analyses.",
+  "premium_required": "This feature requires the Insight or Strategy plan.",
+  "strategy_required": "This feature requires the Strategy plan."
+}

@@ -1,0 +1,31 @@
+INFO:     Started server process [45660]
+INFO:     Waiting for application startup.
+{"timestamp": "2026-09-08T08:02:01.839952+00:00", "level": "INFO", "logger": "app.main", "message": "dev_tables_created"}
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+{"timestamp": "2026-09-08T08:02:08.870824+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "398eb6e36669", "method": "GET", "path": "/docs", "status_code": 200, "duration_ms": 0.54, "user_id": null}
+INFO:     127.0.0.1:52111 - "GET /docs HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:02:20.972167+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "de56aa187b42", "method": "POST", "path": "/api/v1/auth/signup", "status_code": 200, "duration_ms": 1366.38, "user_id": null}
+INFO:     127.0.0.1:58089 - "POST /api/v1/auth/signup HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:02:22.378869+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "fcb7cd2bbe35", "method": "PUT", "path": "/api/v1/user/profile/birth-data", "status_code": 200, "duration_ms": 63.08, "user_id": "42c14390dd2b4c09a995316b6c9f0a8d"}
+INFO:     127.0.0.1:58091 - "PUT /api/v1/user/profile/birth-data HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:02:22.795816+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "93d155abed5c", "method": "GET", "path": "/api/v1/chart/d9", "status_code": 200, "duration_ms": 27.71, "user_id": "42c14390dd2b4c09a995316b6c9f0a8d"}
+INFO:     127.0.0.1:58092 - "GET /api/v1/chart/d9 HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:02:23.378686+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "aee947858ccb", "method": "POST", "path": "/api/v1/chat/astro", "status_code": 200, "duration_ms": 168.49, "user_id": "42c14390dd2b4c09a995316b6c9f0a8d"}
+INFO:     127.0.0.1:58093 - "POST /api/v1/chat/astro HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:15:38.568736+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "096f9fe7ae5d", "method": "GET", "path": "/api/v1/subscription", "status_code": 200, "duration_ms": 12.34, "user_id": "2412268b210a4140a08d47642846978f"}
+INFO:     192.168.1.48:44142 - "GET /api/v1/subscription HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:15:41.854401+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "8b1f6e20bcaa", "method": "GET", "path": "/api/v1/kundali/complete", "status_code": 200, "duration_ms": 28.37, "user_id": "2412268b210a4140a08d47642846978f"}
+INFO:     192.168.1.48:44142 - "GET /api/v1/kundali/complete?language=en&mode=simple HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:15:41.952001+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "3ca28a21a47a", "method": "GET", "path": "/api/v1/chart/d1", "status_code": 200, "duration_ms": 111.44, "user_id": "2412268b210a4140a08d47642846978f"}
+INFO:     192.168.1.48:44156 - "GET /api/v1/chart/d1 HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:15:41.955328+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "f59e30e3b6db", "method": "GET", "path": "/api/v1/chart/d1", "status_code": 200, "duration_ms": 107.09, "user_id": "2412268b210a4140a08d47642846978f"}
+INFO:     192.168.1.48:44160 - "GET /api/v1/chart/d1 HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:15:41.956862+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "e3c7df48afa7", "method": "GET", "path": "/api/v1/horoscope/daily", "status_code": 200, "duration_ms": 112.12, "user_id": "2412268b210a4140a08d47642846978f"}
+INFO:     192.168.1.48:44158 - "GET /api/v1/horoscope/daily?language=en&mode=simple HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:47:33.991998+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "2def7d73ef3f", "method": "GET", "path": "/api/v1/chart/d9", "status_code": 200, "duration_ms": 390.19, "user_id": "2412268b210a4140a08d47642846978f"}
+INFO:     192.168.1.48:55888 - "GET /api/v1/chart/d9 HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:47:35.616637+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "bba9dd6df38c", "method": "GET", "path": "/api/v1/chart/d10", "status_code": 200, "duration_ms": 524.33, "user_id": "2412268b210a4140a08d47642846978f"}
+INFO:     192.168.1.48:55888 - "GET /api/v1/chart/d10 HTTP/1.1" 200 OK
+{"timestamp": "2026-09-08T08:56:12.472564+00:00", "level": "INFO", "logger": "request", "message": "request_completed", "request_id": "67808541d295", "method": "GET", "path": "/api/v1/subscription", "status_code": 200, "duration_ms": 131.19, "user_id": "2412268b210a4140a08d47642846978f"}
+INFO:     192.168.1.48:38450 - "GET /api/v1/subscription HTTP/1.1" 200 OK

@@ -1,0 +1,442 @@
+{
+  "tabs": {
+    "home": "Home",
+    "kundali": "Kundali",
+    "charts": "Charts",
+    "periods": "Periods",
+    "profile": "Profile"
+  },
+  "onboarding": {
+    "welcomeTitle": "Vedic astrology, explained simply.",
+    "welcomeSubtitle": "Understand your kundali in plain Hindi or English, at your own pace.",
+    "getStarted": "Get Started",
+    "authTitle": "Create your account",
+    "authSubtitleSignup": "Set up a free account to get your kundali.",
+    "authSubtitleLogin": "Welcome back — log in to your account.",
+    "loginTab": "Log in",
+    "signupTab": "Sign up",
+    "emailLabel": "Email",
+    "passwordLabel": "Password",
+    "confirmPasswordLabel": "Confirm password",
+    "continueButton": "Continue",
+    "methodEmail": "Email",
+    "methodPhone": "Phone",
+    "phoneLabel": "Phone number",
+    "phonePlaceholder": "+91XXXXXXXXXX",
+    "sendOtpButton": "Send OTP",
+    "otpLabel": "Enter the 6-digit code",
+    "otpSentTo": "Code sent to {{phone}}",
+    "verifyOtpButton": "Verify & continue",
+    "resendOtpButton": "Resend code",
+    "devOtpNote": "Test mode — no SMS provider yet, so here's your code: {{code}}",
+    "errorNameRequired": "Please enter your name.",
+    "errorEmailInvalid": "Please enter a valid email address.",
+    "errorPasswordLength": "Password must be at least 8 characters.",
+    "errorPasswordMismatch": "Passwords do not match.",
+    "errorPhoneInvalid": "Please enter a valid phone number with country code (e.g. +919999999999).",
+    "errorOtpInvalid": "Please enter the 6-digit code.",
+    "errorInvalidCredentials": "Incorrect email or password.",
+    "accountExistsTitle": "Account already exists",
+    "accountExistsMessage": "An account with this email already exists. Would you like to log in instead?",
+    "birthDataTitle": "Your birth details",
+    "birthDataSubtitle": "This is used to prepare your kundali. You can update it anytime from your profile.",
+    "generateKundali": "Generate my kundali",
+    "aiProcessingTitle": "Reading your stars...",
+    "processingMessages": [
+      "Validating birth coordinates...",
+      "Calculating planetary placements...",
+      "Interpreting houses and doshas...",
+      "Preparing your dashboard..."
+    ]
+  },
+  "appInfo": {
+    "skip": "Skip",
+    "continueButton": "Continue",
+    "getStarted": "Create my account",
+    "slides": [
+      {
+        "eyebrow": "Real calculations, not guesses",
+        "title": "Every number here is computed, not guessed.",
+        "checks": [
+          {
+            "title": "Swiss Ephemeris precision",
+            "desc": "Lahiri sidereal positions accurate to the arcminute — the same engine professional software uses."
+          },
+          {
+            "title": "D1, D9 & D10 charts, real dasha timeline",
+            "desc": "Your Rasi, Navamsa and Dashamsa charts, plus your full Vimshottari dasha down to the current sub-period."
+          }
+        ]
+      },
+      {
+        "eyebrow": "Five guides, one chart",
+        "title": "Ask a Rishi — pick the perspective you need.",
+        "checks": [
+          {
+            "title": "Vasishtha, Parashara, Gargi, Agastya & Bhrigu",
+            "desc": "Each Rishi keeps its own conversation and its own focus, drawing on your same real chart."
+          },
+          {
+            "title": "A fresh reading every day",
+            "desc": "Rating, risks, opportunities and more, recalculated daily — never a canned message."
+          }
+        ]
+      },
+      {
+        "eyebrow": "Your details stay yours",
+        "title": "Real astrology needs real birth details, handled carefully.",
+        "checks": [
+          {
+            "title": "Encrypted at rest",
+            "desc": "Your birth data is encrypted in our database — never sold or shared."
+          },
+          {
+            "title": "Used only for your chart",
+            "desc": "Everything you see is generated from your own details — nothing generic."
+          }
+        ]
+      }
+    ]
+  },
+  "validation": {
+    "title": "Does this sound like you?",
+    "subtitle": "Answer honestly — this helps us calibrate your reading.",
+    "yes": "Yes, that's me",
+    "no": "Not really",
+    "resultTitleHigh": "Strong match",
+    "resultTitleLow": "Partial match",
+    "resultHighMessage": "{{percent}}% accurate — we'll go ahead and share what's ahead for you too.",
+    "resultLowMessage": "{{percent}}% accurate — this can happen if your birth time isn't exact to the minute.",
+    "continueAnyway": "Continue anyway",
+    "editBirthDetails": "Edit birth details",
+    "continueButton": "Continue"
+  },
+  "preferences": {
+    "title": "What do you want to know about?",
+    "subtitle": "Pick what matters most to you — we'll keep an eye on these for you.",
+    "family": "Family",
+    "health": "Health",
+    "career": "Career",
+    "marriageRelationships": "Marriage & Relationships",
+    "friends": "Friends",
+    "continueButton": "Continue",
+    "selectAtLeastOne": "Select at least one to continue"
+  },
+  "insights": {
+    "screenTitle": "Your Insights",
+    "emptyState": "Nothing new yet — check back after your next reading.",
+    "toneGood": "Good",
+    "toneAverage": "Average",
+    "toneWatch": "Worth watching"
+  },
+  "common": {
+    "appName": "KundaliAI",
+    "listenToThisSection": "Listen to this section",
+    "listenToFullExplanation": "Listen to full explanation",
+    "listenToThisAnalysis": "Listen to this analysis",
+    "play": "Play",
+    "pause": "Pause",
+    "close": "Close",
+    "premiumFeature": "Premium feature",
+    "premiumTooltip": "Voice explanation is available with the Insight plan.",
+    "premiumTooltipGeneric": "This feature is available with the Insight plan.",
+    "upgrade": "Upgrade plan",
+    "cancel": "Cancel",
+    "tryAgain": "Try again",
+    "contactSupport": "Contact support",
+    "loading": "Loading…",
+    "seeFullKundali": "See full kundali",
+    "downloadPdf": "Download PDF report",
+    "readLater": "Save for later",
+    "language": "हिंदी",
+    "back": "Back",
+    "edit": "Edit",
+    "save": "Save",
+    "current": "Current",
+    "locked": "Locked"
+  },
+  "home": {
+    "greeting": "Namaste",
+    "todayCardTitle": "Today",
+    "todayCardCta": "See full reading",
+    "glanceCardTitle": "Your Kundali at a Glance",
+    "glanceCardFree": "Free",
+    "lagna": "Lagna (Ascendant)",
+    "moonSign": "Moon Sign",
+    "coreStrength": "Core Strength",
+    "coreChallenge": "Core Challenge",
+    "manglikStatusLabel": "Manglik Status",
+    "youAreManglik": "You are Manglik.",
+    "youAreNotManglik": "You are not Manglik.",
+    "viewManglikAnalysis": "View Manglik analysis",
+    "chartsCardTitle": "Charts",
+    "gunaMilanButton": "Guna Milan",
+    "seePeriods": "Periods",
+    "profileButtonLabel": "Profile & birth details",
+    "focusMeaningLabel": "What this means",
+    "focusAvoidLabel": "Avoid today",
+    "focusDoLabel": "Lean into today"
+  },
+  "kundali": {
+    "screenTitle": "Complete Kundali",
+    "preparingKundali": "Preparing your complete kundali…",
+    "errorTitle": "We could not prepare your kundali",
+    "errorMessage": "Something went wrong while generating your report. Please try again.",
+    "yourKundaliTitle": "Your Kundali",
+    "basicDetailsTitle": "Basic Details",
+    "personalityNatureTitle": "Personality & Nature",
+    "careerMoneyTitle": "Career & Money",
+    "relationshipsMarriageTitle": "Relationships & Marriage",
+    "manglikStatusSectionTitle": "Manglik Status",
+    "healthTemperamentTitle": "Health & Temperament",
+    "strengthsChallengesTitle": "Strengths & Challenges",
+    "timingOverviewTitle": "Timing Overview",
+    "keyPointsLabel": "Key points",
+    "brutalTruthLabel": "In one line",
+    "viewFullManglikAnalysis": "View full Manglik analysis",
+    "sunSign": "Sun Sign",
+    "nakshatra": "Nakshatra",
+    "savedConfirmation": "Saved. You can find this in your saved reports.",
+    "pdfPreparingMessage": "Your PDF report is on its way. We will let you know when it is ready.",
+    "planetaryPositionsTitle": "Planetary Positions (Grah Spashta)",
+    "lagnaDegreeLabel": "Lagna degree",
+    "houseLabel": "House",
+    "dignity": {
+      "exalted": "Exalted",
+      "debilitated": "Debilitated",
+      "own_sign": "Own sign",
+      "neutral": "Neutral"
+    }
+  },
+  "manglik": {
+    "screenTitle": "Manglik Analysis",
+    "youAreManglik": "You are Manglik.",
+    "youAreNotManglik": "You are not Manglik.",
+    "marsHouseFromLagnaLabel": "Mars house from Lagna",
+    "marsHouseFromMoonLabel": "Mars house from Moon",
+    "explanationTitle": "Why this is calculated this way",
+    "cancellationsTitle": "Noted cancellations & mitigations",
+    "relationshipImplicationsTitle": "What this means for marriage",
+    "noCancellations": "No specific cancellations were found in this chart.",
+    "remediesTitle": "Suggested remedies (optional)",
+    "remediesDisclaimer": "These are common traditional suggestions, not medical or financial advice."
+  },
+  "plans": {
+    "screenTitle": "Plans",
+    "currentPlan": "Current plan",
+    "choosePlan": "Choose this plan",
+    "free": "Free",
+    "insight": "Insight",
+    "strategy": "Strategy",
+    "freeFeatures": [
+      "Daily horoscope",
+      "Basic chart (D1)",
+      "Basic Manglik status (Yes/No + 1-2 lines)",
+      "Limited deep period analyses"
+    ],
+    "insightFeatures": [
+      "D9 and D10 charts",
+      "Unlimited period analyses",
+      "Complete kundali report (text)",
+      "Manglik detailed explanation",
+      "Voice explanation of charts & kundali sections"
+    ],
+    "strategyFeatures": [
+      "All Insight features",
+      "Voice chat with AI",
+      "Decision planner",
+      "Advanced alerts"
+    ]
+  },
+  "charts": {
+    "screenTitle": "Birth Charts",
+    "lagnaCellLabel": "Lagna house, shown in colour",
+    "keyPointsLabel": "Key points",
+    "listenToThisChart": "Listen to this chart",
+    "lockedMessage": "This chart is available with the Insight plan.",
+    "unlockButton": "Unlock with Insight plan",
+    "yogasTitle": "Yogas & Doshas Detected",
+    "yogasSubtitle": "Real placement-based combinations found in this chart — not every chart has any.",
+    "noYogasFound": "No classical yoga or dosha from this starter set was detected in this chart.",
+    "houseByHouseTitle": "House by House",
+    "houseByHouseSubtitle": "What's placed in each house, and what that combination means in plain language."
+  },
+  "gunaMilan": {
+    "screenTitle": "Guna Milan",
+    "formSubtitle": "Enter your partner's birth details to check Ashtakoot (Guna Milan) compatibility with your own chart.",
+    "matchButton": "Check compatibility",
+    "matchAnother": "Match with someone else",
+    "matching": "Comparing charts...",
+    "yourMoon": "Your Moon: {{sign}} ({{nakshatra}})",
+    "partnerMoon": "Partner's Moon: {{sign}} ({{nakshatra}})",
+    "kootaBreakdown": "8-point breakdown",
+    "verdict": {
+      "excellent": "Excellent match",
+      "good": "Good match",
+      "average": "Average match",
+      "not_recommended": "Not recommended"
+    }
+  },
+  "periods": {
+    "screenTitle": "Time Periods",
+    "introText": "These are the major life periods (Dasha) from your chart, ruled one after another by different planets.",
+    "currentBadge": "Current period",
+    "rightNowLabel": "Right now",
+    "subPeriodsLabel": "Sub-periods",
+    "risksLabel": "Risks",
+    "opportunitiesLabel": "Opportunities",
+    "remainingFreeAnalyses_one": "{{count}} free deep analysis left this month",
+    "remainingFreeAnalyses_other": "{{count}} free deep analyses left this month",
+    "analysisErrorMessage": "Could not load the analysis for this period. Please try again.",
+    "listenToThisPeriod": "Listen to this period",
+    "lockedMessage": "Full details for this period are available with the Insight plan.",
+    "unlockButton": "Unlock with Insight plan"
+  },
+  "profile": {
+    "screenTitle": "Profile & Birth Details",
+    "birthDetailsTitle": "Birth Details",
+    "nameLabel": "Name",
+    "dateOfBirthLabel": "Date of birth (YYYY-MM-DD)",
+    "timeOfBirthLabel": "Time of birth (HH:mm)",
+    "placeOfBirthLabel": "Place of birth",
+    "planLabel": "Current plan",
+    "savedMessage": "Saved. Your kundali will be freshly prepared with these details.",
+    "languageLabel": "App language",
+    "creditsLabel": "chat credits",
+    "unlimitedCredits": "Unlimited chat credits",
+    "buyCredits": "Buy more credits",
+    "logOut": "Log out",
+    "logOutConfirmTitle": "Log out?",
+    "logOutConfirmMessage": "You'll need to log in again to see your kundali. Your account and reports stay saved.",
+    "testingSectionTitle": "Testing",
+    "restartOnboarding": "Restart onboarding flow",
+    "restartOnboardingConfirmTitle": "Restart onboarding?",
+    "restartOnboardingConfirmMessage": "This clears your birth details, preferences and reports so you can go through onboarding again."
+  },
+  "rishi": {
+    "unlimitedMessages": "Unlimited messages",
+    "send": "Send",
+    "outOfCreditsTitle": "You're out of free messages",
+    "outOfCreditsMessage": "Buy a pass to keep chatting, or upgrade your plan for unlimited access.",
+    "buyPass": "Buy a pass",
+    "freeMessagesLeft_one": "{{count}} free message left today",
+    "freeMessagesLeft_other": "{{count}} free messages left today",
+    "promptWeek": "This week's focus",
+    "promptDasha": "My current Dasha",
+    "promptCareer": "Career pattern",
+    "promptRemedy": "A practical remedy"
+  },
+  "voiceChat": {
+    "promoTitle": "Ask your questions out loud",
+    "promoSubtitle": "Tap the mic and ask anything about your chart — get a spoken answer back.",
+    "promoButton": "Ask a Rishi",
+    "tapToAsk": "Tap to ask",
+    "thinking": "Thinking...",
+    "typeInsteadPlaceholder": "Or type your question instead...",
+    "comingSoonTitle": "Voice input coming soon",
+    "comingSoonMessage": "Talking to the AI out loud needs an app update we haven't shipped yet — type your question below for now."
+  },
+  "rishiPicker": {
+    "screenTitle": "Ask a Rishi",
+    "subtitle": "One chart, five ways to see it — choose the guide that fits your question.",
+    "openButton": "Open conversation",
+    "disclaimer": "Every Rishi draws on the same real chart calculations — the tone changes, the facts don't.",
+    "vasishtha": {
+      "focus": "Life direction",
+      "tag": "Steady & grounded",
+      "description": "For perspective, long-term patterns and decisions that need calm clarity.",
+      "greeting": "Namaste. Your chart carries real patterns worth sitting with — what would you like to understand today?"
+    },
+    "parashara": {
+      "focus": "Timing & transits",
+      "tag": "Precise & analytical",
+      "description": "For planetary periods, timing windows and the movement behind current events.",
+      "greeting": "Welcome. Ask me about timing, transits, or the dasha period you're currently in."
+    },
+    "gargi": {
+      "focus": "Relationships",
+      "tag": "Warm & discerning",
+      "description": "For communication, compatibility, boundaries and emotional understanding.",
+      "greeting": "I'm here to help you look at relationships clearly — where would you like to begin?"
+    },
+    "agastya": {
+      "focus": "Inner balance",
+      "tag": "Reflective & practical",
+      "description": "For habits, wellbeing, remedies and restoring a sense of personal rhythm.",
+      "greeting": "Let's bring your chart back to practical rhythm — habits, rest, and what actually helps."
+    },
+    "bhrigu": {
+      "focus": "Career & resources",
+      "tag": "Direct & strategic",
+      "description": "For work, money, capability and the choices shaping your practical future.",
+      "greeting": "Tell me which career or financial decision you're weighing, and we'll look at it through your chart."
+    }
+  },
+  "passStore": {
+    "screenTitle": "Pass Store",
+    "subtitle": "Buy credits to chat with an astrologer.",
+    "buyButton": "Buy",
+    "creditsSuffix": "chat credits"
+  },
+  "payment": {
+    "screenTitle": "Checkout",
+    "demoNotice": "This is a demo checkout — no real payment is processed.",
+    "payNow": "Simulate Payment",
+    "processing": "Processing payment...",
+    "successTitle": "Payment successful",
+    "successMessage_one": "{{count}} credit added to your account.",
+    "successMessage_other": "{{count}} credits added to your account.",
+    "doneButton": "Done"
+  },
+  "horoscope": {
+    "screenTitle": "Today's Reading",
+    "loadingMessage": "Reading today's chart…",
+    "errorMessage": "Could not load today's reading. Please try again.",
+    "todaysRatingLabel": "Today's rating",
+    "riskOpportunityTitle": "Risk & Opportunity",
+    "keyRiskLabel": "Key risk today",
+    "keyOpportunityLabel": "Key opportunity today",
+    "currentPeriodTitle": "Current Period",
+    "periodRatingLabel": "Period rating",
+    "periodTypeLabel": "Period type",
+    "dominantLifeAreaLabel": "Dominant life area right now",
+    "natalPatternsTitle": "Your Chart Patterns",
+    "coreStrengthLabel": "Core strength",
+    "coreWeaknessLabel": "Core weakness / blind spot",
+    "stressPatternLabel": "Stress pattern",
+    "decisionStyleLabel": "How you tend to decide",
+    "moonAndTransitTitle": "Moon & Transit",
+    "moonNakshatraLabel": "Moon nakshatra & mood",
+    "transitHighlightLabel": "Today's major transit",
+    "beforeYouLeaveHomeLabel": "Before you leave home",
+    "lifeGrowthTaskLabel": "Long-term growth task",
+    "doshasLabel": "Doshas",
+    "doshaPresent": "Present",
+    "doshaNotPresent": "Not present",
+    "energyModes": {
+      "grind": "Grind",
+      "strategic": "Strategic",
+      "rest": "Rest",
+      "conflict_prone": "Conflict-prone",
+      "creative": "Creative"
+    },
+    "periodTypes": {
+      "grind": "Grind",
+      "instability": "Instability",
+      "consolidation": "Consolidation",
+      "growth": "Growth",
+      "testing": "Testing"
+    },
+    "tithiTags": {
+      "start": "Fresh start",
+      "consolidate": "Consolidate",
+      "effort": "Effort",
+      "avoid_starts": "Avoid new starts",
+      "finish": "Finish"
+    },
+    "paksha": {
+      "shukla": "Shukla",
+      "krishna": "Krishna"
+    }
+  }
+}
