@@ -8,6 +8,7 @@ hedging, honest rating, memorable one-liner" tone without needing a live LLM
 call — see app.services.interpretation.claude_interpreter for the prompt
 these are standing in for. Everything else here stays intentionally simpler.
 """
+import re
 from typing import Any, Literal
 
 from app.astro.constants import PLANET_NAMES_EN, PLANET_NAMES_HI, PlanetKey
@@ -373,7 +374,7 @@ _TOPIC_KEYWORDS: dict[str, list[str]] = {
     "career": ["career", "job", "profession", "naukri", "karobar", "नौकरी", "करियर", "पेशा", "व्यापार"],
     "money": ["money", "finance", "wealth", "income", "paisa", "dhan", "पैसा", "धन", "आर्थिक", "वित्त"],
     "marriage": [
-        "marriage", "marry", "shaadi", "vivah", "husband", "wife", "spouse", "partner",
+        "marriage", "marry", "married", "shaadi", "vivah", "husband", "wife", "spouse", "partner",
         "शादी", "विवाह", "पति", "पत्नी", "जीवनसाथी",
     ],
     "health": ["health", "sick", "illness", "disease", "tabiyat", "सेहत", "स्वास्थ्य", "बीमारी", "तबीयत"],
@@ -396,6 +397,48 @@ _DASHA_KEYWORDS = [
 ]
 _TODAY_KEYWORDS = ["today", "aaj", "आज", "daily", "din"]
 
+# "When will I get married" needs the actual Prediction Engine (real dasha/
+# transit windows), not the static 7th-house natal-placement fact the plain
+# "marriage" topic answers with — so it's detected as its own category,
+# reusing the marriage keyword list ANDed with a timing hint, checked before
+# the generic "dasha" category (which would otherwise swallow "when will…").
+_TIMING_HINT_KEYWORDS = ["when", "kab", "कब", "which year", "what age", "kis umar", "किस उम्र"]
+# "How's my year going" / "how's 2026 looking" likewise needs the real
+# Varshaphala-based Year-Ahead engine, not a bare dasha-lord sentence.
+# Deliberately NOT bare "this year"/"next year"/"yearly" — those show up as
+# ordinary time qualifiers on plain topic questions too (e.g. "how's my
+# career looking this year?" is a career question, not a whole-year-outlook
+# one), so they'd wrongly hijack every topic question that mentions a
+# timeframe. A standalone 4-digit year (e.g. "2026") is a much stronger,
+# low-collision signal and is checked separately via _YEAR_TOKEN_RE.
+_YEAR_AHEAD_PHRASES = [
+    "how is my year", "how's my year", "hows my year", "my year going", "year ahead", "yearly outlook",
+    "how does my year look", "how will my year",
+    "saal kaisa", "yeh saal kaisa", "agla saal kaisa", "saal kaisa jayega", "saal kaisa rahega",
+    "साल कैसा", "यह साल कैसा", "अगला साल कैसा", "वर्ष कैसा",
+]
+_YEAR_TOKEN_RE = re.compile(r"\b20[2-4]\d\b")  # a bare "2026"-style year, 2020-2049
+
+
+def message_mentions_marriage_timing(message: str) -> bool:
+    """True for a real WHEN-will-I-get-married question — the caller (see
+    app.api.v1.chat) uses this to decide whether to fetch the marriage-timing
+    engine's output at all, avoiding that computation on unrelated chat
+    messages."""
+    lowered = message.lower()
+    has_marriage = any(k in lowered for k in _TOPIC_KEYWORDS["marriage"])
+    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
+    return has_marriage and has_timing
+
+
+def message_mentions_year_ahead(message: str) -> bool:
+    """True for a real how's-my-year-going question — used the same way as
+    message_mentions_marriage_timing above."""
+    lowered = message.lower()
+    if _YEAR_TOKEN_RE.search(lowered):
+        return True
+    return any(k in lowered for k in _YEAR_AHEAD_PHRASES)
+
 # Which Rishi persona owns which question category — the specialization the
 # user asked for ("Vasishtha only answers life direction, Parashara only
 # timing, Gargi only relationships") rather than all five personas answering
@@ -404,8 +447,8 @@ _TODAY_KEYWORDS = ["today", "aaj", "आज", "daily", "din"]
 # exactly one Rishi so a reverse lookup (_CATEGORY_RISHI) is unambiguous.
 _RISHI_SPECIALTY: dict[str, set[str]] = {
     "vasishtha": {"education", "travel"},
-    "parashara": {"dasha", "today"},
-    "gargi": {"marriage", "family", "friends", "siblings", "children"},
+    "parashara": {"dasha", "today", "year_ahead"},
+    "gargi": {"marriage", "family", "friends", "siblings", "children", "marriage_timing"},
     "agastya": {"dosha", "yoga", "health"},
     "bhrigu": {"career", "money"},
 }
@@ -958,6 +1001,10 @@ class TemplateInterpreter(Interpreter):
         category: str | None = None
         if asked_about(_TODAY_KEYWORDS):
             category = "today"
+        elif message_mentions_marriage_timing(message):
+            category = "marriage_timing"
+        elif message_mentions_year_ahead(message):
+            category = "year_ahead"
         elif asked_about(_DASHA_KEYWORDS):
             category = "dasha"
         elif asked_about(_DOSHA_KEYWORDS):
@@ -978,6 +1025,38 @@ class TemplateInterpreter(Interpreter):
             if daily.get("festival"):
                 parts.append(f"आज {daily['festival']} है।" if hi else f"Today is {daily['festival']}.")
             answer = " ".join(p for p in parts if p) or None
+
+        elif category == "marriage_timing":
+            windows: list[dict[str, Any]] = context.get("marriage_timing_windows") or []
+            if windows:
+                top = windows[0]
+                if hi:
+                    answer = (
+                        f"आपकी कुंडली के अनुसार, विवाह या किसी गंभीर साझेदारी के लिए सबसे संभावित समय "
+                        f"{top['start_date']} से {top['end_date']} के बीच लगता है। {top['reason']} ध्यान रहे, यह एक "
+                        "संभावित अनुकूल समय है, कोई निश्चित तारीख नहीं।"
+                    )
+                else:
+                    answer = (
+                        f"Based on your chart, the most likely window for marriage or a serious partnership looks "
+                        f"like {top['start_date']} to {top['end_date']}. {top['reason']} Keep in mind this is a "
+                        "probable favorable window, not a guaranteed exact date."
+                    )
+            else:
+                answer = (
+                    "मुझे अभी जितनी अवधि खोजी है उसमें कोई खास तौर पर अनुकूल समय नहीं मिला।"
+                    if hi
+                    else "I didn't find a strongly favorable window in the period I can currently search."
+                )
+
+        elif category == "year_ahead":
+            year_ahead: dict[str, Any] | None = context.get("year_ahead")
+            if year_ahead:
+                answer = (
+                    f"{year_ahead['year']} के लिए, कुल रेटिंग {year_ahead['overall_rating']}/10 है। {year_ahead['overall_theme']}"
+                    if hi
+                    else f"For {year_ahead['year']}, the overall rating is {year_ahead['overall_rating']}/10. {year_ahead['overall_theme']}"
+                )
 
         elif category == "dasha" and mahadasha_lord and antardasha_lord:
             answer = (

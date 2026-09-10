@@ -79,6 +79,49 @@ async def test_chat_astro_specializes_by_rishi_id_and_scopes_history_per_rishi(c
     assert "Bhrigu" not in resp2.json()["reply"]
 
 
+async def test_chat_astro_answers_when_will_i_get_married_from_the_real_prediction_engine(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "When will I get married?", "rishi_id": "gargi", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    # Either a real window (with a date range) or the honest "no window
+    # found" line — never the old generic dasha-lord sentence or a refusal.
+    assert "probable favorable window" in reply or "I didn't find a strongly favorable window" in reply
+
+
+async def test_chat_astro_marriage_timing_question_redirects_to_gargi_from_another_rishi(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "When will I get married?", "rishi_id": "bhrigu", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "Gargi" in resp.json()["reply"]
+
+
+async def test_chat_astro_answers_hows_my_year_from_the_real_prediction_engine(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "How's my year looking?", "rishi_id": "parashara", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "overall rating is" in reply and "/10" in reply
+
+
 async def test_chat_astro_requires_birth_profile(client):
     signup = await client.post(
         "/api/v1/auth/signup",

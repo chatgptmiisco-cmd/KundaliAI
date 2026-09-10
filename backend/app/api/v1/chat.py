@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
@@ -11,11 +11,12 @@ from app.db.models.birth_profile import BirthProfile
 from app.db.models.chat import ChatMessage
 from app.db.models.user import User
 from app.schemas.voice import ChatMessageIn, ChatMessageOut
-from app.services import user_service
+from app.services import prediction_service, user_service
 from app.services.chart_service import get_chart
 from app.services.daily_reading_service import get_daily_reading
 from app.services.dasha_service import get_current_dasha
 from app.services.interpretation.factory import get_interpreter
+from app.services.interpretation.templates import message_mentions_marriage_timing, message_mentions_year_ahead
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -76,6 +77,26 @@ async def chat_astro(
         },
         "rishi_id": body.rishi_id,
     }
+
+    # Only fetched when the message actually needs it (real "when will I get
+    # married" / "how's my year" questions) — both are Prediction Engine
+    # calls, DB-cached after first computation, but skipping them on every
+    # unrelated chat message avoids paying that cost (or the first-computation
+    # ephemeris/dasha-scan latency) needlessly.
+    if message_mentions_marriage_timing(body.message):
+        marriage_timing = await prediction_service.get_marriage_timing(db, profile, birth, body.language)
+        context["marriage_timing_windows"] = [
+            {"start_date": w.start_date.isoformat(), "end_date": w.end_date.isoformat(), "reason": w.reason}
+            for w in marriage_timing.windows
+        ]
+    if message_mentions_year_ahead(body.message):
+        current_year = datetime.now(timezone.utc).year
+        year_ahead = await prediction_service.get_year_ahead(db, profile, birth, current_year, body.language)
+        context["year_ahead"] = {
+            "year": year_ahead.year,
+            "overall_rating": year_ahead.overall_rating,
+            "overall_theme": year_ahead.overall_theme,
+        }
 
     # History is scoped per-Rishi (matches the frontend's separate
     # conversation-per-Rishi state) so Vasishtha never sees what the user
