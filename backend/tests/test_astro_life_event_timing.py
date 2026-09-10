@@ -56,6 +56,23 @@ def test_find_event_windows_respects_top_n():
     assert len(windows) <= 2
 
 
+def test_find_event_windows_searches_the_past_when_given_earlier_bounds():
+    # Same as marriage timing's equivalent test: get_life_event_timing's
+    # direction="past" is just from_dt=birth_dt/horizon_years=age instead of
+    # from_dt=now/horizon_years=20 — no separate "past" function needed.
+    birth_dt = FROM
+    now = FROM + timedelta(days=10 * 365.2425)
+    maha1 = _mahadasha("Sa", birth_dt, 19, ["Sa", "Me", "Ke"])
+    age_years = (now - birth_dt).days / 365.2425
+
+    windows = find_event_windows(
+        [maha1], "career", house_lord="Sa", from_dt=birth_dt, horizon_years=age_years, top_n=10
+    )
+    assert len(windows) > 0
+    assert all(w.start >= birth_dt for w in windows)
+    assert all(w.end <= now + timedelta(days=1) for w in windows)
+
+
 def test_corroborate_with_transits_checks_the_right_house_per_event_type():
     window = ScoredWindow(
         start=datetime(2026, 1, 1, tzinfo=timezone.utc),

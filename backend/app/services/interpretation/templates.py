@@ -9,6 +9,7 @@ call — see app.services.interpretation.claude_interpreter for the prompt
 these are standing in for. Everything else here stays intentionally simpler.
 """
 import re
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 from app.astro.constants import PLANET_NAMES_EN, PLANET_NAMES_HI, PlanetKey
@@ -366,42 +367,192 @@ _LIFE_FRAMING_HI: dict[str, dict[str, str]] = {
 # and common Hinglish spellings) a user might ask about that topic in. This
 # lets chat_reply answer from the SAME real per-house facts already computed
 # in chart_explanation_service, rather than a canned "please clarify" stub.
+
+# Every keyword list below is matched through this, not a bare `in` check —
+# plain substring matching already produced two real false positives in this
+# file: bare "ill" (health) is a substring of the extremely common word
+# "will" ("when WILL I..."), and a bare "kid" (children) would be a substring
+# of "kidney" or "kidding". \b-bounded matching structurally prevents that
+# whole class of accidental match, for every keyword, not just the ones
+# caught so far — so short/common keywords can be added freely without
+# manually re-auditing every existing word for collisions each time.
+# Multi-word phrases ("when will", "settle abroad") and non-Latin (Devanagari)
+# keywords fall back to plain substring matching: \b doesn't reliably bound
+# non-ASCII scripts in Python's `re`, and a phrase's own internal spaces
+# already act as a boundary.
+_KEYWORD_PATTERN_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _keyword_pattern(keyword: str) -> re.Pattern[str]:
+    pattern = _KEYWORD_PATTERN_CACHE.get(keyword)
+    if pattern is None:
+        if " " in keyword or any(ord(c) > 0x2FF for c in keyword):
+            pattern = re.compile(re.escape(keyword))
+        else:
+            pattern = re.compile(r"\b" + re.escape(keyword) + r"\b")
+        _KEYWORD_PATTERN_CACHE[keyword] = pattern
+    return pattern
+
+
+# --- Typo/spelling-variant tolerance (Latin-script single-word keywords) ---
+# Real Hinglish has no fixed spelling ("shaadi"/"shadi"/"shadhi" are all the
+# same word to a human), and plain typos happen too ("marraige"). Exact
+# word-boundary matching alone silently misses both — this adds a small
+# edit-distance fallback so a single-word keyword also matches a message
+# word that's just 1-2 characters off, without needing every spelling
+# variant hand-written. Deliberately scoped to single-word LATIN keywords
+# only: multi-word phrases ("when will", "settle abroad") have too many
+# possible edits to fuzz sensibly, and Devanagari typo patterns are a
+# different, script-specific problem this doesn't attempt to solve.
+_WORD_TOKEN_RE = re.compile(r"[a-z]+")
+
+
+def _message_word_tokens(message: str) -> list[str]:
+    return _WORD_TOKEN_RE.findall(message.lower())
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+        prev = curr
+    return prev[-1]
+
+
+def _fuzzy_max_distance(keyword_length: int) -> int:
+    """How many edits a message word may be from a keyword and still count
+    as a match, scaled to the keyword's own length — a fixed distance would
+    either let a short keyword match almost anything, or refuse to fuzz a
+    long word at all. 0 means "exact only" (too short to fuzz safely even
+    with the same-first-letter guard in _fuzzy_contains_keyword: a 3-letter
+    keyword like "din" turned out to be edit-distance 1 from both the
+    common word "in" AND from "did" — another keyword in this very file —
+    even after requiring a matching first letter). Genuinely common short
+    variants (like "kab" -> "kb") are handled as an explicit literal keyword
+    instead of generic fuzzing."""
+    if keyword_length <= 3:
+        return 0
+    if keyword_length <= 5:
+        return 1
+    return 2
+
+
+def _fuzzy_contains_keyword(message_words: list[str], keyword: str) -> bool:
+    max_distance = _fuzzy_max_distance(len(keyword))
+    if max_distance == 0:
+        return False
+    for word in message_words:
+        if abs(len(word) - len(keyword)) > max_distance:
+            continue  # cheap reject before the O(n*m) edit-distance computation
+        # A real typo/spelling variant almost never changes a word's FIRST
+        # letter — this single constraint is what stops a short keyword
+        # from fuzzy-matching an unrelated common word that merely happens
+        # to be nearby in edit-distance (e.g. "din" — a today/day keyword —
+        # matching the extremely common word "in" at distance 1 before this
+        # was added, which wrongly classified almost every message as a
+        # "today" question).
+        if word[:1] != keyword[:1]:
+            continue
+        if _levenshtein(word, keyword) <= max_distance:
+            return True
+    return False
+
+
+def _contains_any_keyword(message: str, keywords: list[str]) -> bool:
+    message_words: list[str] | None = None
+    for k in keywords:
+        if _keyword_pattern(k).search(message):
+            return True
+        is_phrase_or_devanagari = " " in k or any(ord(c) > 0x2FF for c in k)
+        if not is_phrase_or_devanagari:
+            if message_words is None:
+                message_words = _message_word_tokens(message)
+            if _fuzzy_contains_keyword(message_words, k):
+                return True
+    return False
+
+
 _TOPIC_HOUSE: dict[str, int] = {
     "career": 10, "money": 2, "marriage": 7, "health": 6, "family": 4,
     "education": 9, "friends": 11, "travel": 9, "children": 5, "siblings": 3,
 }
 _TOPIC_KEYWORDS: dict[str, list[str]] = {
+    # Each list is deliberately over-inclusive with common inflections
+    # (jobs/hiring, married/marrying, financial/financially) rather than
+    # relying on the reader to remember every derived form — plain substring
+    # matching has already missed "married" (not inside "marry") and
+    # "financial" (not inside "finance") once each in practice, so this pass
+    # closes that whole bug class instead of patching one word at a time.
     "career": [
-        "career", "job", "profession", "promotion", "business", "naukri", "karobar",
-        "नौकरी", "करियर", "पेशा", "व्यापार", "प्रमोशन",
+        "career", "careers", "job", "jobs", "hiring", "hired", "profession", "professional",
+        "promotion", "promoted", "business", "employment", "employed", "unemployed",
+        # Government-job phrasing ("sarkari naukri kab lagegi") is extremely
+        # high-volume in Indian astrology specifically and was entirely
+        # missing before this — real FAQ research surfaced it as one of the
+        # single most common question categories.
+        "sarkari naukri", "government job", "govt job", "ias", "ips", "civil services",
+        "bank job", "posting",
+        "naukri", "karobar", "नौकरी", "करियर", "पेशा", "व्यापार", "प्रमोशन", "सरकारी नौकरी",
     ],
     "money": [
-        "money", "finance", "financial", "wealth", "income", "paisa", "dhan",
-        "पैसा", "धन", "आर्थिक", "वित्त",
+        "money", "finance", "finances", "financial", "financially", "wealth", "wealthy",
+        "income", "salary", "paisa", "paise", "dhan", "पैसा", "पैसे", "धन", "आर्थिक", "वित्त", "वित्तीय",
     ],
     "marriage": [
-        "marriage", "marry", "married", "shaadi", "vivah", "husband", "wife", "spouse", "partner",
-        "शादी", "विवाह", "पति", "पत्नी", "जीवनसाथी",
+        "marriage", "marriages", "marry", "married", "marrying", "shaadi", "vivah",
+        "husband", "wife", "spouse", "partner", "engaged", "engagement", "fiance", "fiancé", "fiancée",
+        "शादी", "विवाह", "पति", "पत्नी", "जीवनसाथी", "सगाई",
     ],
-    "health": ["health", "sick", "illness", "disease", "tabiyat", "सेहत", "स्वास्थ्य", "बीमारी", "तबीयत"],
-    "family": ["family", "parents", "mother", "father", "ghar", "परिवार", "माता", "पिता", "घर"],
-    "education": ["study", "studies", "education", "exam", "padhai", "पढ़ाई", "शिक्षा", "परीक्षा"],
-    "friends": ["friend", "friends", "dost", "दोस्त", "मित्र"],
-    "travel": ["travel", "trip", "abroad", "videsh", "safar", "यात्रा", "विदेश", "सफर"],
-    "children": ["child", "children", "baby", "santan", "औलाद", "संतान", "बच्च"],
-    "siblings": ["sibling", "brother", "sister", "bhai", "behen", "भाई", "बहन"],
+    "health": [
+        # Deliberately NOT bare "ill" — it's a substring of the extremely
+        # common word "will" ("when WILL I...") and matched almost every
+        # timing question by accident; "illness"/"illnesses" alone are
+        # distinctive enough to keep without that collision risk.
+        "health", "healthy", "sick", "sickness", "illness", "illnesses", "disease", "diseases",
+        "tabiyat", "सेहत", "स्वास्थ्य", "बीमारी", "बीमार", "तबीयत",
+    ],
+    "family": [
+        "family", "families", "parents", "parent", "mother", "father", "ghar",
+        "परिवार", "माता", "पिता", "घर",
+    ],
+    "education": [
+        "study", "studies", "studying", "studied", "education", "educational", "exam", "exams",
+        "competitive exam", "clear the exam", "padhai", "पढ़ाई", "शिक्षा", "परीक्षा",
+    ],
+    "friends": ["friend", "friends", "friendship", "dost", "दोस्त", "मित्र", "दोस्ती"],
+    "travel": [
+        "travel", "travels", "travelling", "traveling", "trip", "trips", "abroad", "videsh", "safar",
+        "यात्रा", "विदेश", "सफर",
+    ],
+    "children": [
+        "child", "children", "kid", "kids", "baby", "babies", "childbirth", "santan",
+        "औलाद", "संतान", "बच्च", "बच्चे",
+    ],
+    "siblings": [
+        "sibling", "siblings", "brother", "brothers", "sister", "sisters", "bhai", "behen",
+        "भाई", "बहन",
+    ],
 }
 _DOSHA_KEYS = {"manglik", "kaal_sarp", "kemadruma"}
 _DOSHA_KEYWORDS = [
-    "dosha", "dosh", "manglik", "mangal dosh", "kaal sarp", "kaalsarp", "kemadruma",
+    "dosha", "doshas", "dosh", "manglik", "mangalik", "mangal dosh", "kaal sarp", "kaalsarp", "kemadruma",
     "दोष", "मंगलिक", "कालसर्प", "काल सर्प", "केमद्रुम",
 ]
-_YOGA_KEYWORDS = ["yoga", "raj yoga", "gajakesari", "mahapurusha", "योग"]
+_YOGA_KEYWORDS = ["yoga", "yogas", "raj yoga", "gajakesari", "mahapurusha", "योग"]
 _DASHA_KEYWORDS = [
-    "dasha", "mahadasha", "antardasha", "period", "when will", "kab", "कब",
+    "dasha", "dashas", "mahadasha", "antardasha", "pratyantardasha", "period", "when will", "kab", "कब",
     "दशा", "महादशा", "अंतर्दशा",
 ]
-_TODAY_KEYWORDS = ["today", "aaj", "आज", "daily", "din"]
+_TODAY_KEYWORDS = ["today", "todays", "today's", "aaj", "आज", "daily", "din"]
 
 # "When will I get married" needs the actual Prediction Engine (real dasha/
 # transit windows), not the static 7th-house natal-placement fact the plain
@@ -414,6 +565,11 @@ _TIMING_HINT_KEYWORDS = [
     # I get married?") is just as much a timing question as an explicit
     # "when" — real users ask it this way at least as often.
     "will i", "will my", "क्या मैं", "क्या मेरी", "क्या मेरा",
+    # "kb" (vowel-dropped "kab") is extremely common in casual Hinglish
+    # texting — added as its own literal rather than relying on generic
+    # fuzzing, since 3-letter keywords are excluded from fuzzy matching
+    # entirely (see _fuzzy_max_distance) as too collision-prone.
+    "kb",
 ]
 # "How's my year going" / "how's 2026 looking" likewise needs the real
 # Varshaphala-based Year-Ahead engine, not a bare dasha-lord sentence.
@@ -432,15 +588,27 @@ _YEAR_AHEAD_PHRASES = [
 _YEAR_TOKEN_RE = re.compile(r"\b20[2-4]\d\b")  # a bare "2026"-style year, 2020-2049
 
 
+def _has_timing_signal(lowered_message: str) -> bool:
+    """True for either a forward-looking timing hint ("when", "kab", "will
+    i") or a past-tense marker ("was", "did", "happened") — a real timing
+    question can be asked about the future OR the past ("when will I get
+    married" / "why WAS my marriage delayed"), and both need the actual
+    Prediction Engine rather than a static topic answer. Without this, a
+    past-tense timing question silently fell through to the plain topic
+    text since it never contained a future-oriented hint at all."""
+    return _contains_any_keyword(lowered_message, _TIMING_HINT_KEYWORDS) or message_mentions_past_tense(
+        lowered_message
+    )
+
+
 def message_mentions_marriage_timing(message: str) -> bool:
     """True for a real WHEN-will-I-get-married question — the caller (see
     app.api.v1.chat) uses this to decide whether to fetch the marriage-timing
     engine's output at all, avoiding that computation on unrelated chat
     messages."""
     lowered = message.lower()
-    has_marriage = any(k in lowered for k in _TOPIC_KEYWORDS["marriage"])
-    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
-    return has_marriage and has_timing
+    has_marriage = _contains_any_keyword(lowered, _TOPIC_KEYWORDS["marriage"])
+    return has_marriage and _has_timing_signal(lowered)
 
 
 def message_mentions_year_ahead(message: str) -> bool:
@@ -449,7 +617,7 @@ def message_mentions_year_ahead(message: str) -> bool:
     lowered = message.lower()
     if _YEAR_TOKEN_RE.search(lowered):
         return True
-    return any(k in lowered for k in _YEAR_AHEAD_PHRASES)
+    return _contains_any_keyword(lowered, _YEAR_AHEAD_PHRASES)
 
 
 # Same pattern as marriage timing, generalized to career/wealth/children —
@@ -458,23 +626,20 @@ def message_mentions_year_ahead(message: str) -> bool:
 # the existing static house-text answer, unchanged.
 def message_mentions_career_timing(message: str) -> bool:
     lowered = message.lower()
-    has_career = any(k in lowered for k in _TOPIC_KEYWORDS["career"])
-    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
-    return has_career and has_timing
+    has_career = _contains_any_keyword(lowered, _TOPIC_KEYWORDS["career"])
+    return has_career and _has_timing_signal(lowered)
 
 
 def message_mentions_wealth_timing(message: str) -> bool:
     lowered = message.lower()
-    has_money = any(k in lowered for k in _TOPIC_KEYWORDS["money"])
-    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
-    return has_money and has_timing
+    has_money = _contains_any_keyword(lowered, _TOPIC_KEYWORDS["money"])
+    return has_money and _has_timing_signal(lowered)
 
 
 def message_mentions_children_timing(message: str) -> bool:
     lowered = message.lower()
-    has_children = any(k in lowered for k in _TOPIC_KEYWORDS["children"])
-    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
-    return has_children and has_timing
+    has_children = _contains_any_keyword(lowered, _TOPIC_KEYWORDS["children"])
+    return has_children and _has_timing_signal(lowered)
 
 
 # Deliberately its own keyword list, not the generic "travel" topic (trip/
@@ -482,16 +647,80 @@ def message_mentions_children_timing(message: str) -> bool:
 # relocation question needs the life-event engine, an ordinary domestic-trip
 # question doesn't.
 _FOREIGN_TRAVEL_KEYWORDS = [
-    "abroad", "foreign country", "foreign", "immigrate", "immigration", "settle abroad",
-    "move overseas", "relocate abroad", "videsh", "pravas", "विदेश", "प्रवास",
+    "abroad", "foreign country", "foreign", "immigrate", "immigrating", "immigration",
+    "emigrate", "emigrating", "settle abroad", "settling abroad", "move overseas", "moving overseas",
+    "relocate abroad", "relocating abroad",
+    # "pr" (permanent residency) and "visa" are real, extremely common
+    # phrasing per FAQ research ("PR milega kya", "visa kab tak lagega") —
+    # both word-boundary matched, so "visa" doesn't wrongly fire inside
+    # "advisable" and "pr" only matches as its own standalone token.
+    "pr", "visa", "green card",
+    "videsh", "pravas", "विदेश", "प्रवास",
 ]
 
 
 def message_mentions_foreign_travel_timing(message: str) -> bool:
     lowered = message.lower()
-    has_foreign = any(k in lowered for k in _FOREIGN_TRAVEL_KEYWORDS)
-    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
-    return has_foreign and has_timing
+    has_foreign = _contains_any_keyword(lowered, _FOREIGN_TRAVEL_KEYWORDS)
+    return has_foreign and _has_timing_signal(lowered)
+
+
+# --- Past-event reflection: tense detection + a target-date resolver ------
+# "Why did my marriage get delayed", "what happened to me around 2016",
+# "why was 28 such a hard year" — real astrologers narrate the PAST from the
+# same Dasha+transit engine used for future timing, just pointed backward
+# (see app.services.prediction_service.get_life_theme and the `direction`
+# parameter on get_marriage_timing/get_life_event_timing). This is the NLU
+# layer that recognizes a past-tense question and — when possible — resolves
+# WHICH past date it's actually asking about.
+_PAST_TENSE_KEYWORDS = [
+    "did i", "did my", "was there", "was my", "happened", "why did", "used to",
+    "back then", "in the past", "ago",
+    "hua tha", "hui thi", "pehle", "kya hua",
+    "क्या हुआ", "पहले", "हुआ था", "हुई थी",
+]
+
+
+def message_mentions_past_tense(message: str) -> bool:
+    return _contains_any_keyword(message.lower(), _PAST_TENSE_KEYWORDS)
+
+
+# Matches a real calendar year anywhere from a plausible birth year (1900)
+# through the current one — deliberately wider than _YEAR_TOKEN_RE above
+# (which only covers 2020-2049, tuned for near-future "how's my year"
+# questions), since a past reference can point decades further back.
+_EXPLICIT_PAST_YEAR_RE = re.compile(r"\b(19\d{2}|20[0-4]\d)\b")
+_YEARS_AGO_RE = re.compile(r"\b(\d{1,2})\s*(?:years?|saal|sal|साल)\s*(?:ago|pehle|पहले)\b")
+_WHEN_I_WAS_AGE_RE = re.compile(r"\b(?:when i was|at age|umar (?:thi|the)?)\s*(\d{1,2})\b")
+
+
+def resolve_past_reference(message: str, birth_year: int, current_year: int) -> date | None:
+    """Parses an explicit year, "N years ago", or "when I was N" (age) into
+    a representative (mid-year) date — the real, resolvable date a past
+    question is actually asking about. Returns None rather than guessing
+    when nothing in the message pins down a specific date; callers should
+    fall through to existing behavior in that case, not fabricate one."""
+    lowered = message.lower()
+
+    explicit = _EXPLICIT_PAST_YEAR_RE.search(lowered)
+    if explicit:
+        year = int(explicit.group())
+        if birth_year <= year <= current_year:
+            return date(year, 7, 1)
+
+    ago_match = _YEARS_AGO_RE.search(lowered)
+    if ago_match:
+        year = current_year - int(ago_match.group(1))
+        if birth_year <= year <= current_year:
+            return date(year, 7, 1)
+
+    age_match = _WHEN_I_WAS_AGE_RE.search(lowered)
+    if age_match:
+        year = birth_year + int(age_match.group(1))
+        if birth_year <= year <= current_year:
+            return date(year, 7, 1)
+
+    return None
 
 
 # Shared chat-answer composer for the 4 life-event-timing categories — same
@@ -521,8 +750,21 @@ _LIFE_EVENT_CONTEXT_KEY: dict[str, str] = {
 def _life_event_chat_answer(category: str, context: dict[str, Any], hi: bool) -> str:
     windows: list[dict[str, Any]] = context.get(_LIFE_EVENT_CONTEXT_KEY[category]) or []
     label = (_LIFE_EVENT_LABEL_HI if hi else _LIFE_EVENT_LABEL_EN)[category]
+    direction = context.get(f"{category}_direction", "future")
+
     if windows:
         top = windows[0]
+        if direction == "past":
+            if hi:
+                return (
+                    f"आपकी कुंडली के अनुसार, {top['start_date']} से {top['end_date']} की अवधि शास्त्रीय रूप से "
+                    f"{label} के लिए एक अनुकूल दौर थी। {top['reason']} क्या यह उस समय आपके जीवन में हुई किसी बात से मेल खाता है?"
+                )
+            return (
+                f"Based on your chart, {top['start_date']} to {top['end_date']} was classically a favorable "
+                f"period for {label}. {top['reason']} Does that line up with anything that happened for you "
+                "around then?"
+            )
         if hi:
             return (
                 f"आपकी कुंडली के अनुसार, {label} के लिए सबसे संभावित समय "
@@ -533,6 +775,13 @@ def _life_event_chat_answer(category: str, context: dict[str, Any], hi: bool) ->
             f"Based on your chart, the most likely window for {label} looks like "
             f"{top['start_date']} to {top['end_date']}. {top['reason']} Keep in mind this is a probable "
             "favorable window, not a guaranteed exact date."
+        )
+
+    if direction == "past":
+        return (
+            "मुझे उस समय की अवधि में इससे जुड़ा कोई खास तौर पर सक्रिय दौर नहीं दिखा।"
+            if hi
+            else "I didn't find a strongly active window for that in the past period of your chart I can search."
         )
     return (
         "मुझे अभी जितनी अवधि खोजी है उसमें कोई खास तौर पर अनुकूल समय नहीं मिला।"
@@ -548,7 +797,7 @@ def _life_event_chat_answer(category: str, context: dict[str, Any], hi: bool) ->
 # exactly one Rishi so a reverse lookup (_CATEGORY_RISHI) is unambiguous.
 _RISHI_SPECIALTY: dict[str, set[str]] = {
     "vasishtha": {"education", "travel", "foreign_travel_timing"},
-    "parashara": {"dasha", "today", "year_ahead"},
+    "parashara": {"dasha", "today", "year_ahead", "life_theme"},
     "gargi": {"marriage", "family", "friends", "siblings", "children", "marriage_timing", "children_timing"},
     "agastya": {"dosha", "yoga", "health"},
     "bhrigu": {"career", "money", "career_timing", "wealth_timing"},
@@ -749,6 +998,247 @@ def _rishi_refusal(hi: bool, asking_rishi_id: str, category: str) -> str:
     return (
         f"That's really {owner_name}'s domain, not mine — I focus on {own_domain}. Go ask {owner_name} about "
         "that, they'll go deep on it."
+    )
+
+
+def _asked_about(message: str, keywords: list[str]) -> bool:
+    return _contains_any_keyword(message, keywords)
+
+
+# A "_timing" category and its plain-topic sibling both key off the same
+# underlying topic keywords (message_mentions_marriage_timing REQUIRES the
+# "marriage" topic keywords to be present, for instance) — so whenever the
+# timing category fires, the topic loop below must not also add its plainer
+# sibling, or the reply would answer the same thing twice (once with real
+# dasha-window data, once with the static house text).
+_TIMING_SUPPRESSES_TOPIC = {
+    "marriage_timing": "marriage",
+    "career_timing": "career",
+    "wealth_timing": "money",
+    "children_timing": "children",
+    "foreign_travel_timing": "travel",
+}
+_TIMING_CATEGORIES = frozenset(_TIMING_SUPPRESSES_TOPIC)
+_MAX_CATEGORIES_PER_REPLY = 2
+
+
+def _detect_categories(message: str, birth_year: int | None = None) -> list[str]:
+    """Returns every real-life category this message plausibly asks about,
+    in priority order, capped at _MAX_CATEGORIES_PER_REPLY — a compound
+    question ("how's my career and marriage looking?") gets both answered
+    for real instead of only whichever topic happened to be checked first.
+
+    "today" stays an exclusive, first-priority match (unchanged from the
+    single-category behaviour this replaces) since a "how's today" question
+    is rarely genuinely compound with something else."""
+    if _asked_about(message, _TODAY_KEYWORDS):
+        return ["today"]
+
+    found: list[str] = []
+
+    def add(cat: str) -> None:
+        if cat not in found:
+            found.append(cat)
+
+    if message_mentions_marriage_timing(message):
+        add("marriage_timing")
+    if message_mentions_career_timing(message):
+        add("career_timing")
+    if message_mentions_wealth_timing(message):
+        add("wealth_timing")
+    if message_mentions_children_timing(message):
+        add("children_timing")
+    if message_mentions_foreign_travel_timing(message):
+        add("foreign_travel_timing")
+    if message_mentions_year_ahead(message):
+        add("year_ahead")
+
+    # Generic "dasha" only applies when nothing more specific already
+    # matched — "when will I get married" already shares its "when"/"kab"
+    # timing hint with _DASHA_KEYWORDS and shouldn't also get the generic
+    # "you're running X Mahadasha" sentence bolted on.
+    if not (_TIMING_CATEGORIES & set(found)) and _asked_about(message, _DASHA_KEYWORDS):
+        add("dasha")
+    if _asked_about(message, _DOSHA_KEYWORDS):
+        add("dosha")
+    if _asked_about(message, _YOGA_KEYWORDS):
+        add("yoga")
+
+    suppressed_topics = {_TIMING_SUPPRESSES_TOPIC[c] for c in found if c in _TIMING_SUPPRESSES_TOPIC}
+    for topic in _TOPIC_HOUSE:
+        if topic in suppressed_topics:
+            continue
+        if _asked_about(message, _TOPIC_KEYWORDS[topic]):
+            add(topic)
+
+    # General "what was going on then" reflection — only when nothing more
+    # specific already matched (a life-event category with past tense
+    # already gets its own real past-direction answer; this is the fallback
+    # for a past question that isn't about one specific life area) AND the
+    # message actually resolves to a real date (never guessed).
+    if not found and birth_year is not None and message_mentions_past_tense(message):
+        current_year = datetime.now(timezone.utc).year
+        if resolve_past_reference(message, birth_year, current_year) is not None:
+            add("life_theme")
+
+    return found[:_MAX_CATEGORIES_PER_REPLY]
+
+
+def _compute_answer_for_category(
+    category: str,
+    context: dict[str, Any],
+    hi: bool,
+    daily: dict[str, Any],
+    house_breakdown: dict[int, str],
+    yogas: list[dict[str, str]],
+    mahadasha_lord: str | None,
+    antardasha_lord: str | None,
+) -> str | None:
+    """The exact per-category answer logic chat_reply used to inline as one
+    long if/elif chain — pulled out so it can be called once per detected
+    category (see _detect_categories) instead of only ever the first one
+    that matched."""
+    if category == "today":
+        parts = [daily.get("rating_reason"), daily.get("brutal_truth")]
+        if daily.get("festival"):
+            parts.append(f"आज {daily['festival']} है।" if hi else f"Today is {daily['festival']}.")
+        return " ".join(p for p in parts if p) or None
+
+    if category == "marriage_timing":
+        windows: list[dict[str, Any]] = context.get("marriage_timing_windows") or []
+        direction = context.get("marriage_timing_direction", "future")
+        if windows:
+            top = windows[0]
+            if direction == "past":
+                if hi:
+                    return (
+                        f"आपकी कुंडली के अनुसार, {top['start_date']} से {top['end_date']} की अवधि विवाह या किसी "
+                        f"गंभीर साझेदारी के लिए शास्त्रीय रूप से एक अनुकूल दौर थी। {top['reason']} क्या यह उस समय "
+                        "आपके जीवन में हुई किसी बात से मेल खाता है?"
+                    )
+                return (
+                    f"Based on your chart, {top['start_date']} to {top['end_date']} was classically a favorable "
+                    f"period for marriage or a serious partnership. {top['reason']} Does that line up with "
+                    "anything that happened for you around then?"
+                )
+            if hi:
+                return (
+                    f"आपकी कुंडली के अनुसार, विवाह या किसी गंभीर साझेदारी के लिए सबसे संभावित समय "
+                    f"{top['start_date']} से {top['end_date']} के बीच लगता है। {top['reason']} ध्यान रहे, यह एक "
+                    "संभावित अनुकूल समय है, कोई निश्चित तारीख नहीं।"
+                )
+            return (
+                f"Based on your chart, the most likely window for marriage or a serious partnership looks "
+                f"like {top['start_date']} to {top['end_date']}. {top['reason']} Keep in mind this is a "
+                "probable favorable window, not a guaranteed exact date."
+            )
+        if direction == "past":
+            return (
+                "मुझे उस समय की अवधि में विवाह से जुड़ा कोई खास तौर पर सक्रिय दौर नहीं दिखा।"
+                if hi
+                else "I didn't find a strongly active window for marriage in that past period of your chart."
+            )
+        return (
+            "मुझे अभी जितनी अवधि खोजी है उसमें कोई खास तौर पर अनुकूल समय नहीं मिला।"
+            if hi
+            else "I didn't find a strongly favorable window in the period I can currently search."
+        )
+
+    if category in _LIFE_EVENT_CONTEXT_KEY:
+        return _life_event_chat_answer(category, context, hi)
+
+    if category == "life_theme":
+        theme_data: dict[str, Any] | None = context.get("life_theme")
+        return theme_data.get("theme") if theme_data else None
+
+    if category == "year_ahead":
+        year_ahead: dict[str, Any] | None = context.get("year_ahead")
+        if not year_ahead:
+            return None
+        answer = (
+            f"{year_ahead['year']} के लिए, कुल रेटिंग {year_ahead['overall_rating']}/10 है। {year_ahead['overall_theme']}"
+            if hi
+            else f"For {year_ahead['year']}, the overall rating is {year_ahead['overall_rating']}/10. {year_ahead['overall_theme']}"
+        )
+        current_opportunity = year_ahead.get("current_quarter_opportunity")
+        current_risk = year_ahead.get("current_quarter_risk")
+        if current_opportunity:
+            answer += " " + (f"अभी के लिए: {current_opportunity}" if hi else f"Right now: {current_opportunity}")
+        if current_risk:
+            answer += " " + (f"ध्यान रखें: {current_risk}" if hi else f"Watch out for: {current_risk}")
+        return answer
+
+    if category == "dasha":
+        if not (mahadasha_lord and antardasha_lord):
+            return None
+        return (
+            f"फिलहाल आपकी {mahadasha_lord} महादशा चल रही है, जिसके भीतर {antardasha_lord} की अंतर्दशा चल रही "
+            "है — यही संयोजन इस समय आपके अनुभवों की मुख्य दिशा तय कर रहा है।"
+            if hi
+            else f"You're currently running your {mahadasha_lord} Mahadasha, with {antardasha_lord} Antardasha "
+            "inside it — that combination is what's actually shaping this stretch of your life."
+        )
+
+    if category == "dosha":
+        findings = [y for y in yogas if y["key"] in _DOSHA_KEYS]
+        if findings:
+            return " ".join(f"{y['name']}: {y['description']}" for y in findings)
+        return (
+            "आपकी कुंडली में मंगलिक, कालसर्प या केमद्रुम जैसा कोई प्रमुख दोष नहीं मिला।"
+            if hi
+            else "I didn't find Manglik, Kaal Sarp, or Kemadruma dosha in your chart."
+        )
+
+    if category == "yoga":
+        findings = [y for y in yogas if y["key"] not in _DOSHA_KEYS]
+        if findings:
+            return " ".join(f"{y['name']}: {y['description']}" for y in findings)
+        return (
+            "आपकी कुंडली में कोई विशेष शास्त्रीय योग नहीं मिला — यह कमज़ोर कुंडली का संकेत नहीं है, कई मज़बूत "
+            "कुंडलियों में भी कोई नामी योग नहीं होता।"
+            if hi
+            else "I didn't detect a named classical yoga in your chart — that's not a sign of a weak chart, "
+            "plenty of strong charts don't carry one either."
+        )
+
+    if category in _TOPIC_HOUSE:
+        return house_breakdown.get(_TOPIC_HOUSE[category])
+
+    return None
+
+
+_MULTI_TOPIC_CONNECTOR_EN = " Also, "
+_MULTI_TOPIC_CONNECTOR_HI = " वहीं, "
+
+
+def _join_multi_topic_answers(answers: list[str], hi: bool) -> str:
+    if len(answers) == 1:
+        return answers[0]
+    connector = _MULTI_TOPIC_CONNECTOR_HI if hi else _MULTI_TOPIC_CONNECTOR_EN
+    return connector.join(answers)
+
+
+def _rishi_pointer_multi(hi: bool, categories: list[str], history: list[dict[str, str]]) -> str:
+    """Same idea as _rishi_pointer, generalized to a compound question where
+    more than one of the detected categories falls outside the asking
+    Rishi's specialty — points to every distinct owner once, not once per
+    category (asking Bhrigu about both career timing and children timing
+    should name Gargi once, not repeat her)."""
+    if len(categories) == 1:
+        return _rishi_pointer(hi, categories[0], history)
+    owners: list[str] = []
+    for c in categories:
+        owner_id = _CATEGORY_RISHI[c]
+        name = _RISHI_NAME_HI[owner_id] if hi else _RISHI_NAME_EN[owner_id]
+        if name not in owners:
+            owners.append(name)
+    if len(owners) == 1:
+        return _rishi_pointer(hi, categories[0], history)
+    owners_str = (" या ").join(owners) if hi else " or ".join(owners)
+    return (
+        f"इस पर और जानने के लिए {owners_str} से बात करें।"
+        if hi
+        else f"For more detail on this, chat with {owners_str}."
     )
 
 
@@ -1093,126 +1583,27 @@ class TemplateInterpreter(Interpreter):
         mahadasha_lord = context.get("mahadasha_lord")
         antardasha_lord = context.get("antardasha_lord")
         rishi_id = context.get("rishi_id")
+        birth_year = context.get("birth_year")
 
         message = history[-1]["content"].lower() if history else ""
+        categories = _detect_categories(message, birth_year)
 
-        def asked_about(keywords: list[str]) -> bool:
-            return any(k in message for k in keywords)
+        def _out_of_scope(cat: str) -> bool:
+            return rishi_id in _RISHI_SPECIALTY and cat not in _RISHI_SPECIALTY[rishi_id]
 
-        category: str | None = None
-        if asked_about(_TODAY_KEYWORDS):
-            category = "today"
-        elif message_mentions_marriage_timing(message):
-            category = "marriage_timing"
-        elif message_mentions_career_timing(message):
-            category = "career_timing"
-        elif message_mentions_wealth_timing(message):
-            category = "wealth_timing"
-        elif message_mentions_children_timing(message):
-            category = "children_timing"
-        elif message_mentions_foreign_travel_timing(message):
-            category = "foreign_travel_timing"
-        elif message_mentions_year_ahead(message):
-            category = "year_ahead"
-        elif asked_about(_DASHA_KEYWORDS):
-            category = "dasha"
-        elif asked_about(_DOSHA_KEYWORDS):
-            category = "dosha"
-        elif asked_about(_YOGA_KEYWORDS):
-            category = "yoga"
-        else:
-            for topic in _TOPIC_HOUSE:
-                if asked_about(_TOPIC_KEYWORDS[topic]):
-                    category = topic
-                    break
+        # A real answer is attempted for EVERY detected category regardless
+        # of specialty — Bhrigu still answers a marriage question for real,
+        # he just also points to Gargi afterward. Only when NO category
+        # produced any real answer at all does an out-of-specialty category
+        # fall back to a pure redirect (see below) instead of a real fact.
+        answered: list[tuple[str, str]] = [
+            (c, a)
+            for c in categories
+            if (a := _compute_answer_for_category(c, context, hi, daily, house_breakdown, yogas, mahadasha_lord, antardasha_lord))
+        ]
 
-        out_of_scope = bool(category) and rishi_id in _RISHI_SPECIALTY and category not in _RISHI_SPECIALTY[rishi_id]
-
-        answer: str | None = None
-        if category == "today":
-            parts = [daily.get("rating_reason"), daily.get("brutal_truth")]
-            if daily.get("festival"):
-                parts.append(f"आज {daily['festival']} है।" if hi else f"Today is {daily['festival']}.")
-            answer = " ".join(p for p in parts if p) or None
-
-        elif category == "marriage_timing":
-            windows: list[dict[str, Any]] = context.get("marriage_timing_windows") or []
-            if windows:
-                top = windows[0]
-                if hi:
-                    answer = (
-                        f"आपकी कुंडली के अनुसार, विवाह या किसी गंभीर साझेदारी के लिए सबसे संभावित समय "
-                        f"{top['start_date']} से {top['end_date']} के बीच लगता है। {top['reason']} ध्यान रहे, यह एक "
-                        "संभावित अनुकूल समय है, कोई निश्चित तारीख नहीं।"
-                    )
-                else:
-                    answer = (
-                        f"Based on your chart, the most likely window for marriage or a serious partnership looks "
-                        f"like {top['start_date']} to {top['end_date']}. {top['reason']} Keep in mind this is a "
-                        "probable favorable window, not a guaranteed exact date."
-                    )
-            else:
-                answer = (
-                    "मुझे अभी जितनी अवधि खोजी है उसमें कोई खास तौर पर अनुकूल समय नहीं मिला।"
-                    if hi
-                    else "I didn't find a strongly favorable window in the period I can currently search."
-                )
-
-        elif category in _LIFE_EVENT_CONTEXT_KEY:
-            answer = _life_event_chat_answer(category, context, hi)
-
-        elif category == "year_ahead":
-            year_ahead: dict[str, Any] | None = context.get("year_ahead")
-            if year_ahead:
-                answer = (
-                    f"{year_ahead['year']} के लिए, कुल रेटिंग {year_ahead['overall_rating']}/10 है। {year_ahead['overall_theme']}"
-                    if hi
-                    else f"For {year_ahead['year']}, the overall rating is {year_ahead['overall_rating']}/10. {year_ahead['overall_theme']}"
-                )
-                current_opportunity = year_ahead.get("current_quarter_opportunity")
-                current_risk = year_ahead.get("current_quarter_risk")
-                if current_opportunity:
-                    answer += " " + (f"अभी के लिए: {current_opportunity}" if hi else f"Right now: {current_opportunity}")
-                if current_risk:
-                    answer += " " + (f"ध्यान रखें: {current_risk}" if hi else f"Watch out for: {current_risk}")
-
-        elif category == "dasha" and mahadasha_lord and antardasha_lord:
-            answer = (
-                f"फिलहाल आपकी {mahadasha_lord} महादशा चल रही है, जिसके भीतर {antardasha_lord} की अंतर्दशा चल रही "
-                "है — यही संयोजन इस समय आपके अनुभवों की मुख्य दिशा तय कर रहा है।"
-                if hi
-                else f"You're currently running your {mahadasha_lord} Mahadasha, with {antardasha_lord} Antardasha "
-                "inside it — that combination is what's actually shaping this stretch of your life."
-            )
-
-        elif category == "dosha":
-            findings = [y for y in yogas if y["key"] in _DOSHA_KEYS]
-            if findings:
-                answer = " ".join(f"{y['name']}: {y['description']}" for y in findings)
-            else:
-                answer = (
-                    "आपकी कुंडली में मंगलिक, कालसर्प या केमद्रुम जैसा कोई प्रमुख दोष नहीं मिला।"
-                    if hi
-                    else "I didn't find Manglik, Kaal Sarp, or Kemadruma dosha in your chart."
-                )
-
-        elif category == "yoga":
-            findings = [y for y in yogas if y["key"] not in _DOSHA_KEYS]
-            if findings:
-                answer = " ".join(f"{y['name']}: {y['description']}" for y in findings)
-            else:
-                answer = (
-                    "आपकी कुंडली में कोई विशेष शास्त्रीय योग नहीं मिला — यह कमज़ोर कुंडली का संकेत नहीं है, कई मज़बूत "
-                    "कुंडलियों में भी कोई नामी योग नहीं होता।"
-                    if hi
-                    else "I didn't detect a named classical yoga in your chart — that's not a sign of a weak chart, "
-                    "plenty of strong charts don't carry one either."
-                )
-
-        elif category in _TOPIC_HOUSE:
-            answer = house_breakdown.get(_TOPIC_HOUSE[category])
-
-        if answer:
+        if answered:
+            combined = _join_multi_topic_answers([a for _, a in answered], hi)
             # In-character lead-in before the real fact — a rotating choice
             # per Rishi (see _pick_variant) so the same question asked twice
             # doesn't come back as the identical line every time. Only
@@ -1220,18 +1611,20 @@ class TemplateInterpreter(Interpreter):
             # (no rishi_id) gets the bare answer, unchanged.
             if rishi_id in _RISHI_LEAD_IN_EN:
                 lead_in = _pick_variant(_RISHI_LEAD_IN_HI[rishi_id] if hi else _RISHI_LEAD_IN_EN[rishi_id], history)
-                answer = f"{lead_in} {answer}"
-            # A real, chart-grounded answer either way — out-of-specialty
-            # questions still get the actual answer, just with a pointer to
-            # whoever specializes in it for more depth, instead of a bare
-            # refusal that leaves the user with nothing.
-            return f"{answer} {_rishi_pointer(hi, category, history)}" if out_of_scope and category else answer
+                combined = f"{lead_in} {combined}"
+            out_of_scope_answered = [c for c, _ in answered if _out_of_scope(c)]
+            if out_of_scope_answered:
+                combined = f"{combined} {_rishi_pointer_multi(hi, out_of_scope_answered, history)}"
+            return combined
 
-        if out_of_scope and category:
-            # No real data exists for this category at all (e.g. no current
-            # dasha on file) — nothing to answer with, so this is the one
-            # case that's a pure redirect.
-            return _rishi_refusal(hi, rishi_id, category)
+        out_of_scope_detected = [c for c in categories if _out_of_scope(c)]
+        if out_of_scope_detected:
+            # No real data exists for any detected category at all (e.g. no
+            # current dasha on file) — nothing to answer with, so this is
+            # the one case that's a pure redirect. Uses whichever
+            # out-of-scope category was detected first, same as the
+            # single-category behaviour this replaces.
+            return _rishi_refusal(hi, rishi_id, out_of_scope_detected[0])
 
         if rishi_id in _RISHI_FALLBACK_EN:
             return _pick_variant(_RISHI_FALLBACK_HI[rishi_id] if hi else _RISHI_FALLBACK_EN[rishi_id], history)

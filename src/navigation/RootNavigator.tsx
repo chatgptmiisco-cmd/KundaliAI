@@ -13,7 +13,6 @@ import ManglikAnalysisScreen from '../screens/ManglikAnalysisScreen';
 import PassStoreScreen from '../screens/PassStoreScreen';
 import PaymentScreen from '../screens/PaymentScreen';
 import PeriodAnalysisScreen from '../screens/PeriodAnalysisScreen';
-import PredictionsScreen from '../screens/PredictionsScreen';
 import PreferencesScreen from '../screens/PreferencesScreen';
 import SplashScreen from '../screens/SplashScreen';
 import UpgradePlansScreen from '../screens/UpgradePlansScreen';
@@ -110,11 +109,6 @@ export default function RootNavigator() {
             name="PeriodAnalysis"
             component={PeriodAnalysisScreen}
             options={{ title: t('periods.screenTitle') }}
-          />
-          <Stack.Screen
-            name="Predictions"
-            component={PredictionsScreen}
-            options={{ title: t('predictions.screenTitle') }}
           />
           <Stack.Screen
             name="HoroscopeDetail"

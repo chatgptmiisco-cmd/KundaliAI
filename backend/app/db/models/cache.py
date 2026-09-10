@@ -146,17 +146,21 @@ class YearOutlookCache(Base):
 
 
 class MarriageTimingCache(Base):
-    """Ranked marriage-timing windows, cached per (user, language, birth
-    profile version) — same invalidation story as ChartCache. Not date-keyed
-    like YearOutlookCache: "now" is recomputed fresh whenever the cache is
-    stale (a birth-data edit), not on every calendar day, since the window
-    scan already searches years ahead from whenever it was last computed."""
+    """Ranked marriage-timing windows, cached per (user, direction, language,
+    birth profile version) — same invalidation story as ChartCache. Not
+    date-keyed like YearOutlookCache: "now" is recomputed fresh whenever the
+    cache is stale (a birth-data edit), not on every calendar day, since the
+    window scan already searches years ahead/behind from whenever it was
+    last computed. `direction` ("future" or "past") gets its own row since
+    they're genuinely different searches (now-forward vs. birth-to-now), not
+    a staleness variant of the same one."""
 
     __tablename__ = "marriage_timing_cache"
-    __table_args__ = (UniqueConstraint("user_id", "language", "birth_profile_version"),)
+    __table_args__ = (UniqueConstraint("user_id", "direction", "language", "birth_profile_version"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    direction: Mapped[str] = mapped_column(String(8), default="future", server_default="future")
     language: Mapped[str] = mapped_column(String(8))
     birth_profile_version: Mapped[int] = mapped_column(Integer)
     data: Mapped[dict] = mapped_column(JSON)
@@ -165,15 +169,36 @@ class MarriageTimingCache(Base):
 
 class LifeEventTimingCache(Base):
     """Ranked life-event-timing windows (career/wealth/children/foreign
-    travel), cached per (user, event_type, language, birth profile version)
-    — same invalidation/staleness story as MarriageTimingCache."""
+    travel), cached per (user, event_type, direction, language, birth
+    profile version) — same invalidation/staleness story as
+    MarriageTimingCache, including the future/past `direction` split."""
 
     __tablename__ = "life_event_timing_cache"
-    __table_args__ = (UniqueConstraint("user_id", "event_type", "language", "birth_profile_version"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "event_type", "direction", "language", "birth_profile_version"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     event_type: Mapped[str] = mapped_column(String(32))
+    direction: Mapped[str] = mapped_column(String(8), default="future", server_default="future")
+    language: Mapped[str] = mapped_column(String(8))
+    birth_profile_version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LifeThemeCache(Base):
+    """The general "what was going on then" reflection for one target date
+    (not tied to a specific life-event type) — cached per (user, target_date,
+    language, birth profile version), same invalidation story as ChartCache."""
+
+    __tablename__ = "life_theme_cache"
+    __table_args__ = (UniqueConstraint("user_id", "target_date", "language", "birth_profile_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    target_date: Mapped[date] = mapped_column(Date)
     language: Mapped[str] = mapped_column(String(8))
     birth_profile_version: Mapped[int] = mapped_column(Integer)
     data: Mapped[dict] = mapped_column(JSON)

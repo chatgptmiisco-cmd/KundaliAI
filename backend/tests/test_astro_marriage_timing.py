@@ -54,6 +54,24 @@ def test_find_marriage_windows_respects_top_n():
     assert len(windows) <= 2
 
 
+def test_find_marriage_windows_searches_the_past_when_given_earlier_bounds():
+    # No separate "past" function — get_marriage_timing's `direction="past"`
+    # just calls this exact function with from_dt=birth_dt and
+    # horizon_years=age instead of from_dt=now and horizon_years=20. This
+    # confirms that choice of bounds genuinely searches (and bounds) the past.
+    birth_dt = FROM
+    now = FROM + timedelta(days=15 * 365.2425)  # "today" is 15 years after birth
+    maha1 = _mahadasha("Sa", birth_dt, 19, ["Sa", "Me", "Ke"])
+    age_years = (now - birth_dt).days / 365.2425
+
+    windows = find_marriage_windows(
+        [maha1], seventh_lord="Sa", from_dt=birth_dt, horizon_years=age_years, top_n=10
+    )
+    assert len(windows) > 0
+    assert all(w.start >= birth_dt for w in windows)
+    assert all(w.end <= now + timedelta(days=1) for w in windows)  # nothing beyond "now" returned
+
+
 def test_corroborate_with_transits_returns_a_bool():
     window = ScoredWindow(
         start=datetime(2026, 1, 1, tzinfo=timezone.utc),

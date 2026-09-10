@@ -5,15 +5,16 @@ LLM call, no scraped/templated third-party content (see the Prediction
 Engine plan). Both languages are computed and cached together, same
 convention as every other cached artifact in this app.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from typing import Literal
 
 import anyio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.astro.constants import PLANET_NAMES_EN, PLANET_NAMES_HI
+from app.astro.constants import DAYS_PER_YEAR, PLANET_NAMES_EN, PLANET_NAMES_HI
 from app.astro.dasha import find_current_antardasha, find_current_mahadasha
-from app.astro.doshas import compute_sade_sati
+from app.astro.doshas import compute_dhaiya, compute_sade_sati
 from app.astro.event_window_scanner import ScoredWindow
 from app.astro.life_event_timing import EventType
 from app.astro.life_event_timing import EVENT_HOUSE as LIFE_EVENT_HOUSE
@@ -25,9 +26,10 @@ from app.astro.natal_insights import house_lord, planet_dignity
 from app.astro.transits import compute_transit_snapshot
 from app.astro.varshaphala import compute_solar_return, compute_varshaphala
 from app.db.models.birth_profile import BirthProfile
-from app.db.models.cache import LifeEventTimingCache, MarriageTimingCache, YearOutlookCache
+from app.db.models.cache import LifeEventTimingCache, LifeThemeCache, MarriageTimingCache, YearOutlookCache
 from app.schemas.prediction import (
     LifeEventTimingResponse,
+    LifeThemeResponse,
     MarriageTimingResponse,
     MultiYearOutlookResponse,
     YearOutlookResponse,
@@ -39,10 +41,25 @@ from app.services.dasha_service import get_mahadashas_raw
 from app.services.interpretation.base import Language
 from app.services.interpretation.prediction_templates import (
     life_event_reason_text,
+    life_theme_text,
     marriage_window_reason_text,
     overall_year_theme,
     year_outlook_text,
 )
+
+Direction = Literal["past", "future"]
+_FUTURE_HORIZON_YEARS = 20.0
+
+
+def _search_bounds(direction: Direction, birth_dt: datetime, now: datetime) -> tuple[datetime, float]:
+    """Where to point the window scanner — the entire past (birth to now)
+    or the usual forward-looking horizon (now to +20 years). Same scanner
+    (app.astro.event_window_scanner.scan_dasha_windows) either way; this is
+    purely a different choice of bounds, not new astro logic."""
+    if direction == "past":
+        age_years = (now - birth_dt).days / DAYS_PER_YEAR
+        return birth_dt, max(age_years, 0.0)
+    return now, _FUTURE_HORIZON_YEARS
 
 MAX_MULTI_YEARS = 3
 
@@ -198,33 +215,36 @@ async def get_multi_year_outlook(
     return MultiYearOutlookResponse(years=results)
 
 
-def _marriage_select_stmt(profile: BirthProfile, language: Language):
+def _marriage_select_stmt(profile: BirthProfile, direction: Direction, language: Language):
     return select(MarriageTimingCache).where(
         MarriageTimingCache.user_id == profile.user_id,
+        MarriageTimingCache.direction == direction,
         MarriageTimingCache.language == language,
         MarriageTimingCache.birth_profile_version == profile.version,
     )
 
 
 async def get_marriage_timing(
-    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, language: Language
+    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, language: Language, direction: Direction = "future"
 ) -> MarriageTimingResponse:
     _REQUIRED_CACHE_KEYS = ("windows",)
-    select_stmt = _marriage_select_stmt(profile, language)
+    select_stmt = _marriage_select_stmt(profile, direction, language)
     result = await db.execute(select_stmt)
     cached_row = result.scalar_one_or_none()
     if cached_row is not None and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS):
-        return MarriageTimingResponse(language=language, cached=True, **cached_row.data)
+        return MarriageTimingResponse(language=language, direction=direction, cached=True, **cached_row.data)
 
     d1 = await get_chart(db, profile, birth, "D1")
     moon = next(p for p in d1.planets if p.planet == "Mo")
     mars = next(p for p in d1.planets if p.planet == "Ma")
     mahadashas = await get_mahadashas_raw(db, profile, birth)
     seventh_lord = house_lord(7, d1.lagna_sign_index)
+    birth_dt = birth_datetime_utc(birth)
     now = datetime.now(timezone.utc)
+    from_dt, horizon_years = _search_bounds(direction, birth_dt, now)
 
     def _compute_windows():
-        windows = find_marriage_windows(mahadashas, seventh_lord, now)
+        windows = find_marriage_windows(mahadashas, seventh_lord, from_dt, horizon_years)
         return [(w, corroborate_with_transits(w, d1.lagna_sign_index, moon.sign_index)) for w in windows]
 
     scored_windows = await anyio.to_thread.run_sync(_compute_windows)
@@ -233,7 +253,9 @@ async def get_marriage_timing(
     seventh_lord_name = names[seventh_lord]
     windows_out = []
     for w, corroborated in scored_windows:
-        reason = marriage_window_reason_text(w.reason_keys, seventh_lord_name, corroborated, language)
+        reason = marriage_window_reason_text(
+            w.reason_keys, seventh_lord_name, w.antardasha_lord, corroborated, language, tense=direction
+        )
         windows_out.append(
             {
                 # ISO strings, not date objects — see the matching comment
@@ -267,45 +289,56 @@ async def get_marriage_timing(
     if cached_row is not None:
         cached_row.data = data
         await db.commit()
-        return MarriageTimingResponse(language=language, cached=False, **data)
+        return MarriageTimingResponse(language=language, direction=direction, cached=False, **data)
 
     row = MarriageTimingCache(
-        user_id=profile.user_id, language=language, birth_profile_version=profile.version, data=data
+        user_id=profile.user_id, direction=direction, language=language, birth_profile_version=profile.version,
+        data=data,
     )
     data, was_race = await add_and_commit_or_fetch_existing(db, row, select_stmt)
-    return MarriageTimingResponse(language=language, cached=was_race, **data)
+    return MarriageTimingResponse(language=language, direction=direction, cached=was_race, **data)
 
 
-def _life_event_select_stmt(profile: BirthProfile, event_type: EventType, language: Language):
+def _life_event_select_stmt(profile: BirthProfile, event_type: EventType, direction: Direction, language: Language):
     return select(LifeEventTimingCache).where(
         LifeEventTimingCache.user_id == profile.user_id,
         LifeEventTimingCache.event_type == event_type,
+        LifeEventTimingCache.direction == direction,
         LifeEventTimingCache.language == language,
         LifeEventTimingCache.birth_profile_version == profile.version,
     )
 
 
 async def get_life_event_timing(
-    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, event_type: EventType, language: Language
+    db: AsyncSession,
+    profile: BirthProfile,
+    birth: BirthDataOut,
+    event_type: EventType,
+    language: Language,
+    direction: Direction = "future",
 ) -> LifeEventTimingResponse:
     """Career/wealth/children/foreign-travel timing — the generic sibling of
     get_marriage_timing above, built on the same window scanner via
     app.astro.life_event_timing instead of app.astro.marriage_timing."""
     _REQUIRED_CACHE_KEYS = ("windows",)
-    select_stmt = _life_event_select_stmt(profile, event_type, language)
+    select_stmt = _life_event_select_stmt(profile, event_type, direction, language)
     result = await db.execute(select_stmt)
     cached_row = result.scalar_one_or_none()
     if cached_row is not None and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS):
-        return LifeEventTimingResponse(event_type=event_type, language=language, cached=True, **cached_row.data)
+        return LifeEventTimingResponse(
+            event_type=event_type, language=language, direction=direction, cached=True, **cached_row.data
+        )
 
     d1 = await get_chart(db, profile, birth, "D1")
     moon = next(p for p in d1.planets if p.planet == "Mo")
     mahadashas = await get_mahadashas_raw(db, profile, birth)
     house_lord_planet = house_lord(LIFE_EVENT_HOUSE[event_type], d1.lagna_sign_index)
+    birth_dt = birth_datetime_utc(birth)
     now = datetime.now(timezone.utc)
+    from_dt, horizon_years = _search_bounds(direction, birth_dt, now)
 
     def _compute_windows() -> list[tuple[ScoredWindow, bool]]:
-        windows = find_event_windows(mahadashas, event_type, house_lord_planet, now)
+        windows = find_event_windows(mahadashas, event_type, house_lord_planet, from_dt, horizon_years)
         return [
             (w, corroborate_life_event_with_transits(event_type, w, d1.lagna_sign_index, moon.sign_index))
             for w in windows
@@ -317,7 +350,9 @@ async def get_life_event_timing(
     house_lord_name = names[house_lord_planet]
     windows_out = []
     for w, corroborated in scored_windows:
-        reason = life_event_reason_text(event_type, w.reason_keys, house_lord_name, corroborated, language)
+        reason = life_event_reason_text(
+            event_type, w.reason_keys, house_lord_name, w.antardasha_lord, corroborated, language, tense=direction
+        )
         windows_out.append(
             {
                 "start_date": w.start.date().isoformat(),
@@ -337,14 +372,101 @@ async def get_life_event_timing(
     if cached_row is not None:
         cached_row.data = data
         await db.commit()
-        return LifeEventTimingResponse(event_type=event_type, language=language, cached=False, **data)
+        return LifeEventTimingResponse(
+            event_type=event_type, language=language, direction=direction, cached=False, **data
+        )
 
     row = LifeEventTimingCache(
         user_id=profile.user_id,
         event_type=event_type,
+        direction=direction,
         language=language,
         birth_profile_version=profile.version,
         data=data,
     )
     data, was_race = await add_and_commit_or_fetch_existing(db, row, select_stmt)
-    return LifeEventTimingResponse(event_type=event_type, language=language, cached=was_race, **data)
+    return LifeEventTimingResponse(
+        event_type=event_type, language=language, direction=direction, cached=was_race, **data
+    )
+
+
+def _life_theme_select_stmt(profile: BirthProfile, target_date: date, language: Language):
+    return select(LifeThemeCache).where(
+        LifeThemeCache.user_id == profile.user_id,
+        LifeThemeCache.target_date == target_date,
+        LifeThemeCache.language == language,
+        LifeThemeCache.birth_profile_version == profile.version,
+    )
+
+
+async def get_life_theme(
+    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, target_date: date, language: Language
+) -> LifeThemeResponse:
+    """The general "what was going on then" reflection for ANY date (almost
+    always past, but nothing stops asking about today or a future date too)
+    — not tied to one life-event type. Reuses find_current_mahadasha/
+    antardasha and compute_transit_snapshot exactly as every other feature
+    in this app does, just pointed at an arbitrary target date instead of
+    "now"; the only genuinely new computation is Sade Sati/Dhaiya at that
+    date, both already-existing dosha checks (compute_sade_sati,
+    compute_dhaiya) given a transit snapshot for any date."""
+    _REQUIRED_CACHE_KEYS = ("mahadasha_lord", "theme")
+    select_stmt = _life_theme_select_stmt(profile, target_date, language)
+    result = await db.execute(select_stmt)
+    cached_row = result.scalar_one_or_none()
+    if cached_row is not None and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS):
+        return LifeThemeResponse(target_date=target_date, language=language, cached=True, **cached_row.data)
+
+    d1 = await get_chart(db, profile, birth, "D1")
+    moon = next(p for p in d1.planets if p.planet == "Mo")
+    mahadashas = await get_mahadashas_raw(db, profile, birth)
+    at = datetime(target_date.year, target_date.month, target_date.day, 12, 0, tzinfo=timezone.utc)
+
+    def _compute():
+        maha = find_current_mahadasha(mahadashas, at)
+        antar = find_current_antardasha(maha, at) if maha is not None else None
+        snapshot = compute_transit_snapshot(at, d1.lagna_sign_index, moon.sign_index)
+        return maha, antar, snapshot
+
+    mahadasha_at, antardasha_at, snapshot = await anyio.to_thread.run_sync(_compute)
+
+    if mahadasha_at is None or antardasha_at is None:
+        # Outside the single ~120-year Vimshottari cycle this app computes
+        # from birth — realistically only reachable for a target_date far
+        # beyond a human lifespan. Nothing real to report.
+        raise ValueError("target_date is outside the computable Dasha timeline for this chart")
+
+    sade_sati = compute_sade_sati(moon.sign_index, snapshot.planet_sign_index["Sa"])
+    dhaiya = compute_dhaiya(moon.sign_index, snapshot.planet_sign_index["Sa"])
+
+    names = PLANET_NAMES_HI if language == "hi" else PLANET_NAMES_EN
+    generated = life_theme_text(
+        mahadasha_lord=mahadasha_at.lord,
+        antardasha_lord=antardasha_at.lord,
+        sade_sati_active=sade_sati.is_active,
+        dhaiya_active=dhaiya.is_active,
+        language=language,
+    )
+
+    data = {
+        "mahadasha_lord": mahadasha_at.lord,
+        "mahadasha_lord_name": names[mahadasha_at.lord],
+        "antardasha_lord": antardasha_at.lord,
+        "antardasha_lord_name": names[antardasha_at.lord],
+        "sade_sati_active": sade_sati.is_active,
+        "dhaiya_active": dhaiya.is_active,
+        "rating": generated["rating"],
+        "theme": generated["theme"],
+    }
+
+    if cached_row is not None:
+        cached_row.data = data
+        await db.commit()
+        return LifeThemeResponse(target_date=target_date, language=language, cached=False, **data)
+
+    row = LifeThemeCache(
+        user_id=profile.user_id, target_date=target_date, language=language,
+        birth_profile_version=profile.version, data=data,
+    )
+    data, was_race = await add_and_commit_or_fetch_existing(db, row, select_stmt)
+    return LifeThemeResponse(target_date=target_date, language=language, cached=was_race, **data)

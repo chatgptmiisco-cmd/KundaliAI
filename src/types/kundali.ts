@@ -195,50 +195,6 @@ export interface PeriodAnalysis {
   summary: string;
 }
 
-/** One quarter of a year-ahead outlook — real dasha + Varshaphala + transit
- * facts for that specific stretch, not a repeated per-lord canned block. */
-export interface QuarterOutlook {
-  startDate: string;
-  endDate: string;
-  dominantDashaLord: PlanetKey;
-  dominantDashaLordName: string;
-  theme: string;
-  rating: number; // 1-10
-  opportunities: string[];
-  risks: string[];
-}
-
-/** A full year's Prediction Engine outlook: Varshaphala (annual chart) +
- * running dasha + transit doshas, broken into quarters. */
-export interface YearOutlook {
-  year: number;
-  overallRating: number; // 1-10
-  overallTheme: string;
-  varsheshwar: PlanetKey;
-  varsheshwarName: string;
-  munthaHouse: number;
-  quarters: QuarterOutlook[];
-}
-
-/** A ranked, probable-favorable window for marriage/partnership — never a
- * fabricated exact date, always backed by real dasha + transit facts. */
-export interface MarriageTimingWindow {
-  startDate: string;
-  endDate: string;
-  mahadashaLord: PlanetKey;
-  mahadashaLordName: string;
-  antardashaLord: PlanetKey;
-  antardashaLordName: string;
-  score: number;
-  reason: string;
-  transitCorroborated: boolean;
-}
-
-export interface MarriageTimingPrediction {
-  windows: MarriageTimingWindow[];
-  manglikNote: string | null;
-}
-
 export interface DoshaSummaryItem {
   key: string;
   label: string;

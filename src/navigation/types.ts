@@ -28,5 +28,4 @@ export type RootStackParamList = {
   Payment: { passId: string };
   PeriodAnalysis: undefined;
   GunaMilan: undefined;
-  Predictions: undefined;
 };

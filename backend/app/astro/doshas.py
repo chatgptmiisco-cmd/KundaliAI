@@ -75,6 +75,25 @@ def compute_sade_sati(natal_moon_sign_index: int, transiting_saturn_sign_index: 
     return SadeSatiFacts(is_active=phase is not None, phase=phase, house_from_moon=house)
 
 
+_DHAIYA_HOUSES = {4, 8}
+
+
+@dataclass(frozen=True)
+class DhaiyaFacts:
+    is_active: bool
+    house_from_moon: int
+
+
+def compute_dhaiya(natal_moon_sign_index: int, transiting_saturn_sign_index: int) -> DhaiyaFacts:
+    """Dhaiya (also called Kantak Shani) — Saturn transiting the 4th or 8th
+    house from natal Moon, ~2.5 years per house — the other classically
+    named Saturn-hardship window alongside Sade Sati (12th/1st/2nd from
+    Moon, see compute_sade_sati above). Same "plain sign indices in" shape
+    as every other function in this module."""
+    house = house_number(transiting_saturn_sign_index, natal_moon_sign_index)
+    return DhaiyaFacts(is_active=house in _DHAIYA_HOUSES, house_from_moon=house)
+
+
 @dataclass(frozen=True)
 class KemadrumaFacts:
     is_present: bool

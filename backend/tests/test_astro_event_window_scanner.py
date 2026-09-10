@@ -68,6 +68,21 @@ def test_scan_excludes_windows_before_from_dt_and_clips_the_straddling_one():
     assert windows[0].start == mid_window_start  # clipped, not the antardasha's real (earlier) start
 
 
+def test_scan_clips_a_windows_end_to_the_horizon_too():
+    # A window whose real Antardasha end falls AFTER horizon_end (e.g. an
+    # ongoing period during a past-direction search, where horizon_end is
+    # "now") must be reported as ending at horizon_end, not its real
+    # (future-relative-to-the-search) end — otherwise a "what happened in
+    # the past" search could return a window that hasn't finished yet with
+    # an end date still out in the future.
+    rules = [WindowRule("antardasha_lord", "Ve", 1.0, "venus_antardasha")]
+    horizon_years = 200 / 365.2425  # ends mid-way through the first (Ve) antardasha
+    horizon_end = FROM + timedelta(days=200)
+    windows = scan_dasha_windows(_timeline(), rules, FROM, horizon_years=horizon_years)
+    assert len(windows) == 1
+    assert windows[0].end == horizon_end
+
+
 def test_scan_results_sorted_highest_score_first():
     rules = [
         WindowRule("antardasha_lord", "Mo", 1.0, "moon_antardasha"),

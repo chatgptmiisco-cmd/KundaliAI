@@ -172,7 +172,6 @@
     "chartsCardTitle": "चार्ट",
     "gunaMilanButton": "गुण मिलान",
     "seePeriods": "अवधि",
-    "predictionsCardTitle": "भविष्यवाणियां",
     "profileButtonLabel": "प्रोफ़ाइल और जन्म विवरण",
     "focusMeaningLabel": "इसका मतलब",
     "focusAvoidLabel": "आज बचें",
@@ -357,26 +356,6 @@
     "listenToThisPeriod": "यह अवधि सुनें",
     "lockedMessage": "इस अवधि की पूरी जानकारी इनसाइट प्लान में उपलब्ध है।",
     "unlockButton": "इनसाइट प्लान से अनलॉक करें"
-  },
-  "predictions": {
-    "screenTitle": "भविष्यवाणियां",
-    "introText": "आपके आने वाले साल के लिए एक असली, गणना की गई जानकारी — आपकी वार्षिक (वर्षफल) कुंडली, चल रही दशा और वर्तमान ग्रह गोचर से तैयार। यह AI का अंदाज़ा नहीं है।",
-    "viewMode": {
-      "this": "इस साल",
-      "next": "अगला साल",
-      "multi": "2-साल का दृश्य"
-    },
-    "varsheshwarLabel": "इस वर्ष का स्वामी (वर्षेश्वर): {{planet}}",
-    "opportunitiesLabel": "अवसर",
-    "risksLabel": "जोखिम",
-    "errorTitle": "यह भविष्यवाणी लोड नहीं हो पाई",
-    "errorMessage": "इसकी गणना करते समय कुछ गड़बड़ हुई। कृपया फिर से कोशिश करें।",
-    "marriageTiming": {
-      "sectionTitle": "विवाह का समय",
-      "introText": "विवाह या गंभीर साझेदारी के लिए संभावित अनुकूल समय, असली दशा और गोचर संकेतों के आधार पर क्रमबद्ध — कोई गढ़ी हुई सटीक तारीख नहीं।",
-      "corroboratedBadge": "गोचर से पुष्टि",
-      "noWindowsFound": "इस इंजन द्वारा अभी खोजी गई अवधि में कोई मज़बूत अनुकूल समय नहीं मिला।"
-    }
   },
   "profile": {
     "screenTitle": "प्रोफ़ाइल और जन्म विवरण",

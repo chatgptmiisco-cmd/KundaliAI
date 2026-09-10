@@ -262,6 +262,37 @@ async def test_period_analysis_accepts_a_real_mahadasha_length_range(client):
     assert 1 <= resp.json()["rating"] <= 10
 
 
+async def test_period_analysis_uses_the_dasha_lord_actually_running_in_that_period_not_todays(client):
+    """Regression guard: get_period_analysis used to call get_current_dasha()
+    (always "today"), so analyzing a PAST Mahadasha silently described
+    whatever lord happens to be running right now instead of that period's
+    own lord. This locks in the fix using the birth fixture's very first
+    Mahadasha (shortly after birth in 1990), which cannot possibly be the
+    same lord as whatever is running decades later, "today"."""
+    headers = await _signup_and_set_birth_data(client)
+
+    timeline = await client.get("/api/v1/dasha/timeline", headers=headers)
+    assert timeline.status_code == 200, timeline.text
+    mahadashas = timeline.json()["mahadashas"]
+    first_period = mahadashas[0]
+    current_period = next(m for m in mahadashas if m["is_current"])
+    assert first_period["lord"] != current_period["lord"]  # the fixture spans decades; this must hold
+
+    resp = await client.post(
+        "/api/v1/analysis/period", headers=headers,
+        json={"start_date": first_period["start"][:10], "end_date": first_period["end"][:10], "language": "en", "mode": "simple"},
+    )
+    assert resp.status_code == 200, resp.text
+    theme = resp.json()["theme"]
+    # Pinned to the exact "{lord}'s broader Mahadasha" phrase the template
+    # uses for the MAHADASHA slot specifically (not the antardasha slot,
+    # which cycles through all 9 lords and could otherwise coincidentally
+    # include the current lord's name too, making a bare substring check
+    # unreliable).
+    assert f"{first_period['lord_name_en']}'s broader Mahadasha" in theme
+    assert f"{current_period['lord_name_en']}'s broader Mahadasha" not in theme
+
+
 async def test_period_analysis_still_rejects_an_unreasonably_long_range(client):
     headers = await _signup_and_set_birth_data(client)
     resp = await client.post(
@@ -398,6 +429,73 @@ async def test_life_event_timing_rejects_an_invalid_event_type(client):
         "/api/v1/prediction/life-event-timing", headers=headers, params={"event_type": "vehicle", "language": "en"}
     )
     assert resp.status_code == 422
+
+
+async def test_marriage_timing_past_direction_returns_windows_within_the_persons_lifetime(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get(
+        "/api/v1/prediction/marriage-timing", headers=headers, params={"direction": "past", "language": "en"}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["direction"] == "past"
+    today = date.today().isoformat()
+    for window in data["windows"]:
+        assert window["start_date"] >= "1990-01-25"  # the fixture's birth date
+        assert window["end_date"] <= today
+    # Past and future searches are cached separately, not the same row.
+    future = await client.get(
+        "/api/v1/prediction/marriage-timing", headers=headers, params={"direction": "future", "language": "en"}
+    )
+    assert future.json()["direction"] == "future"
+
+
+async def test_life_event_timing_past_direction_returns_windows_within_the_persons_lifetime(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get(
+        "/api/v1/prediction/life-event-timing",
+        headers=headers, params={"event_type": "career", "direction": "past", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["direction"] == "past"
+    today = date.today().isoformat()
+    for window in data["windows"]:
+        assert window["start_date"] >= "1990-01-25"
+        assert window["end_date"] <= today
+
+
+async def test_life_theme_returns_the_real_historical_dasha_lord(client):
+    headers = await _signup_and_set_birth_data(client)
+
+    timeline = await client.get("/api/v1/dasha/timeline", headers=headers)
+    assert timeline.status_code == 200, timeline.text
+    first_period = timeline.json()["mahadashas"][0]
+
+    resp = await client.get(
+        "/api/v1/prediction/life-theme",
+        headers=headers, params={"date": first_period["start"][:10], "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["mahadasha_lord"] == first_period["lord"]
+    assert 1 <= data["rating"] <= 10
+    assert data["theme"]
+    # Honest tendency framing, never a fabricated specific claim.
+    assert "you experienced" not in data["theme"].lower()
+
+
+async def test_life_theme_is_cached_on_repeat_call(client):
+    headers = await _signup_and_set_birth_data(client)
+    first = await client.get(
+        "/api/v1/prediction/life-theme", headers=headers, params={"date": "2000-06-15", "language": "en"}
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["cached"] is False
+    second = await client.get(
+        "/api/v1/prediction/life-theme", headers=headers, params={"date": "2000-06-15", "language": "en"}
+    )
+    assert second.json()["cached"] is True
 
 
 async def test_chat_astro_requires_strategy_tier(client):

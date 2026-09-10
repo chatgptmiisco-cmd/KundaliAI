@@ -44,6 +44,7 @@ class MarriageWindow(BaseModel):
 
 class MarriageTimingResponse(BaseModel):
     language: str
+    direction: str
     windows: list[MarriageWindow]
     manglik_note: str | None
     cached: bool
@@ -64,5 +65,20 @@ class LifeEventWindow(BaseModel):
 class LifeEventTimingResponse(BaseModel):
     event_type: str
     language: str
+    direction: str
     windows: list[LifeEventWindow]
+    cached: bool
+
+
+class LifeThemeResponse(BaseModel):
+    target_date: date
+    language: str
+    mahadasha_lord: str
+    mahadasha_lord_name: str
+    antardasha_lord: str
+    antardasha_lord_name: str
+    sade_sati_active: bool
+    dhaiya_active: bool
+    rating: int = Field(ge=1, le=10)
+    theme: str
     cached: bool

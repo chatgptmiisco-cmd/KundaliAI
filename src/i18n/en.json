@@ -172,7 +172,6 @@
     "chartsCardTitle": "Charts",
     "gunaMilanButton": "Guna Milan",
     "seePeriods": "Periods",
-    "predictionsCardTitle": "Predictions",
     "profileButtonLabel": "Profile & birth details",
     "focusMeaningLabel": "What this means",
     "focusAvoidLabel": "Avoid today",
@@ -357,26 +356,6 @@
     "listenToThisPeriod": "Listen to this period",
     "lockedMessage": "Full details for this period are available with the Insight plan.",
     "unlockButton": "Unlock with Insight plan"
-  },
-  "predictions": {
-    "screenTitle": "Predictions",
-    "introText": "A real, computed outlook for your year ahead — built from your annual (Varshaphala) chart, your running dasha, and current planetary transits. Not AI-generated guesses.",
-    "viewMode": {
-      "this": "This Year",
-      "next": "Next Year",
-      "multi": "2-Year View"
-    },
-    "varsheshwarLabel": "This year's ruling planet (Varsheshwar): {{planet}}",
-    "opportunitiesLabel": "Opportunities",
-    "risksLabel": "Risks",
-    "errorTitle": "We could not load this prediction",
-    "errorMessage": "Something went wrong while computing this. Please try again.",
-    "marriageTiming": {
-      "sectionTitle": "Marriage Timing",
-      "introText": "Probable favorable windows for marriage or a serious partnership, ranked by real dasha and transit signals — not a fabricated exact date.",
-      "corroboratedBadge": "Transit-confirmed",
-      "noWindowsFound": "No strongly favorable window was found in the period this engine currently searches."
-    }
   },
   "profile": {
     "screenTitle": "Profile & Birth Details",

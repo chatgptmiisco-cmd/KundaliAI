@@ -182,6 +182,67 @@ async def test_chat_astro_plain_career_question_is_not_hijacked_by_career_timing
     assert "I didn't find a strongly favorable window" not in reply
 
 
+@pytest.mark.parametrize(
+    "message,rishi_id",
+    [
+        ("Why was my marriage delayed?", "gargi"),
+        ("Did I have a good period for my career in the past?", "bhrigu"),
+        ("Was there ever a good time for me to have had children?", "gargi"),
+    ],
+)
+async def test_chat_astro_past_tense_life_event_questions_search_backward(client, monkeypatch, message, rishi_id):
+    """Real past-tense phrasings ("why was X delayed", "did I have a good
+    period for X") must search the past (birth-to-now), not the future —
+    the honest, real-astrologer style "was classically a period associated
+    with... did that line up" phrasing, not a "guaranteed date" framing that
+    makes no sense for something the calendar says already happened."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": message, "rishi_id": rishi_id, "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert (
+        "line up with anything that happened" in reply
+        or "I didn't find a strongly active window" in reply
+    )
+    assert "not a guaranteed exact date" not in reply  # that's the future-tense framing, must not leak in
+
+
+async def test_chat_astro_answers_what_happened_around_a_specific_past_year(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "What happened to me in 2010?", "rishi_id": "parashara", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "dominant influence at that time" in reply  # plain-language, not Mahadasha/Antardasha jargon
+    assert "Antardasha" not in reply and "Mahadasha" not in reply
+    assert "you experienced" not in reply.lower()  # honest tendency framing, never a fabricated specific claim
+
+
+async def test_chat_astro_sarkari_naukri_question_routes_to_career(client, monkeypatch):
+    """Real, high-volume FAQ phrasing from research — previously entirely
+    unrepresented in the career keyword list."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "Sarkari naukri kab lagegi?", "rishi_id": "bhrigu", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "probable favorable window" in reply or "I didn't find a strongly favorable window" in reply
+
+
 async def test_chat_astro_requires_birth_profile(client):
     signup = await client.post(
         "/api/v1/auth/signup",

@@ -44,8 +44,12 @@ def scan_dasha_windows(
     """Walks every Antardasha window overlapping [from_dt, from_dt +
     horizon_years), scores each against `rules`, and returns only windows
     with a non-zero score — highest score first, ties broken by earliest
-    start. A window that has already started but not yet ended is clipped to
-    start at `from_dt` (it's still "ahead", just already underway)."""
+    start. A window that starts before `from_dt` or ends after `horizon_end`
+    is clipped to those bounds on the corresponding side — every returned
+    window's [start, end) is fully contained in [from_dt, horizon_end),
+    which matters for a past-direction search: an Antardasha that's still
+    ongoing (started in the past, hasn't ended "today") must not be reported
+    with an end date out in the future."""
     horizon_end = from_dt + timedelta(days=horizon_years * DAYS_PER_YEAR)
 
     scored: list[ScoredWindow] = []
@@ -64,7 +68,7 @@ def scan_dasha_windows(
                 scored.append(
                     ScoredWindow(
                         start=max(antar.start, from_dt),
-                        end=antar.end,
+                        end=min(antar.end, horizon_end),
                         mahadasha_lord=maha.lord,
                         antardasha_lord=antar.lord,
                         score=score,

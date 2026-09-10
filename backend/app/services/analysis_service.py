@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.astro.constants import PLANET_NAMES_EN, PLANET_NAMES_HI
+from app.astro.dasha import find_current_antardasha, find_current_mahadasha
 from app.astro.transits import compute_transit_snapshot
 from app.core.config import get_settings
 from app.db.models.birth_profile import BirthProfile
@@ -16,7 +18,7 @@ from app.schemas.analysis import PeriodAnalysisRequest, PeriodAnalysisResponse
 from app.schemas.user import BirthDataOut
 from app.services.cache_utils import add_and_commit_or_fetch_existing
 from app.services.chart_service import get_chart
-from app.services.dasha_service import get_current_dasha
+from app.services.dasha_service import get_mahadashas_raw
 from app.services.interpretation.context import build_transit_context
 from app.services.interpretation.factory import get_interpreter
 
@@ -97,16 +99,22 @@ async def get_period_analysis(
     context: dict = {"lagna_sign": d1.lagna_sign_name_hi if request.language == "hi" else d1.lagna_sign_name_en}
     context.update(build_transit_context(snapshot, request.language))  # type: ignore[arg-type]
 
-    current_dasha = await get_current_dasha(db, profile, birth)
-    if current_dasha is not None:
-        context["mahadasha_lord_key"] = current_dasha.mahadasha.lord
-        context["antardasha_lord_key"] = current_dasha.antardasha.lord
-        context["mahadasha_lord"] = (
-            current_dasha.mahadasha.lord_name_hi if request.language == "hi" else current_dasha.mahadasha.lord_name_en
-        )
-        context["antardasha_lord"] = (
-            current_dasha.antardasha.lord_name_hi if request.language == "hi" else current_dasha.antardasha.lord_name_en
-        )
+    # The dasha lord actually running DURING THE REQUESTED PERIOD (via its
+    # midpoint) — not "today's" dasha. A past or future period being
+    # analyzed almost never matches whichever dasha happens to be running
+    # right now, so using get_current_dasha() here was a real bug: asking
+    # for a Mahadasha's own analysis (e.g. by tapping it on
+    # PeriodAnalysisScreen, or a past-events chat question) would silently
+    # describe a DIFFERENT, unrelated lord's themes instead.
+    mahadashas = await get_mahadashas_raw(db, profile, birth)
+    mahadasha_at_period = find_current_mahadasha(mahadashas, at)
+    antardasha_at_period = find_current_antardasha(mahadasha_at_period, at) if mahadasha_at_period else None
+    if mahadasha_at_period is not None and antardasha_at_period is not None:
+        names = PLANET_NAMES_HI if request.language == "hi" else PLANET_NAMES_EN
+        context["mahadasha_lord_key"] = mahadasha_at_period.lord
+        context["antardasha_lord_key"] = antardasha_at_period.lord
+        context["mahadasha_lord"] = names[mahadasha_at_period.lord]
+        context["antardasha_lord"] = names[antardasha_at_period.lord]
 
     interpreter = get_interpreter()
     generated = await interpreter.period_analysis(context, request.language, request.mode)  # type: ignore[arg-type]

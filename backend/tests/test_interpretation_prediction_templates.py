@@ -2,6 +2,7 @@ import pytest
 
 from app.services.interpretation.prediction_templates import (
     life_event_reason_text,
+    life_theme_text,
     marriage_window_reason_text,
     overall_year_theme,
     year_outlook_text,
@@ -81,6 +82,7 @@ def test_marriage_window_reason_text_composes_multiple_reasons(language):
     text = marriage_window_reason_text(
         reason_keys=["seventh_lord_antardasha", "venus_antardasha"],
         seventh_lord_name="Venus" if language == "en" else "शुक्र",
+        antardasha_lord="Ve",
         transit_corroborated=True,
         language=language,
     )
@@ -89,37 +91,47 @@ def test_marriage_window_reason_text_composes_multiple_reasons(language):
         assert "Jupiter or Saturn" in text
     else:
         assert "गुरु या शनि" in text
+    # Must lead with a real, plain-language effect (from _PERIOD_CONTENT), not
+    # just the mechanism/jargon sentences.
+    assert "Antardasha" not in text
+    assert "Mahadasha" not in text
 
 
 def test_marriage_window_reason_text_omits_corroboration_when_absent():
     text = marriage_window_reason_text(
-        reason_keys=["venus_antardasha"], seventh_lord_name="Venus", transit_corroborated=False, language="en",
+        reason_keys=["venus_antardasha"], seventh_lord_name="Venus", antardasha_lord="Ve",
+        transit_corroborated=False, language="en",
     )
     assert "Jupiter or Saturn" not in text
 
 
-@pytest.mark.parametrize("event_type,house_lord_name", [
-    ("career", "Saturn"), ("wealth", "Jupiter"), ("children", "Jupiter"), ("foreign_travel", "Rahu"),
+@pytest.mark.parametrize("event_type,house_lord_name,house_lord_key", [
+    ("career", "Saturn", "Sa"), ("wealth", "Jupiter", "Ju"), ("children", "Jupiter", "Ju"), ("foreign_travel", "Rahu", "Ra"),
 ])
 @pytest.mark.parametrize("language", ["en", "hi"])
-def test_life_event_reason_text_composes_house_lord_reason(event_type, house_lord_name, language):
+def test_life_event_reason_text_composes_house_lord_reason(event_type, house_lord_name, house_lord_key, language):
     text = life_event_reason_text(
         event_type=event_type,
         reason_keys=[f"{event_type}_house_lord_antardasha"],
         house_lord_name=house_lord_name,
+        antardasha_lord=house_lord_key,
         transit_corroborated=False,
         language=language,
     )
     assert house_lord_name in text
     assert len(text) > 10
+    assert "Antardasha" not in text
+    assert "Mahadasha" not in text
 
 
 def test_life_event_reason_text_composes_karaka_reasons_per_event_type():
     career_text = life_event_reason_text(
-        "career", ["career_karaka_antardasha_Sa"], "Mercury", transit_corroborated=False, language="en"
+        "career", ["career_karaka_antardasha_Sa"], "Mercury", antardasha_lord="Sa",
+        transit_corroborated=False, language="en"
     )
     wealth_text = life_event_reason_text(
-        "wealth", ["wealth_karaka_antardasha_Ju"], "Mercury", transit_corroborated=False, language="en"
+        "wealth", ["wealth_karaka_antardasha_Ju"], "Mercury", antardasha_lord="Ju",
+        transit_corroborated=False, language="en"
     )
     # Same planet (Ju/Sa are different here, but the point is the karaka
     # framing differs per event type) — texts must not collapse identically.
@@ -130,13 +142,74 @@ def test_life_event_reason_text_composes_karaka_reasons_per_event_type():
 
 def test_life_event_reason_text_includes_corroboration_when_present():
     text = life_event_reason_text(
-        "foreign_travel", ["foreign_travel_house_lord_antardasha"], "Rahu", transit_corroborated=True, language="en"
+        "foreign_travel", ["foreign_travel_house_lord_antardasha"], "Rahu", antardasha_lord="Ra",
+        transit_corroborated=True, language="en"
     )
-    assert "extra classical signal" in text
+    assert "second real signal" in text
 
 
 def test_life_event_reason_text_omits_corroboration_when_absent():
     text = life_event_reason_text(
-        "foreign_travel", ["foreign_travel_house_lord_antardasha"], "Rahu", transit_corroborated=False, language="en"
+        "foreign_travel", ["foreign_travel_house_lord_antardasha"], "Rahu", antardasha_lord="Ra",
+        transit_corroborated=False, language="en"
     )
-    assert "extra classical signal" not in text
+    assert "second real signal" not in text
+
+
+@pytest.mark.parametrize("language", ["en", "hi"])
+def test_marriage_window_reason_text_past_tense_reads_retrospectively(language):
+    future_text = marriage_window_reason_text(
+        ["seventh_lord_antardasha"], "Mercury" if language == "en" else "बुध", antardasha_lord="Me",
+        transit_corroborated=True, language=language, tense="future",
+    )
+    past_text = marriage_window_reason_text(
+        ["seventh_lord_antardasha"], "Mercury" if language == "en" else "बुध", antardasha_lord="Me",
+        transit_corroborated=True, language=language, tense="past",
+    )
+    assert future_text != past_text
+    if language == "en":
+        assert "has extra pull during this phase" in future_text
+        assert "had extra pull during that phase" in past_text
+    else:
+        assert "सक्रिय है" in future_text and "सक्रिय था" in past_text
+
+
+def test_life_event_reason_text_past_tense_reads_retrospectively():
+    future_text = life_event_reason_text(
+        "career", ["career_house_lord_antardasha"], "Mercury", antardasha_lord="Me",
+        transit_corroborated=False, language="en", tense="future",
+    )
+    past_text = life_event_reason_text(
+        "career", ["career_house_lord_antardasha"], "Mercury", antardasha_lord="Me",
+        transit_corroborated=False, language="en", tense="past",
+    )
+    assert future_text != past_text
+    assert "has extra pull during this phase" in future_text
+    assert "had extra pull during that phase" in past_text
+
+
+@pytest.mark.parametrize("language", ["en", "hi"])
+def test_life_theme_text_composes_a_real_retrospective_theme(language):
+    result = life_theme_text(
+        mahadasha_lord="Sa", antardasha_lord="Ju", sade_sati_active=False, dhaiya_active=False, language=language,
+    )
+    assert 1 <= result["rating"] <= 10
+    assert len(result["theme"]) > 20
+    # Never a fabricated specific claim ("you got divorced") — only the
+    # honest, computed thematic tendency.
+    assert "you experienced" not in result["theme"].lower()
+
+
+def test_life_theme_text_varies_with_different_lords():
+    a = life_theme_text("Ju", "Ve", sade_sati_active=False, dhaiya_active=False, language="en")
+    b = life_theme_text("Sa", "Ra", sade_sati_active=False, dhaiya_active=False, language="en")
+    assert a["theme"] != b["theme"]
+
+
+def test_life_theme_text_lowers_rating_and_adds_notes_when_sade_sati_or_dhaiya_active():
+    baseline = life_theme_text("Ju", "Ve", sade_sati_active=False, dhaiya_active=False, language="en")
+    with_hardship = life_theme_text("Ju", "Ve", sade_sati_active=True, dhaiya_active=True, language="en")
+    assert with_hardship["rating"] <= baseline["rating"]
+    assert "Sade Sati" in with_hardship["theme"]
+    assert "Dhaiya" in with_hardship["theme"]
+    assert "Sade Sati" not in baseline["theme"]

@@ -10,8 +10,16 @@ from app.astro.constants import VIMSHOTTARI_SEQUENCE
 from app.services.interpretation.templates import (
     TemplateInterpreter,
     _LIFE_FRAMING_EN,
+    _fuzzy_max_distance,
+    _levenshtein,
     _ordinal,
     _strip_trailing_stop,
+    message_mentions_career_timing,
+    message_mentions_children_timing,
+    message_mentions_foreign_travel_timing,
+    message_mentions_marriage_timing,
+    message_mentions_past_tense,
+    resolve_past_reference,
 )
 
 interpreter = TemplateInterpreter()
@@ -25,8 +33,110 @@ def test_ordinal_suffixes(n, expected):
     assert _ordinal(n) == expected
 
 
+# --- Typo/spelling-variant tolerance ----------------------------------------
+
+def test_levenshtein_basic_distances():
+    assert _levenshtein("kitten", "kitten") == 0
+    assert _levenshtein("kitten", "sitten") == 1  # substitution
+    assert _levenshtein("shadi", "shaadi") == 1  # insertion
+    assert _levenshtein("", "abc") == 3
+    assert _levenshtein("abc", "") == 3
+
+
+def test_fuzzy_max_distance_scales_with_keyword_length():
+    assert _fuzzy_max_distance(2) == 0  # too short to fuzz safely at all
+    assert _fuzzy_max_distance(3) == 0  # "din"/"did"/"in" collision — see below
+    assert _fuzzy_max_distance(5) == 1
+    assert _fuzzy_max_distance(6) == 2
+    assert _fuzzy_max_distance(8) == 2
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "shadi kab hogi",  # missing double-a
+        "shadi kb hogi",  # missing double-a AND vowel-dropped kab
+        "when will i get marraige",  # transposed letters
+    ],
+)
+def test_marriage_timing_tolerates_real_typos(message):
+    assert message_mentions_marriage_timing(message)
+
+
+@pytest.mark.parametrize("message", ["nokri kab milegi", "carreer kab badlega"])
+def test_career_timing_tolerates_real_typos(message):
+    assert message_mentions_career_timing(message)
+
+
+def test_children_timing_tolerates_a_real_typo():
+    assert message_mentions_children_timing("when will i have childern")
+
+
+def test_foreign_travel_timing_tolerates_a_real_typo():
+    assert message_mentions_foreign_travel_timing("when will my imigration come through")
+
+
+def test_fuzzy_matching_does_not_reintroduce_the_din_in_collision():
+    """Regression guard for a real bug caught while building this: "din"
+    (today/day keyword, 3 letters) was fuzzy-matching the extremely common
+    word "in" at edit-distance 1 — before the length-3 floor was added,
+    almost every message containing "in" was wrongly classified as a
+    "today" question."""
+    assert not message_mentions_past_tense("please tell me about my career in general")
+
+
+def test_fuzzy_matching_does_not_confuse_did_with_din():
+    """Regression guard for the second real collision caught: "did" (a
+    past-tense keyword) is itself edit-distance 1 from "din" (a today
+    keyword), same first letter — both are exactly 3 letters, which is
+    exactly why 3-letter keywords are excluded from fuzzing entirely rather
+    than trying to special-case every short collision as it's found."""
+    from app.services.interpretation.templates import _asked_about, _TODAY_KEYWORDS
+
+    assert not _asked_about("did i have a good career period", _TODAY_KEYWORDS)
+
+
 def test_strip_trailing_stop_removes_terminal_punctuation_only():
     assert _strip_trailing_stop("Something clear.") == "Something clear"
+
+
+# --- Past-event reflection: tense detection + date resolution --------------
+
+def test_message_mentions_past_tense_recognizes_real_phrasings():
+    assert message_mentions_past_tense("Why did my marriage get delayed?")
+    assert message_mentions_past_tense("What happened to me in 2016?")
+    assert message_mentions_past_tense("Was there a reason for that setback?")
+    assert not message_mentions_past_tense("When will I get married?")
+    assert not message_mentions_past_tense("How's my career looking?")
+
+
+def test_resolve_past_reference_parses_an_explicit_year():
+    resolved = resolve_past_reference("What happened to me in 2016?", birth_year=1990, current_year=2026)
+    assert resolved is not None
+    assert resolved.year == 2016
+
+
+def test_resolve_past_reference_parses_years_ago():
+    resolved = resolve_past_reference("Why was I struggling 5 years ago?", birth_year=1990, current_year=2026)
+    assert resolved is not None
+    assert resolved.year == 2021
+
+
+def test_resolve_past_reference_parses_when_i_was_age():
+    resolved = resolve_past_reference("What happened when I was 25?", birth_year=1990, current_year=2026)
+    assert resolved is not None
+    assert resolved.year == 2015
+
+
+def test_resolve_past_reference_returns_none_when_unresolvable():
+    assert resolve_past_reference("Why did things feel so hard?", birth_year=1990, current_year=2026) is None
+
+
+def test_resolve_past_reference_rejects_years_outside_the_persons_lifetime():
+    # A "year" mentioned before birth or after "now" isn't a resolvable
+    # reference to this person's own past — never guessed.
+    assert resolve_past_reference("What about 1985?", birth_year=1990, current_year=2026) is None
+    assert resolve_past_reference("What about 2030?", birth_year=1990, current_year=2026) is None
     assert _strip_trailing_stop("कुछ बात।") == "कुछ बात"
     assert _strip_trailing_stop("No punctuation here") == "No punctuation here"
 
@@ -249,6 +359,50 @@ async def test_chat_reply_answers_yoga_question_with_real_findings():
     assert "Manglik" not in reply  # dosha, not a yoga
 
 
+async def test_chat_reply_answers_life_theme_question_from_precomputed_context():
+    # chat.py resolves the target date + calls prediction_service.get_life_theme
+    # BEFORE calling chat_reply — this locks in that chat_reply correctly
+    # surfaces whatever real theme text it was given for a resolvable past
+    # question, without re-deriving anything itself.
+    context = {
+        **_CHAT_CONTEXT,
+        "birth_year": 1990,
+        "life_theme": {"theme": "You were running your Saturn Mahadasha then — a grinding, disciplined period.", "rating": 5},
+    }
+    reply = await interpreter.chat_reply(_history("What happened to me in 2016?"), context, "en")
+    assert "Saturn Mahadasha" in reply
+
+
+async def test_chat_reply_does_not_answer_life_theme_when_date_unresolvable():
+    context = {**_CHAT_CONTEXT, "birth_year": 1990}  # no life_theme data attached — chat.py never fetched it
+    reply = await interpreter.chat_reply(_history("Why did things feel so hard for me?"), context, "en")
+    assert "Saturn Mahadasha" not in reply
+
+
+async def test_chat_reply_word_boundary_matching_avoids_substring_false_positives():
+    """Regression guard: bare "ill" (health keyword) is a substring of the
+    extremely common word "will" ("when WILL I get married"), and bare "kid"
+    (children keyword) is a substring of "kidney"/"kidding" — plain substring
+    matching caught both live before word-boundary matching was added."""
+    context1 = {**_CHAT_CONTEXT, "house_breakdown": {**_CHAT_CONTEXT["house_breakdown"], 6: "Health house text."}}
+    reply = await interpreter.chat_reply(_history("When will I get a promotion?"), context1, "en")
+    assert "Health house text." not in reply
+
+    context = {**_CHAT_CONTEXT, "house_breakdown": {**_CHAT_CONTEXT["house_breakdown"], 5: "Children house text."}}
+    reply2 = await interpreter.chat_reply(_history("My kidney has been hurting lately"), context, "en")
+    assert "Children house text." not in reply2
+
+
+def test_new_faq_keywords_do_not_false_fire_on_unrelated_words():
+    """Regression guard for the government-job/PR/visa FAQ keyword expansion:
+    short, real-world tokens like "PR" must only match as their own
+    standalone word (word-boundary matched), never as a substring of an
+    unrelated word (e.g. "pr" inside "surprise", "expression")."""
+    assert not message_mentions_foreign_travel_timing("that was a nice surprise expression, when will I know?")
+    assert message_mentions_foreign_travel_timing("when will I get my PR?")
+    assert message_mentions_foreign_travel_timing("when will my visa come through?")
+
+
 async def test_chat_reply_answers_dasha_question_naming_real_lords():
     reply = await interpreter.chat_reply(_history("What dasha am I running right now?"), _CHAT_CONTEXT, "en")
     assert "Jupiter" in reply and "Saturn" in reply
@@ -269,6 +423,36 @@ async def test_chat_reply_falls_back_to_chart_summary_when_nothing_matches():
 async def test_chat_reply_handles_empty_history_without_crashing():
     reply = await interpreter.chat_reply([], _CHAT_CONTEXT, "en")
     assert "Sagittarius" in reply
+
+
+# --- chat_reply: compound (multi-topic) questions ---------------------------
+# "How's my career and marriage looking?" should answer BOTH real topics
+# instead of only whichever one happened to be checked first — the old
+# single-category if/elif chain could only ever return one.
+
+async def test_chat_reply_answers_both_topics_in_a_compound_question():
+    reply = await interpreter.chat_reply(
+        _history("How's my career and marriage looking?"), _CHAT_CONTEXT, "en"
+    )
+    assert _CHAT_CONTEXT["house_breakdown"][10] in reply
+    assert _CHAT_CONTEXT["house_breakdown"][7] in reply
+
+
+async def test_chat_reply_caps_compound_questions_at_two_topics():
+    # career + money + marriage all mentioned — only 2 of the 3 real answers
+    # should come back, not an ever-growing wall of text.
+    context = {
+        **_CHAT_CONTEXT,
+        "house_breakdown": {**_CHAT_CONTEXT["house_breakdown"], 2: "Venus sits here — this house governs money."},
+    }
+    reply = await interpreter.chat_reply(
+        _history("How's my career, money, and marriage looking?"), context, "en"
+    )
+    matched = sum(
+        text in reply
+        for text in (context["house_breakdown"][10], context["house_breakdown"][2], context["house_breakdown"][7])
+    )
+    assert matched == 2
 
 
 # --- chat_reply: per-Rishi specialization -----------------------------------
@@ -307,6 +491,18 @@ async def test_gargi_answers_marriage_but_still_answers_career_with_a_pointer_to
     out_of_domain = await interpreter.chat_reply(_history("How's my career looking?"), _rishi_context("gargi"), "en")
     assert _CHAT_CONTEXT["house_breakdown"][10] in out_of_domain
     assert "Bhrigu" in out_of_domain
+
+
+async def test_gargi_answers_both_topics_of_a_mixed_scope_compound_question():
+    # Marriage (Gargi's own domain) and career (Bhrigu's) asked together —
+    # both get real answers, with a single pointer to Bhrigu, not one
+    # redirect per out-of-scope topic.
+    reply = await interpreter.chat_reply(
+        _history("How's my career and marriage looking?"), _rishi_context("gargi"), "en"
+    )
+    assert _CHAT_CONTEXT["house_breakdown"][7] in reply
+    assert _CHAT_CONTEXT["house_breakdown"][10] in reply
+    assert reply.count("Bhrigu") == 1
 
 
 async def test_parashara_answers_dasha_but_still_answers_dosha_with_a_pointer_to_agastya():

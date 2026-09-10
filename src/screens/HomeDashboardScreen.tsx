@@ -158,12 +158,6 @@ export default function HomeDashboardScreen() {
       label: t('home.seePeriods'),
       onPress: () => navigation.navigate('PeriodAnalysis'),
     },
-    {
-      key: 'predictions',
-      icon: 'trending-up-outline',
-      label: t('home.predictionsCardTitle'),
-      onPress: () => navigation.navigate('Predictions'),
-    },
   ];
 
   const tabs = [

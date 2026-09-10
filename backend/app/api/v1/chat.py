@@ -21,8 +21,10 @@ from app.services.interpretation.templates import (
     message_mentions_children_timing,
     message_mentions_foreign_travel_timing,
     message_mentions_marriage_timing,
+    message_mentions_past_tense,
     message_mentions_wealth_timing,
     message_mentions_year_ahead,
+    resolve_past_reference,
 )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -83,7 +85,19 @@ async def chat_astro(
             "doshas": [d.model_dump() for d in daily.doshas],
         },
         "rishi_id": body.rishi_id,
+        # Needed to resolve "when I was N" style past-age references (see
+        # message_mentions_past_tense/resolve_past_reference below) — same
+        # convention as every other real fact already threaded through here.
+        "birth_year": birth.date_of_birth.year,
     }
+
+    # A past-tense question ("why did my marriage get delayed", "was there a
+    # good period for X") searches backward (birth-to-now) instead of
+    # forward (now-to-+20yr) — same engine, same window scanner, just
+    # different bounds (see prediction_service._search_bounds). Resolved
+    # once per message since it applies uniformly to whichever category(ies)
+    # actually match.
+    direction: prediction_service.Direction = "past" if message_mentions_past_tense(body.message) else "future"
 
     # Only fetched when the message actually needs it (real "when will I get
     # married" / "how's my year" questions) — both are Prediction Engine
@@ -91,7 +105,8 @@ async def chat_astro(
     # unrelated chat message avoids paying that cost (or the first-computation
     # ephemeris/dasha-scan latency) needlessly.
     if message_mentions_marriage_timing(body.message):
-        marriage_timing = await prediction_service.get_marriage_timing(db, profile, birth, body.language)
+        marriage_timing = await prediction_service.get_marriage_timing(db, profile, birth, body.language, direction)
+        context["marriage_timing_direction"] = direction
         context["marriage_timing_windows"] = [
             {"start_date": w.start_date.isoformat(), "end_date": w.end_date.isoformat(), "reason": w.reason}
             for w in marriage_timing.windows
@@ -101,18 +116,35 @@ async def chat_astro(
     # pattern as marriage timing above, one block per event type since each
     # needs its own get_life_event_timing(event_type=...) call.
     _LIFE_EVENT_CHECKS = (
-        ("career", message_mentions_career_timing, "career_timing_windows"),
-        ("wealth", message_mentions_wealth_timing, "wealth_timing_windows"),
-        ("children", message_mentions_children_timing, "children_timing_windows"),
-        ("foreign_travel", message_mentions_foreign_travel_timing, "foreign_travel_timing_windows"),
+        ("career", message_mentions_career_timing, "career_timing"),
+        ("wealth", message_mentions_wealth_timing, "wealth_timing"),
+        ("children", message_mentions_children_timing, "children_timing"),
+        ("foreign_travel", message_mentions_foreign_travel_timing, "foreign_travel_timing"),
     )
-    for event_type, mentions_fn, context_key in _LIFE_EVENT_CHECKS:
+    for event_type, mentions_fn, category in _LIFE_EVENT_CHECKS:
         if mentions_fn(body.message):
-            life_event = await prediction_service.get_life_event_timing(db, profile, birth, event_type, body.language)
-            context[context_key] = [
+            life_event = await prediction_service.get_life_event_timing(
+                db, profile, birth, event_type, body.language, direction
+            )
+            context[f"{category}_direction"] = direction
+            context[f"{category}_windows"] = [
                 {"start_date": w.start_date.isoformat(), "end_date": w.end_date.isoformat(), "reason": w.reason}
                 for w in life_event.windows
             ]
+
+    # The general "what was going on then" reflection — only fires when a
+    # past reference actually resolves to a real date (never guessed); a
+    # past-tense question already answered by one of the categories above
+    # (marriage/career/etc.) doesn't also need this generic fallback.
+    if (
+        direction == "past"
+        and not any(mentions_fn(body.message) for _, mentions_fn, _ in _LIFE_EVENT_CHECKS)
+        and not message_mentions_marriage_timing(body.message)
+    ):
+        target_date = resolve_past_reference(body.message, birth.date_of_birth.year, datetime.now(timezone.utc).year)
+        if target_date is not None:
+            life_theme = await prediction_service.get_life_theme(db, profile, birth, target_date, body.language)
+            context["life_theme"] = {"theme": life_theme.theme, "rating": life_theme.rating}
 
     if message_mentions_year_ahead(body.message):
         current_year = datetime.now(timezone.utc).year

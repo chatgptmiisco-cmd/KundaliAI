@@ -1,10 +1,11 @@
 {
-  "enabledPlugins": {
-    "expo@claude-plugins-official": true
-  },
   "permissions": {
     "allow": [
-      "Bash(powershell -Command \"Stop-Process -Id 52568 -Force\")"
+      "Bash(powershell -Command \"Stop-Process -Id 52568 -Force\")",
+      "WebSearch"
     ]
+  },
+  "enabledPlugins": {
+    "expo@claude-plugins-official": true
   }
 }

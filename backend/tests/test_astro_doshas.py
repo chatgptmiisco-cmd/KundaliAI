@@ -1,4 +1,5 @@
 from app.astro.doshas import (
+    compute_dhaiya,
     compute_kaal_sarp_dosha,
     compute_kemadruma_dosha,
     compute_sade_sati,
@@ -38,6 +39,28 @@ def test_sade_sati_phases_by_saturn_house_from_natal_moon():
     inactive = compute_sade_sati(natal_moon_sign_index=9, transiting_saturn_sign_index=0)
     assert inactive.is_active is False
     assert inactive.phase is None
+
+
+def test_dhaiya_active_in_4th_and_8th_house_from_natal_moon():
+    # Natal Moon in Capricorn(9). Saturn transiting Aries(0) = house 4 from
+    # Moon (same placement compute_sade_sati's own test uses to prove Sade
+    # Sati is NOT active there) -> Dhaiya active.
+    facts = compute_dhaiya(natal_moon_sign_index=9, transiting_saturn_sign_index=0)
+    assert facts.is_active is True
+    assert facts.house_from_moon == 4
+
+    # Saturn transiting Leo(4) = house 8 from Moon -> also active.
+    facts8 = compute_dhaiya(natal_moon_sign_index=9, transiting_saturn_sign_index=4)
+    assert facts8.is_active is True
+    assert facts8.house_from_moon == 8
+
+
+def test_dhaiya_inactive_outside_4th_and_8th_house():
+    # Saturn transiting Capricorn(9) = house 1 from Moon (Sade Sati peak) ->
+    # not a Dhaiya house.
+    facts = compute_dhaiya(natal_moon_sign_index=9, transiting_saturn_sign_index=9)
+    assert facts.is_active is False
+    assert facts.house_from_moon == 1
 
 
 def test_kemadruma_present_with_no_supporting_or_cancelling_placements():

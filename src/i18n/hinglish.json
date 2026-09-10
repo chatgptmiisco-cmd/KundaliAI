@@ -172,7 +172,6 @@
     "chartsCardTitle": "Charts",
     "gunaMilanButton": "Guna Milan",
     "seePeriods": "Periods",
-    "predictionsCardTitle": "Predictions",
     "profileButtonLabel": "Profile aur birth details",
     "focusMeaningLabel": "Iska matlab",
     "focusAvoidLabel": "Aaj bachein",
@@ -357,26 +356,6 @@
     "listenToThisPeriod": "Yeh period suno",
     "lockedMessage": "Is period ki poori details Insight plan mein available hain.",
     "unlockButton": "Insight plan se unlock karein"
-  },
-  "predictions": {
-    "screenTitle": "Predictions",
-    "introText": "Aapke aane wale saal ke liye ek real, calculated outlook — aapki annual (Varshaphala) chart, chal rahi dasha, aur current planetary transits se banaya gaya. Yeh AI ka guess nahi hai.",
-    "viewMode": {
-      "this": "Is Saal",
-      "next": "Agla Saal",
-      "multi": "2-Saal View"
-    },
-    "varsheshwarLabel": "Is saal ka ruling planet (Varsheshwar): {{planet}}",
-    "opportunitiesLabel": "Opportunities",
-    "risksLabel": "Risks",
-    "errorTitle": "Yeh prediction load nahi ho payi",
-    "errorMessage": "Isko calculate karte waqt kuch galat ho gaya. Please phir try karein.",
-    "marriageTiming": {
-      "sectionTitle": "Marriage Timing",
-      "introText": "Marriage ya serious partnership ke liye probable favorable windows, real dasha aur transit signals se ranked — koi fake exact date nahi.",
-      "corroboratedBadge": "Transit-confirmed",
-      "noWindowsFound": "Is engine ne abhi jitni period search ki hai, usmein koi strongly favorable window nahi mila."
-    }
   },
   "profile": {
     "screenTitle": "Profile & Birth Details",

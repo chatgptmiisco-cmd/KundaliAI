@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,12 +10,14 @@ from app.db.base import get_db
 from app.db.models.birth_profile import BirthProfile
 from app.schemas.prediction import (
     LifeEventTimingResponse,
+    LifeThemeResponse,
     MarriageTimingResponse,
     MultiYearOutlookResponse,
     YearOutlookResponse,
 )
 from app.services import prediction_service, user_service
 from app.services.interpretation.base import Language
+from app.services.prediction_service import Direction
 
 router = APIRouter(prefix="/prediction", tags=["prediction"])
 
@@ -58,12 +60,13 @@ async def multi_year(
 @limiter.limit("20/minute")
 async def marriage_timing(
     request: Request,
+    direction: Direction = Query(default="future"),
     language: Language = Query(default="en"),
     profile: BirthProfile = Depends(require_birth_profile),
     db: AsyncSession = Depends(get_db),
 ):
     birth = user_service.decrypt_birth_data(profile)
-    return await prediction_service.get_marriage_timing(db, profile, birth, language)
+    return await prediction_service.get_marriage_timing(db, profile, birth, language, direction)
 
 
 @router.get("/life-event-timing", response_model=LifeEventTimingResponse)
@@ -71,9 +74,23 @@ async def marriage_timing(
 async def life_event_timing(
     request: Request,
     event_type: EventType = Query(...),
+    direction: Direction = Query(default="future"),
     language: Language = Query(default="en"),
     profile: BirthProfile = Depends(require_birth_profile),
     db: AsyncSession = Depends(get_db),
 ):
     birth = user_service.decrypt_birth_data(profile)
-    return await prediction_service.get_life_event_timing(db, profile, birth, event_type, language)
+    return await prediction_service.get_life_event_timing(db, profile, birth, event_type, language, direction)
+
+
+@router.get("/life-theme", response_model=LifeThemeResponse)
+@limiter.limit("20/minute")
+async def life_theme(
+    request: Request,
+    target_date: date = Query(..., alias="date"),
+    language: Language = Query(default="en"),
+    profile: BirthProfile = Depends(require_birth_profile),
+    db: AsyncSession = Depends(get_db),
+):
+    birth = user_service.decrypt_birth_data(profile)
+    return await prediction_service.get_life_theme(db, profile, birth, target_date, language)

@@ -16,14 +16,11 @@ import {
   KundaliSummary,
   Language,
   ManglikStatus,
-  MarriageTimingPrediction,
   PeriodAnalysis,
   PlanetDetail,
   PlanetKey,
   PreferenceKey,
-  QuarterOutlook,
   ValidationQuestion,
-  YearOutlook,
 } from '../types/kundali';
 
 // ---------------------------------------------------------------------------
@@ -650,111 +647,6 @@ export async function getPeriodAnalysis(
     opportunities: data.opportunities,
     summary: data.summary,
     remainingFreeAnalysesThisMonth: data.remaining_free_analyses_this_month,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Prediction Engine — Varshaphala (annual chart) + dasha/transit-based year
-// outlook, and a dasha/transit window scan for marriage timing. Real
-// computed astrology only, same as everywhere else in this app — no LLM.
-// ---------------------------------------------------------------------------
-
-interface QuarterOutlookApi {
-  start_date: string;
-  end_date: string;
-  dominant_dasha_lord: string;
-  dominant_dasha_lord_name: string;
-  theme: string;
-  rating: number;
-  opportunities: string[];
-  risks: string[];
-}
-
-interface YearOutlookApi {
-  year: number;
-  overall_rating: number;
-  overall_theme: string;
-  varsheshwar: string;
-  varsheshwar_name: string;
-  muntha_house: number;
-  quarters: QuarterOutlookApi[];
-  cached: boolean;
-}
-
-function mapQuarterOutlook(q: QuarterOutlookApi): QuarterOutlook {
-  return {
-    startDate: q.start_date,
-    endDate: q.end_date,
-    dominantDashaLord: q.dominant_dasha_lord as PlanetKey,
-    dominantDashaLordName: q.dominant_dasha_lord_name,
-    theme: q.theme,
-    rating: q.rating,
-    opportunities: q.opportunities,
-    risks: q.risks,
-  };
-}
-
-function mapYearOutlook(y: YearOutlookApi): YearOutlook {
-  return {
-    year: y.year,
-    overallRating: y.overall_rating,
-    overallTheme: y.overall_theme,
-    varsheshwar: y.varsheshwar as PlanetKey,
-    varsheshwarName: y.varsheshwar_name,
-    munthaHouse: y.muntha_house,
-    quarters: y.quarters.map(mapQuarterOutlook),
-  };
-}
-
-export async function getYearAheadOutlook(lang: Language, year?: number): Promise<YearOutlook> {
-  const data = await apiRequest<YearOutlookApi>('/prediction/year-ahead', {
-    query: { language: lang, year },
-  });
-  return mapYearOutlook(data);
-}
-
-export async function getMultiYearOutlook(lang: Language, years: number): Promise<YearOutlook[]> {
-  const data = await apiRequest<{ years: YearOutlookApi[] }>('/prediction/multi-year', {
-    query: { language: lang, years },
-  });
-  return data.years.map(mapYearOutlook);
-}
-
-interface MarriageWindowApi {
-  start_date: string;
-  end_date: string;
-  mahadasha_lord: string;
-  mahadasha_lord_name: string;
-  antardasha_lord: string;
-  antardasha_lord_name: string;
-  score: number;
-  reason: string;
-  transit_corroborated: boolean;
-}
-
-interface MarriageTimingApi {
-  windows: MarriageWindowApi[];
-  manglik_note: string | null;
-  cached: boolean;
-}
-
-export async function getMarriageTimingPrediction(lang: Language): Promise<MarriageTimingPrediction> {
-  const data = await apiRequest<MarriageTimingApi>('/prediction/marriage-timing', {
-    query: { language: lang },
-  });
-  return {
-    windows: data.windows.map((w) => ({
-      startDate: w.start_date,
-      endDate: w.end_date,
-      mahadashaLord: w.mahadasha_lord as PlanetKey,
-      mahadashaLordName: w.mahadasha_lord_name,
-      antardashaLord: w.antardasha_lord as PlanetKey,
-      antardashaLordName: w.antardasha_lord_name,
-      score: w.score,
-      reason: w.reason,
-      transitCorroborated: w.transit_corroborated,
-    })),
-    manglikNote: data.manglik_note,
   };
 }
 

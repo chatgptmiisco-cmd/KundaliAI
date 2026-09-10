@@ -6,7 +6,6 @@ import { ALL_FEATURES_FREE } from '../config/env';
 import { useChatStore } from './useChatStore';
 import { useInsightsStore } from './useInsightsStore';
 import { useKundaliStore } from './useKundaliStore';
-import { usePredictionStore } from './usePredictionStore';
 import { AppLanguage, BirthData, PlanTier, PreferenceKey } from '../types/kundali';
 
 const FREE_TRIAL_CREDITS = 3;
@@ -81,7 +80,6 @@ export const useUserStore = create<UserState>()(
         set({ birthData });
         invalidateKundaliMemo();
         useKundaliStore.getState().invalidateAll();
-        usePredictionStore.getState().invalidateAll();
       },
 
       // Unlike setBirthData, this does NOT re-PUT to the server — it's for
@@ -137,7 +135,6 @@ export const useUserStore = create<UserState>()(
           isPremium: ALL_FEATURES_FREE,
         });
         useKundaliStore.getState().invalidateAll();
-        usePredictionStore.getState().invalidateAll();
         useInsightsStore.getState().reset();
         useChatStore.getState().reset();
       },
@@ -160,7 +157,6 @@ export const useUserStore = create<UserState>()(
           isPremium: ALL_FEATURES_FREE,
         });
         useKundaliStore.getState().invalidateAll();
-        usePredictionStore.getState().invalidateAll();
         useInsightsStore.getState().reset();
         useChatStore.getState().reset();
       },
