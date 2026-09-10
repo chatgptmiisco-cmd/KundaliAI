@@ -53,6 +53,32 @@ async def test_chat_astro_answers_in_hindi_when_requested(client, monkeypatch):
     assert body["reply"]
 
 
+async def test_chat_astro_specializes_by_rishi_id_and_scopes_history_per_rishi(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    # Bhrigu (career & resources) redirects a relationship question to Gargi
+    # instead of answering it himself.
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "Tell me about my marriage prospects", "rishi_id": "bhrigu", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "Gargi" in resp.json()["reply"]
+
+    # The same question asked of Gargi (relationships) gets a real answer,
+    # not a redirect.
+    resp2 = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "Tell me about my marriage prospects", "rishi_id": "gargi", "language": "en"},
+    )
+    assert resp2.status_code == 200, resp2.text
+    assert "Gargi" not in resp2.json()["reply"]
+    assert "Bhrigu" not in resp2.json()["reply"]
+
+
 async def test_chat_astro_requires_birth_profile(client):
     signup = await client.post(
         "/api/v1/auth/signup",

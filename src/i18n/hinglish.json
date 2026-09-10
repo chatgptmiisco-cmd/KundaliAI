@@ -172,6 +172,7 @@
     "chartsCardTitle": "Charts",
     "gunaMilanButton": "Guna Milan",
     "seePeriods": "Periods",
+    "predictionsCardTitle": "Predictions",
     "profileButtonLabel": "Profile aur birth details",
     "focusMeaningLabel": "Iska matlab",
     "focusAvoidLabel": "Aaj bachein",
@@ -250,6 +251,8 @@
   },
   "charts": {
     "screenTitle": "Birth Charts",
+    "northIndianStyle": "North Indian",
+    "southIndianStyle": "South Indian",
     "lagnaCellLabel": "Lagna house, colour mein dikhaya gaya",
     "keyPointsLabel": "Key points",
     "listenToThisChart": "Yeh chart suno",
@@ -259,7 +262,70 @@
     "yogasSubtitle": "Is kundali mein mile real placement-based combinations — har kundali mein nahi milte.",
     "noYogasFound": "Is kundali mein is starter list ka koi classical yoga ya dosha nahi mila.",
     "houseByHouseTitle": "Bhaav-dar-Bhaav Vivaran",
-    "houseByHouseSubtitle": "Har house mein kya hai, aur iska simple bhasha mein kya matlab hai."
+    "houseByHouseSubtitle": "Har house mein kya hai, aur iska simple bhasha mein kya matlab hai.",
+    "identity": {
+      "lagnaLabel": "Lagna (Rising Sign)",
+      "moonLabel": "Rashi (Moon Sign)",
+      "sunLabel": "Sun Sign",
+      "nakshatraLabel": "Janam Nakshatra",
+      "nakshatraPada": "Pada {{pada}}",
+      "nakshatraLord": "Swami: {{lord}}",
+      "nakshatraSymbol": "Symbol: {{symbol}}",
+      "elementModalityTitle": "Aapki Kundali Mein Tatva Aur Gun",
+      "elementModalitySubtitle": "Aapka Lagna aur 9 grah kaunsi rashiyon mein hain — yeh aapki kundali mein active tatvon ki jhalak hai, personality ka score nahi."
+    },
+    "purusharthas": {
+      "title": "Zindagi Ke Chaar Purushartha",
+      "subtitle": "Aapke houses jin cheezon ko shastra ke hisaab se represent karte hain, unke hisaab se group kiye gaye hain — explore karne ke liye tap karein.",
+      "dharmaTitle": "Aapka Life Purpose Aur Talents",
+      "dharmaSubtitle": "House 1, 5, 9 — pehchaan, creativity aur uchch shiksha.",
+      "arthaTitle": "Career, Paisa Aur Finance",
+      "arthaSubtitle": "House 2, 6, 10 — paisa, daily kaam aur career.",
+      "kamaTitle": "Pyaar, Rishte Aur Networks",
+      "kamaSubtitle": "House 3, 7, 11 — baatcheet, partnership aur community.",
+      "mokshaTitle": "Andar Ki Shanti Aur Spirituality",
+      "mokshaSubtitle": "House 4, 8, 12 — ghar, transformation aur chodna.",
+      "directMode": "Direct",
+      "deepDiveMode": "Deep Dive",
+      "deepDivePlanetLine": "{{planet}}: {{degree}} · {{nakshatra}} pada {{pada}} · {{dignity}}"
+    },
+    "tooltip": {
+      "exaltedTerm": "Uccha",
+      "exaltedDefinition": "Ek grah us rashi mein hai jahan woh sabse strong aur best kaam karta hai.",
+      "debilitatedTerm": "Neech",
+      "debilitatedDefinition": "Ek grah us rashi mein hai jahan woh sabse zyada weak rehta hai.",
+      "ownSignTerm": "Swa-Rashi",
+      "ownSignDefinition": "Ek grah apni hi rashi mein hai — comfortable aur confident.",
+      "neutralTerm": "Normal",
+      "neutralDefinition": "Ek grah ek normal rashi mein hai — na sabse best position mein, na sabse weak.",
+      "retrogradeTerm": "Vakri",
+      "retrogradeDefinition": "Ek grah jo Earth se peeche jaata hua dikhta hai — iske themes andar ki taraf mudte hain aur dobara samne aate hain.",
+      "combustTerm": "Ast (Combust)",
+      "combustDefinition": "Ek grah jo Sun ke bahut paas hai — iska apna effect dab jaata hai aur clearly dikhna mushkil ho jaata hai.",
+      "nakshatraTerm": "Nakshatra",
+      "nakshatraDefinition": "27 lunar nakshatron mein se ek jinse Moon guzarta hai — yeh rashi se bhi zyada detailed jaankari deta hai.",
+      "padaTerm": "Pada",
+      "padaDefinition": "Ek nakshatra ka chauthai hissa (1 se 4) jo uske meaning ko aur clear karta hai."
+    },
+    "timeEngine": {
+      "title": "Abhi Aisa Kyun Ho Raha Hai",
+      "dashaSectionTitle": "Aapka Current Life Chapter",
+      "mahadashaLabel": "Mahadasha: {{lord}}",
+      "antardashaLabel": "Antardasha: {{lord}}",
+      "elapsedLabel": "Is Mahadasha ka {{percent}}% part beet chuka hai",
+      "dominantLifeArea": "Abhi yeh Antardasha mainly aapke {{area}} ko shape kar rahi hai.",
+      "periodType": {
+        "growth": "Yeh ek genuinely strong period hai — real opportunities khul rahe hain, safe rehne ke bajaye inhe use karna better rahega.",
+        "consolidation": "Yeh period naya shuru karne ke bajaye jo pehle se hai use mazboot karne ka reward deta hai.",
+        "testing": "Yeh period normal se zyada demand karta hai — bade steps se zyada patience aur consistency matter karti hai.",
+        "grind": "Yeh genuinely ek tough period hai — progress expect se slow hogi, par jo abhi carefully banaya jayega wahi tikega.",
+        "instability": "Yeh period real unpredictability laata hai — purane patterns shayad na chalein, isliye fixed plan pe ade rehne ke bajaye flexible rahein."
+      },
+      "transitSectionTitle": "Aapke Moon Par Active Transits",
+      "sadeSatiActive": "Shani abhi aapki Moon rashi se transit kar raha hai — Sade Sati ({{phase}}).",
+      "jupiterActive": "Guru abhi aapki Moon rashi se transit kar raha hai — yeh shastra ke hisaab se favourable time hai.",
+      "noMajorTransit": "Abhi aapki Moon rashi par Shani ya Guru ka koi bada effect nahi hai — yeh genuinely ek calm period hai, na extra pressure hai na extra opportunity. Steady rehne ka accha time hai."
+    }
   },
   "gunaMilan": {
     "screenTitle": "Guna Milan",
@@ -291,6 +357,26 @@
     "listenToThisPeriod": "Yeh period suno",
     "lockedMessage": "Is period ki poori details Insight plan mein available hain.",
     "unlockButton": "Insight plan se unlock karein"
+  },
+  "predictions": {
+    "screenTitle": "Predictions",
+    "introText": "Aapke aane wale saal ke liye ek real, calculated outlook — aapki annual (Varshaphala) chart, chal rahi dasha, aur current planetary transits se banaya gaya. Yeh AI ka guess nahi hai.",
+    "viewMode": {
+      "this": "Is Saal",
+      "next": "Agla Saal",
+      "multi": "2-Saal View"
+    },
+    "varsheshwarLabel": "Is saal ka ruling planet (Varsheshwar): {{planet}}",
+    "opportunitiesLabel": "Opportunities",
+    "risksLabel": "Risks",
+    "errorTitle": "Yeh prediction load nahi ho payi",
+    "errorMessage": "Isko calculate karte waqt kuch galat ho gaya. Please phir try karein.",
+    "marriageTiming": {
+      "sectionTitle": "Marriage Timing",
+      "introText": "Marriage ya serious partnership ke liye probable favorable windows, real dasha aur transit signals se ranked — koi fake exact date nahi.",
+      "corroboratedBadge": "Transit-confirmed",
+      "noWindowsFound": "Is engine ne abhi jitni period search ki hai, usmein koi strongly favorable window nahi mila."
+    }
   },
   "profile": {
     "screenTitle": "Profile & Birth Details",
@@ -324,7 +410,8 @@
     "promptWeek": "Is hafte ka focus",
     "promptDasha": "Meri current Dasha",
     "promptCareer": "Career pattern",
-    "promptRemedy": "Ek practical upaay"
+    "promptRemedy": "Ek practical upaay",
+    "listenToReply": "Suniye"
   },
   "voiceChat": {
     "promoTitle": "Bolkar apne sawaal poochein",
@@ -392,7 +479,12 @@
     "screenTitle": "Aaj ki Jaankari",
     "loadingMessage": "Aapki aaj ki kundali padhi ja rahi hai…",
     "errorMessage": "Aaj ki jaankari load nahi ho payi. Please phir try karein.",
+    "todaysHoroscopeTitle": "Aaj Ka Rashifal",
+    "yourRashiLabel": "Aapki Rashi (Moon Sign): {{rashi}}",
     "todaysRatingLabel": "Aaj ki rating",
+    "todaysColorLabel": "Aaj ka rang",
+    "todaysNumberLabel": "Aaj ka number",
+    "todayGuidanceTitle": "Aaj Kaise Aage Badhein",
     "riskOpportunityTitle": "Risk aur Mauka",
     "keyRiskLabel": "Aaj ka main risk",
     "keyOpportunityLabel": "Aaj ka main mauka",

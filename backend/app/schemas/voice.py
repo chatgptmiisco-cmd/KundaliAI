@@ -31,6 +31,11 @@ class ExplainChartRequest(BaseModel):
 class ChatMessageIn(BaseModel):
     message: str
     language: Literal["en", "hi"] = "en"
+    # Which Rishi persona the user is talking to (see RISHIS in the frontend
+    # and _RISHI_SPECIALTY in templates.py) — optional and unvalidated
+    # against a fixed enum so an unrecognized/omitted id just falls back to
+    # the old persona-agnostic universal router rather than erroring.
+    rishi_id: str | None = None
 
 
 class ChatMessageOut(BaseModel):

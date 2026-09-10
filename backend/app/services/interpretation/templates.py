@@ -396,6 +396,217 @@ _DASHA_KEYWORDS = [
 ]
 _TODAY_KEYWORDS = ["today", "aaj", "आज", "daily", "din"]
 
+# Which Rishi persona owns which question category — the specialization the
+# user asked for ("Vasishtha only answers life direction, Parashara only
+# timing, Gargi only relationships") rather than all five personas answering
+# every topic identically. Categories are the 4 special ones (today/dasha/
+# dosha/yoga) plus every key in _TOPIC_HOUSE; every category is owned by
+# exactly one Rishi so a reverse lookup (_CATEGORY_RISHI) is unambiguous.
+_RISHI_SPECIALTY: dict[str, set[str]] = {
+    "vasishtha": {"education", "travel"},
+    "parashara": {"dasha", "today"},
+    "gargi": {"marriage", "family", "friends", "siblings", "children"},
+    "agastya": {"dosha", "yoga", "health"},
+    "bhrigu": {"career", "money"},
+}
+_CATEGORY_RISHI: dict[str, str] = {
+    category: rishi for rishi, categories in _RISHI_SPECIALTY.items() for category in categories
+}
+_RISHI_NAME_EN = {"vasishtha": "Vasishtha", "parashara": "Parashara", "gargi": "Gargi", "agastya": "Agastya", "bhrigu": "Bhrigu"}
+_RISHI_NAME_HI = {"vasishtha": "वशिष्ठ", "parashara": "पराशर", "gargi": "गार्गी", "agastya": "अगस्त्य", "bhrigu": "भृगु"}
+_RISHI_DOMAIN_EN = {
+    "vasishtha": "life direction and purpose",
+    "parashara": "timing — your dasha and transits",
+    "gargi": "relationships and family",
+    "agastya": "doshas, yogas, and inner balance",
+    "bhrigu": "career and money",
+}
+_RISHI_DOMAIN_HI = {
+    "vasishtha": "जीवन की दिशा और उद्देश्य",
+    "parashara": "समय — आपकी दशा और गोचर",
+    "gargi": "रिश्तों और परिवार",
+    "agastya": "दोष, योग और आंतरिक संतुलन",
+    "bhrigu": "करियर और धन",
+}
+# Each Rishi's own personality-flavoured lead-in, spoken before a real
+# chart-grounded answer (house_breakdown/dasha/dosha/yoga/today text) — a
+# rotating choice (see _pick_variant) so asking the same Rishi more than once
+# in a conversation doesn't read as the same canned line every time. This is
+# the "sounds like a real person, not a repeated template" fix: the
+# underlying FACT stays exactly the same (never invented), only how it's
+# introduced varies.
+_RISHI_LEAD_IN_EN: dict[str, list[str]] = {
+    "vasishtha": [
+        "Looking at your chart, here's what stands out:",
+        "This is what your placements tell me:",
+        "Let me walk you through what I see:",
+    ],
+    "parashara": [
+        "Based on the calculations in your chart:",
+        "Cross-referencing your placements and timing:",
+        "Here's what the numbers show:",
+    ],
+    "gargi": [
+        "Let's see what your chart says about this:",
+        "Here's what I notice, looking closely:",
+        "This is what comes up when I look at this part of your chart:",
+    ],
+    "agastya": [
+        "Sit with this for a moment — here's what I see:",
+        "Here's what your chart is pointing toward:",
+        "Let's look at this together:",
+    ],
+    "bhrigu": [
+        "Here's the direct read, no sugarcoating:",
+        "Straight from your chart:",
+        "Let's get into it:",
+    ],
+}
+_RISHI_LEAD_IN_HI: dict[str, list[str]] = {
+    "vasishtha": [
+        "आपकी कुंडली देखने पर यह सामने आता है:",
+        "आपकी स्थिति यही बताती है:",
+        "मैं आपको बताता हूं मुझे क्या दिख रहा है:",
+    ],
+    "parashara": [
+        "आपकी कुंडली की गणना के अनुसार:",
+        "आपकी स्थिति और समय को मिलाकर देखें तो:",
+        "आंकड़े यह दिखाते हैं:",
+    ],
+    "gargi": [
+        "देखते हैं आपकी कुंडली इस बारे में क्या कहती है:",
+        "ध्यान से देखने पर यह दिखता है:",
+        "आपकी कुंडली के इस हिस्से में यह सामने आता है:",
+    ],
+    "agastya": [
+        "एक पल रुककर देखें — मुझे यह दिख रहा है:",
+        "आपकी कुंडली इस ओर इशारा कर रही है:",
+        "आइए इसे साथ में देखते हैं:",
+    ],
+    "bhrigu": [
+        "सीधी बात, बिना लाग-लपेट के:",
+        "सीधे आपकी कुंडली से:",
+        "चलिए सीधे मुद्दे पर आते हैं:",
+    ],
+}
+
+_RISHI_FALLBACK_EN: dict[str, list[str]] = {
+    "vasishtha": [
+        "I speak to your life direction and purpose — ask me things like \"what's my life purpose\" or "
+        "\"what should I focus on in life\".",
+        "Life direction is where I can actually help — try asking about your purpose, your path, or what "
+        "you should be focusing on right now.",
+        "That's a bit outside what I read for you. I'm here for life direction and purpose — ask me about "
+        "your path or what you're meant to focus on.",
+    ],
+    "parashara": [
+        "I read timing — your dasha and transits. Ask me things like \"what dasha am I running\" or "
+        "\"what does today look like\".",
+        "Timing is my domain — your current dasha, today's transits, that sort of thing. Ask me about those.",
+        "I'd rather stay useful than guess — ask me about your dasha, your transits, or what today looks like.",
+    ],
+    "gargi": [
+        "I focus on relationships and family. Ask me things like \"how's my marriage looking\" or "
+        "\"what about my family life\".",
+        "Relationships and family are where I can really help — try asking about your marriage, or your "
+        "family life.",
+        "That's not quite my area, but I'd love to talk about your relationships or family — ask me about those.",
+    ],
+    "agastya": [
+        "I look at doshas, yogas, and inner balance. Ask me things like \"am I manglik\" or "
+        "\"do I have any yoga in my chart\".",
+        "Doshas, yogas, and inner balance are what I read — ask me if you're manglik, or what yogas your "
+        "chart carries.",
+        "I'm here for the deeper patterns — doshas, yogas, inner balance. Ask me about those.",
+    ],
+    "bhrigu": [
+        "I focus on career and money. Ask me things like \"how's my career looking\" or "
+        "\"what about my finances\".",
+        "Career and money are what I actually read for you — ask me how your career's looking, or about your finances.",
+        "That's outside my read, but ask me about your career or money and I'll go deep.",
+    ],
+}
+_RISHI_FALLBACK_HI: dict[str, list[str]] = {
+    "vasishtha": [
+        "मैं आपकी जीवन दिशा और उद्देश्य पर बात करता हूं — मुझसे पूछें जैसे \"मेरे जीवन का उद्देश्य क्या है\" या "
+        "\"मुझे किस पर ध्यान देना चाहिए\"।",
+        "जीवन दिशा वही है जहां मैं वाकई मदद कर सकता हूं — अपने उद्देश्य, अपने रास्ते के बारे में पूछें।",
+        "यह मेरे विषय से थोड़ा बाहर है। मैं जीवन दिशा और उद्देश्य के लिए हूं — अपने रास्ते के बारे में पूछें।",
+    ],
+    "parashara": [
+        "मैं समय देखता हूं — आपकी दशा और गोचर। मुझसे पूछें जैसे \"मेरी अभी कौन सी दशा चल रही है\" या "
+        "\"आज का दिन कैसा है\"।",
+        "समय मेरा विषय है — आपकी मौजूदा दशा, आज के गोचर। इनके बारे में पूछें।",
+        "अंदाज़ा लगाने से बेहतर है काम की बात — अपनी दशा या आज के दिन के बारे में पूछें।",
+    ],
+    "gargi": [
+        "मैं रिश्तों और परिवार पर ध्यान देती हूं। मुझसे पूछें जैसे \"मेरी शादी कैसी रहेगी\" या "
+        "\"मेरे परिवार के बारे में क्या\"।",
+        "रिश्ते और परिवार वही हैं जहां मैं वाकई मदद कर सकती हूं — अपनी शादी या परिवार के बारे में पूछें।",
+        "यह मेरा विषय नहीं, पर मुझे आपके रिश्तों या परिवार पर बात करना अच्छा लगेगा — इनके बारे में पूछें।",
+    ],
+    "agastya": [
+        "मैं दोष, योग और आंतरिक संतुलन देखता हूं। मुझसे पूछें जैसे \"क्या मैं मंगलिक हूं\" या "
+        "\"मेरी कुंडली में कोई योग है क्या\"।",
+        "दोष, योग और आंतरिक संतुलन वही है जो मैं पढ़ता हूं — पूछें कि आप मंगलिक हैं या नहीं, या कोई योग है क्या।",
+        "मैं गहरे पैटर्न के लिए हूं — दोष, योग, आंतरिक संतुलन। इनके बारे में पूछें।",
+    ],
+    "bhrigu": [
+        "मैं करियर और धन पर ध्यान देता हूं। मुझसे पूछें जैसे \"मेरा करियर कैसा रहेगा\" या "
+        "\"मेरी आर्थिक स्थिति के बारे में क्या\"।",
+        "करियर और धन ही असल में मेरा विषय है — अपने करियर या आर्थिक स्थिति के बारे में पूछें।",
+        "यह मेरे विषय से बाहर है, पर करियर या पैसों के बारे में पूछें, मैं गहराई से बताऊंगा।",
+    ],
+}
+
+_RISHI_POINTER_EN = [
+    "For more detail on this, chat with {owner} — it's their specialty.",
+    "{owner} goes much deeper on this — worth asking them too.",
+    "If you want the full picture here, {owner} is who to ask.",
+]
+_RISHI_POINTER_HI = [
+    "इस पर और जानने के लिए {owner} से बात करें — यह उनकी विशेषज्ञता का विषय है।",
+    "{owner} इस पर कहीं ज़्यादा गहराई से बता सकते हैं — उनसे भी पूछें।",
+    "इसकी पूरी तस्वीर के लिए {owner} से पूछना सही रहेगा।",
+]
+
+
+def _pick_variant(variants: list[str], history: list[dict[str, str]]) -> str:
+    """Deterministic (no LLM/randomness) rotation through a set of hand-
+    written phrasings, keyed off how many messages exist in this
+    conversation so far — so asking the same Rishi twice in one chat gets a
+    different phrasing each time, without ever inventing new content."""
+    return variants[len(history) % len(variants)]
+
+
+def _rishi_pointer(hi: bool, category: str, history: list[dict[str, str]]) -> str:
+    """A short suffix pointing to the Rishi who actually specializes in
+    `category`, appended AFTER a real answer — not a refusal on its own. A
+    user asking Vasishtha about their marriage still gets a real answer from
+    the chart; they're just also told Gargi goes deeper on it."""
+    owner_id = _CATEGORY_RISHI[category]
+    owner_name = _RISHI_NAME_HI[owner_id] if hi else _RISHI_NAME_EN[owner_id]
+    template = _pick_variant(_RISHI_POINTER_HI if hi else _RISHI_POINTER_EN, history)
+    return template.format(owner=owner_name)
+
+
+def _rishi_refusal(hi: bool, asking_rishi_id: str, category: str) -> str:
+    """Used only when no real answer exists to give at all (e.g. a category
+    the chart has no data for) — states the asking Rishi's own domain and
+    points to the one who actually owns this topic."""
+    owner_id = _CATEGORY_RISHI[category]
+    owner_name = _RISHI_NAME_HI[owner_id] if hi else _RISHI_NAME_EN[owner_id]
+    own_domain = _RISHI_DOMAIN_HI[asking_rishi_id] if hi else _RISHI_DOMAIN_EN[asking_rishi_id]
+    if hi:
+        return (
+            f"यह सवाल {owner_name} के विषय क्षेत्र में आता है, मेरे नहीं — मैं {own_domain} पर बात करता/करती हूं। "
+            f"कृपया यह सवाल {owner_name} से पूछें, वे इसमें गहराई से बता सकेंगे।"
+        )
+    return (
+        f"That's really {owner_name}'s domain, not mine — I focus on {own_domain}. Go ask {owner_name} about "
+        "that, they'll go deep on it."
+    )
+
 
 class TemplateInterpreter(Interpreter):
     async def daily_horoscope(self, context: dict[str, Any], language: Language, mode: Mode) -> dict[str, Any]:
@@ -722,7 +933,14 @@ class TemplateInterpreter(Interpreter):
         message against a small set of real-life topics/keywords and answers
         from facts already computed elsewhere in the app (house_breakdown,
         yogas/doshas, current dasha, today's reading) — never invents a
-        fact the chart doesn't actually support."""
+        fact the chart doesn't actually support.
+
+        When context carries a rishi_id (see _RISHI_SPECIALTY), each Rishi
+        only answers questions in their own specialty and redirects anything
+        else to whichever Rishi actually owns it — Vasishtha won't answer a
+        marriage question, Gargi won't answer a career one, etc. With no
+        rishi_id (or an unrecognized one) every category is answered
+        directly, matching the original persona-agnostic behaviour."""
         hi = language == "hi"
         lagna = context.get("lagna_sign", "")
         house_breakdown: dict[int, str] = context.get("house_breakdown", {})
@@ -730,58 +948,96 @@ class TemplateInterpreter(Interpreter):
         daily: dict[str, Any] = context.get("daily_reading", {})
         mahadasha_lord = context.get("mahadasha_lord")
         antardasha_lord = context.get("antardasha_lord")
+        rishi_id = context.get("rishi_id")
 
         message = history[-1]["content"].lower() if history else ""
 
         def asked_about(keywords: list[str]) -> bool:
             return any(k in message for k in keywords)
 
+        category: str | None = None
         if asked_about(_TODAY_KEYWORDS):
+            category = "today"
+        elif asked_about(_DASHA_KEYWORDS):
+            category = "dasha"
+        elif asked_about(_DOSHA_KEYWORDS):
+            category = "dosha"
+        elif asked_about(_YOGA_KEYWORDS):
+            category = "yoga"
+        else:
+            for topic in _TOPIC_HOUSE:
+                if asked_about(_TOPIC_KEYWORDS[topic]):
+                    category = topic
+                    break
+
+        out_of_scope = bool(category) and rishi_id in _RISHI_SPECIALTY and category not in _RISHI_SPECIALTY[rishi_id]
+
+        answer: str | None = None
+        if category == "today":
             parts = [daily.get("rating_reason"), daily.get("brutal_truth")]
             if daily.get("festival"):
                 parts.append(f"आज {daily['festival']} है।" if hi else f"Today is {daily['festival']}.")
-            reply = " ".join(p for p in parts if p)
-            if reply:
-                return reply
+            answer = " ".join(p for p in parts if p) or None
 
-        if asked_about(_DASHA_KEYWORDS) and mahadasha_lord and antardasha_lord:
-            if hi:
-                return (
-                    f"फिलहाल आपकी {mahadasha_lord} महादशा चल रही है, जिसके भीतर {antardasha_lord} की अंतर्दशा चल रही "
-                    "है — यही संयोजन इस समय आपके अनुभवों की मुख्य दिशा तय कर रहा है।"
-                )
-            return (
-                f"You're currently running your {mahadasha_lord} Mahadasha, with {antardasha_lord} Antardasha "
+        elif category == "dasha" and mahadasha_lord and antardasha_lord:
+            answer = (
+                f"फिलहाल आपकी {mahadasha_lord} महादशा चल रही है, जिसके भीतर {antardasha_lord} की अंतर्दशा चल रही "
+                "है — यही संयोजन इस समय आपके अनुभवों की मुख्य दिशा तय कर रहा है।"
+                if hi
+                else f"You're currently running your {mahadasha_lord} Mahadasha, with {antardasha_lord} Antardasha "
                 "inside it — that combination is what's actually shaping this stretch of your life."
             )
 
-        if asked_about(_DOSHA_KEYWORDS):
+        elif category == "dosha":
             findings = [y for y in yogas if y["key"] in _DOSHA_KEYS]
             if findings:
-                return " ".join(f"{y['name']}: {y['description']}" for y in findings)
-            return (
-                "आपकी कुंडली में मंगलिक, कालसर्प या केमद्रुम जैसा कोई प्रमुख दोष नहीं मिला।"
-                if hi
-                else "I didn't find Manglik, Kaal Sarp, or Kemadruma dosha in your chart."
-            )
+                answer = " ".join(f"{y['name']}: {y['description']}" for y in findings)
+            else:
+                answer = (
+                    "आपकी कुंडली में मंगलिक, कालसर्प या केमद्रुम जैसा कोई प्रमुख दोष नहीं मिला।"
+                    if hi
+                    else "I didn't find Manglik, Kaal Sarp, or Kemadruma dosha in your chart."
+                )
 
-        if asked_about(_YOGA_KEYWORDS):
+        elif category == "yoga":
             findings = [y for y in yogas if y["key"] not in _DOSHA_KEYS]
             if findings:
-                return " ".join(f"{y['name']}: {y['description']}" for y in findings)
-            return (
-                "आपकी कुंडली में कोई विशेष शास्त्रीय योग नहीं मिला — यह कमज़ोर कुंडली का संकेत नहीं है, कई मज़बूत "
-                "कुंडलियों में भी कोई नामी योग नहीं होता।"
-                if hi
-                else "I didn't detect a named classical yoga in your chart — that's not a sign of a weak chart, "
-                "plenty of strong charts don't carry one either."
-            )
+                answer = " ".join(f"{y['name']}: {y['description']}" for y in findings)
+            else:
+                answer = (
+                    "आपकी कुंडली में कोई विशेष शास्त्रीय योग नहीं मिला — यह कमज़ोर कुंडली का संकेत नहीं है, कई मज़बूत "
+                    "कुंडलियों में भी कोई नामी योग नहीं होता।"
+                    if hi
+                    else "I didn't detect a named classical yoga in your chart — that's not a sign of a weak chart, "
+                    "plenty of strong charts don't carry one either."
+                )
 
-        for topic, house in _TOPIC_HOUSE.items():
-            if asked_about(_TOPIC_KEYWORDS[topic]):
-                explanation = house_breakdown.get(house)
-                if explanation:
-                    return explanation
+        elif category in _TOPIC_HOUSE:
+            answer = house_breakdown.get(_TOPIC_HOUSE[category])
+
+        if answer:
+            # In-character lead-in before the real fact — a rotating choice
+            # per Rishi (see _pick_variant) so the same question asked twice
+            # doesn't come back as the identical line every time. Only
+            # applied when a rishi_id is known; the persona-agnostic caller
+            # (no rishi_id) gets the bare answer, unchanged.
+            if rishi_id in _RISHI_LEAD_IN_EN:
+                lead_in = _pick_variant(_RISHI_LEAD_IN_HI[rishi_id] if hi else _RISHI_LEAD_IN_EN[rishi_id], history)
+                answer = f"{lead_in} {answer}"
+            # A real, chart-grounded answer either way — out-of-specialty
+            # questions still get the actual answer, just with a pointer to
+            # whoever specializes in it for more depth, instead of a bare
+            # refusal that leaves the user with nothing.
+            return f"{answer} {_rishi_pointer(hi, category, history)}" if out_of_scope and category else answer
+
+        if out_of_scope and category:
+            # No real data exists for this category at all (e.g. no current
+            # dasha on file) — nothing to answer with, so this is the one
+            # case that's a pure redirect.
+            return _rishi_refusal(hi, rishi_id, category)
+
+        if rishi_id in _RISHI_FALLBACK_EN:
+            return _pick_variant(_RISHI_FALLBACK_HI[rishi_id] if hi else _RISHI_FALLBACK_EN[rishi_id], history)
 
         if hi:
             return (

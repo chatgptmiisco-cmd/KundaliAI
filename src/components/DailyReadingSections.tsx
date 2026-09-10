@@ -29,15 +29,8 @@ export default function DailyReadingSections({ reading }: { reading: DailyReadin
   return (
     <>
       <Card>
-        <View style={styles.ratingHeader}>
-          <View>
-            <Text style={styles.ratingNumber}>{reading.rating}/10</Text>
-            <Text style={styles.ratingLabel}>{t('horoscope.todaysRatingLabel')}</Text>
-          </View>
-          <View style={[styles.colorChip, { backgroundColor: colors.primaryLight }]}>
-            <Text style={styles.colorChipText}>{reading.todayColor}</Text>
-          </View>
-        </View>
+        <Text style={styles.ratingNumber}>{reading.rating}/10</Text>
+        <Text style={styles.ratingLabel}>{t('horoscope.todaysRatingLabel')}</Text>
         <Text style={styles.reasonText}>{reading.ratingReason}</Text>
         <View style={styles.tagsRow}>
           <View style={styles.tag}>
@@ -50,6 +43,25 @@ export default function DailyReadingSections({ reading }: { reading: DailyReadin
             <Text style={styles.tagText}>{tithiLabel}</Text>
           </View>
         </View>
+        <View style={styles.luckyRow}>
+          <View style={styles.luckyItem}>
+            <Text style={styles.luckyLabel}>{t('horoscope.todaysColorLabel')}</Text>
+            <View style={[styles.colorChip, { backgroundColor: colors.primaryLight }]}>
+              <Text style={styles.colorChipText}>{reading.todayColor}</Text>
+            </View>
+          </View>
+          <View style={styles.luckyItem}>
+            <Text style={styles.luckyLabel}>{t('horoscope.todaysNumberLabel')}</Text>
+            <View style={[styles.colorChip, { backgroundColor: colors.accentLight }]}>
+              <Text style={styles.colorChipText}>{reading.luckyNumber}</Text>
+            </View>
+          </View>
+        </View>
+      </Card>
+
+      <Card>
+        <SectionHeader title={t('horoscope.todayGuidanceTitle')} />
+        <BulletList items={reading.todayGuidance} />
       </Card>
 
       <Card style={styles.brutalTruthCard}>
@@ -113,12 +125,6 @@ export default function DailyReadingSections({ reading }: { reading: DailyReadin
 }
 
 const styles = StyleSheet.create({
-  ratingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-  },
   ratingNumber: {
     ...typography.display,
     color: colors.primary,
@@ -126,6 +132,20 @@ const styles = StyleSheet.create({
   ratingLabel: {
     ...typography.caption,
     color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  luckyRow: {
+    flexDirection: 'row',
+    gap: spacing.lg,
+    marginTop: spacing.md,
+  },
+  luckyItem: {
+    alignItems: 'flex-start',
+  },
+  luckyLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
   },
   colorChip: {
     borderRadius: radius.pill,

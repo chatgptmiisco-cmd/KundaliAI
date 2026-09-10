@@ -3,7 +3,9 @@ is hand-constructed (no ephemeris/DB calls), so every expected value below is
 derived by hand from the same classical rules the function implements."""
 from datetime import date, datetime, timezone
 
+from app.astro.constants import PLANET_NUMBER
 from app.astro.natal_insights import compute_natal_insights
+from app.astro.panchang import weekday_lord
 from app.astro.transits import TransitSnapshot
 from app.services.daily_reading_service import _build_reading
 from app.services.interpretation.templates import _FOCUS_BY_HOUSE_EN, _LIFE_FRAMING_EN, _PERIOD_CONTENT_EN
@@ -101,6 +103,33 @@ def test_tithi_tag_and_daily_varying_risk_opportunity():
     assert reading["key_opportunity"] == opportunities[9 % len(opportunities)]
 
 
+def test_lucky_number_is_the_real_weekday_lords_classical_number():
+    reading = _build_reading(**_base_kwargs(transit_snapshot=_fake_snapshot(4, saturn_sign_index=4)))
+    expected_lord = weekday_lord(date(2026, 1, 1))
+    assert reading["lucky_number"] == PLANET_NUMBER[expected_lord]
+
+
+def test_today_guidance_gives_calm_advice_on_a_conflict_prone_dusthana_transit():
+    # Moon transiting house 8 (a dusthana house) forces energy_mode to
+    # "conflict_prone" regardless of the antardasha lord.
+    reading = _build_reading(**_base_kwargs(transit_snapshot=_fake_snapshot(8, saturn_sign_index=4)))
+    assert reading["energy_mode"] == "conflict_prone"
+    assert len(reading["today_guidance"]) >= 2
+    assert "calm" in reading["today_guidance"][0].lower()
+
+
+def test_today_guidance_reflects_the_real_tithi_energy_tag():
+    avoid_starts_reading = _build_reading(
+        **_base_kwargs(
+            transit_snapshot=_fake_snapshot(4, saturn_sign_index=4),
+            sun_longitude_today=10.0,
+            moon_longitude_today=50.0,  # diff=40 -> tithi index 4 (Rikta group -> avoid_starts)
+        )
+    )
+    assert avoid_starts_reading["tithi_tag"] == "avoid_starts"
+    assert "avoid starting" in avoid_starts_reading["today_guidance"][1].lower()
+
+
 def test_dosha_summary_reflects_real_placements():
     reading = _build_reading(**_base_kwargs(transit_snapshot=_fake_snapshot(4, saturn_sign_index=4)))
     doshas = {d["key"]: d for d in reading["doshas"]}
@@ -113,6 +142,17 @@ def test_dosha_summary_reflects_real_placements():
     assert doshas["sade_sati"]["is_present"] is True
     assert "setting" in doshas["sade_sati"]["label"]
     assert doshas["kemadruma"]["is_present"] is False
+
+
+def test_jupiter_transiting_moon_sign_flag_reflects_the_real_transit():
+    reading = _build_reading(**_base_kwargs(transit_snapshot=_fake_snapshot(4, saturn_sign_index=4)))
+    # Jupiter sits house 2 from Moon in this fixture, not house 1.
+    assert reading["jupiter_transiting_moon_sign"] is False
+
+    snapshot = _fake_snapshot(4, saturn_sign_index=4)
+    snapshot.planet_house_from_moon["Ju"] = 1  # frozen dataclass, mutable dict field — legal
+    conjunct = _build_reading(**_base_kwargs(transit_snapshot=snapshot))
+    assert conjunct["jupiter_transiting_moon_sign"] is True
 
 
 def test_life_growth_task_uses_ninth_house_lord():

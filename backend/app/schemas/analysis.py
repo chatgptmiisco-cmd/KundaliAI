@@ -14,8 +14,16 @@ class PeriodAnalysisRequest(BaseModel):
     def check_range(self) -> "PeriodAnalysisRequest":
         if self.end_date < self.start_date:
             raise ValueError("end_date must not be before start_date")
-        if (self.end_date - self.start_date).days > 366:
-            raise ValueError("period must not exceed one year")
+        # The frontend's only caller of this endpoint (PeriodAnalysisScreen)
+        # analyzes a full Mahadasha at a time, not just a short sub-period —
+        # and a single Vimshottari Mahadasha can run up to 20 years (Venus).
+        # The computation itself has no dependency on a short range (it just
+        # picks the range's midpoint for a representative transit snapshot),
+        # so the real constraint is "one Vimshottari Mahadasha", not "one
+        # year" — a much larger, generous cap that still rejects a request
+        # spanning multiple lifetimes' worth of dashas by mistake.
+        if (self.end_date - self.start_date).days > 8000:
+            raise ValueError("period must not exceed roughly one Mahadasha (~22 years)")
         return self
 
 

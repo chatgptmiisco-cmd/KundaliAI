@@ -58,6 +58,38 @@ async def test_profile_round_trip(client):
     assert data["subscription_tier"] == "free"
 
 
+async def test_preferences_persist_server_side_and_survive_a_new_session(client):
+    # Preferences used to live only in the client's local AsyncStorage — a
+    # different device/browser signing into the same account saw an empty
+    # list (and so no swipeable focus tabs at all), the same class of bug
+    # birth data had before it was fixed to hydrate from the server.
+    headers = await _signup_and_set_birth_data(client)
+
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    assert profile.json()["preferences"] == []
+
+    resp = await client.put(
+        "/api/v1/user/profile/preferences", headers=headers,
+        json={"preferences": ["family", "career"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["preferences"] == ["family", "career"]
+
+    # A fresh GET (simulating a different device/browser reading the same
+    # account) sees the same preferences, not an empty list.
+    profile_again = await client.get("/api/v1/user/profile", headers=headers)
+    assert profile_again.json()["preferences"] == ["family", "career"]
+
+
+async def test_preferences_reject_an_invalid_key(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.put(
+        "/api/v1/user/profile/preferences", headers=headers,
+        json={"preferences": ["family", "money"]},  # "money" was renamed away long ago
+    )
+    assert resp.status_code == 422
+
+
 async def test_d1_chart_is_free_and_deterministic(client):
     headers = await _signup_and_set_birth_data(client)
     r1 = await client.get("/api/v1/chart/d1", headers=headers)
@@ -110,6 +142,15 @@ async def test_d1_chart_includes_house_breakdown_and_yoga_detection(client):
     assert d1.status_code == 200, d1.text
     body = d1.json()
 
+    # Combustion: a real Sun-relative-longitude fact, computed for every
+    # planet but always False for the Sun itself and for Rahu/Ketu (no
+    # classical combustion orb applies to them).
+    for p in body["planets"]:
+        if p["planet"] in ("Su", "Ra", "Ke"):
+            assert p["combust"] is False
+        else:
+            assert isinstance(p["combust"], bool)
+
     assert len(body["house_breakdown"]) == 12
     houses_with_planets = 0
     for house in body["house_breakdown"]:
@@ -130,12 +171,16 @@ async def test_d1_chart_includes_house_breakdown_and_yoga_detection(client):
         assert yoga["name_en"] and yoga["name_hi"]
         assert yoga["description_en"] and yoga["description_hi"]
 
-    # D9/D10 skip yoga detection entirely (a classical D1-only reading).
+    # D9/D10 also run yoga/dosha detection now (against that divisional
+    # chart's own placements) — any findings must still be real, valid keys,
+    # not necessarily the same ones D1 found.
     await client.post(
         "/api/v1/subscription/checkout", headers=headers, json={"tier": "insight", "billing_cycle": "monthly"}
     )
     d9 = await client.get("/api/v1/chart/d9", headers=headers)
-    assert d9.json()["yogas"] == []
+    for yoga in d9.json()["yogas"]:
+        assert yoga["key"] in valid_yoga_keys
+        assert yoga["name_en"] and yoga["name_hi"]
     assert len(d9.json()["house_breakdown"]) == 12
 
 
@@ -201,6 +246,31 @@ async def test_period_analysis_free_quota_enforced(client):
     assert over_limit.status_code == 402
 
 
+async def test_period_analysis_accepts_a_real_mahadasha_length_range(client):
+    # PeriodAnalysisScreen's only caller of this endpoint analyzes a whole
+    # Mahadasha at a time, not a short sub-period — a real Vimshottari
+    # Mahadasha can run up to 20 years (Venus). This range (~19 years,
+    # matching a real Saturn Mahadasha) previously 422'd against an old
+    # "must not exceed one year" cap that had no computational basis — this
+    # is the regression guard for that bug.
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.post(
+        "/api/v1/analysis/period", headers=headers,
+        json={"start_date": "2024-02-17", "end_date": "2043-02-16", "language": "en", "mode": "simple"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert 1 <= resp.json()["rating"] <= 10
+
+
+async def test_period_analysis_still_rejects_an_unreasonably_long_range(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.post(
+        "/api/v1/analysis/period", headers=headers,
+        json={"start_date": "2000-01-01", "end_date": "2100-01-01", "language": "en", "mode": "simple"},
+    )
+    assert resp.status_code == 422
+
+
 async def test_repeat_period_analysis_is_cached_and_does_not_cost_quota(client):
     headers = await _signup_and_set_birth_data(client)
     body = {"start_date": "2025-01-01", "end_date": "2025-01-28", "language": "en", "mode": "simple"}
@@ -211,6 +281,87 @@ async def test_repeat_period_analysis_is_cached_and_does_not_cost_quota(client):
     second = await client.post("/api/v1/analysis/period", headers=headers, json=body)
     assert second.json()["cached"] is True
     assert second.json()["remaining_free_analyses_this_month"] == 2  # unchanged, no new usage
+
+
+async def test_year_ahead_prediction_returns_a_real_computed_outlook(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get("/api/v1/prediction/year-ahead", headers=headers, params={"language": "en"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert 1 <= data["overall_rating"] <= 10
+    assert data["overall_theme"]
+    assert data["varsheshwar"] in ("Su", "Mo", "Ma", "Me", "Ju", "Ve", "Sa")
+    assert len(data["quarters"]) == 4
+    for quarter in data["quarters"]:
+        assert 1 <= quarter["rating"] <= 10
+        assert quarter["theme"]
+
+
+async def test_year_ahead_prediction_is_cached_on_repeat_call(client):
+    headers = await _signup_and_set_birth_data(client)
+    first = await client.get("/api/v1/prediction/year-ahead", headers=headers, params={"language": "en"})
+    assert first.json()["cached"] is False
+    second = await client.get("/api/v1/prediction/year-ahead", headers=headers, params={"language": "en"})
+    assert second.json()["cached"] is True
+    assert second.json()["quarters"] == first.json()["quarters"]
+
+
+async def test_year_ahead_prediction_differs_between_two_real_charts(client):
+    headers_a = await _signup_and_set_birth_data(client)
+    a = await client.get("/api/v1/prediction/year-ahead", headers=headers_a, params={"language": "en"})
+
+    signup_b = await client.post(
+        "/api/v1/auth/signup",
+        json={"email": "test2@example.com", "password": "supersecret1", "name": "Test User 2", "preferred_language": "en"},
+    )
+    headers_b = {"Authorization": f"Bearer {signup_b.json()['access_token']}"}
+    await client.put(
+        "/api/v1/user/profile/birth-data", headers=headers_b,
+        json={
+            "name": "Test User 2", "date_of_birth": "1985-06-10", "time_of_birth": "14:15",
+            "time_uncertain": False, "place_of_birth": "Mumbai, India",
+            "latitude": 19.07, "longitude": 72.87, "timezone_offset_hours": 5.5,
+        },
+    )
+    b = await client.get("/api/v1/prediction/year-ahead", headers=headers_b, params={"language": "en"})
+
+    assert a.json()["varsheshwar"] != b.json()["varsheshwar"] or a.json()["muntha_house"] != b.json()["muntha_house"]
+
+
+async def test_multi_year_outlook_returns_requested_number_of_years(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get("/api/v1/prediction/multi-year", headers=headers, params={"years": 2, "language": "en"})
+    assert resp.status_code == 200, resp.text
+    years = resp.json()["years"]
+    assert len(years) == 2
+    assert years[1]["year"] == years[0]["year"] + 1
+
+
+async def test_multi_year_outlook_caps_at_the_maximum_allowed_years(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get("/api/v1/prediction/multi-year", headers=headers, params={"years": 3, "language": "en"})
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["years"]) == 3
+
+
+async def test_marriage_timing_returns_ranked_windows(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get("/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    for window in data["windows"]:
+        assert window["score"] > 0
+        assert window["reason"]
+    scores = [w["score"] for w in data["windows"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+async def test_marriage_timing_is_cached_on_repeat_call(client):
+    headers = await _signup_and_set_birth_data(client)
+    first = await client.get("/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"})
+    assert first.json()["cached"] is False
+    second = await client.get("/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"})
+    assert second.json()["cached"] is True
 
 
 async def test_chat_astro_requires_strategy_tier(client):
@@ -449,6 +600,7 @@ async def test_daily_reading_returns_every_field_and_varies_by_chart(client):
         "core_strength", "core_weakness", "stress_pattern", "decision_style", "moon_nakshatra",
         "moon_mood_tag", "transit_highlight", "before_you_leave_home", "life_growth_task",
         "tithi_tag", "tithi_name", "paksha", "lunar_month", "today_color", "doshas",
+        "lucky_number", "today_guidance",
     ]
     for field in required_fields:
         assert body_a[field] not in (None, "", []), f"{field} was empty for chart A"
@@ -463,6 +615,9 @@ async def test_daily_reading_returns_every_field_and_varies_by_chart(client):
     # presence/type here rather than in the strict non-empty loop above.
     assert "festival" in body_a
     assert body_a["festival"] is None or isinstance(body_a["festival"], str)
+    # "jupiter_transiting_moon_sign" is a real boolean that can legitimately
+    # be False, so it's also checked for presence/type rather than truthiness.
+    assert isinstance(body_a["jupiter_transiting_moon_sign"], bool)
 
     # Two different birth charts must not collapse to the same natal facts —
     # the same regression guard as the earlier "static content" fixes.

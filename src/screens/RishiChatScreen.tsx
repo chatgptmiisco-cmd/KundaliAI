@@ -67,7 +67,7 @@ export default function RishiChatScreen() {
     if (hasStrategyAccess) {
       setPhase('thinking');
       try {
-        reply = await postChatMessage(text, contentLanguage);
+        reply = await postChatMessage(text, contentLanguage, rishi.id);
       } catch {
         const assistantIndex = messages.filter((m) => m.role === 'assistant').length;
         reply = getRishiReply(rishi.tone, assistantIndex, contentLanguage);
@@ -79,7 +79,8 @@ export default function RishiChatScreen() {
 
     addMessage(rishi.id, { id: `a-${Date.now()}`, role: 'assistant', text: reply, createdAt: Date.now() });
     setPhase('idle');
-    speak({ title: rishi.name, text: reply, language: contentLanguage });
+    // No auto-play here — replies stay text-only until the user taps the
+    // listen icon on a specific message (see the message list below).
   };
 
   const handleMicPress = () => {
@@ -127,6 +128,18 @@ export default function RishiChatScreen() {
             style={[styles.bubble, m.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}
           >
             <Text style={[styles.bubbleText, m.role === 'user' && styles.bubbleTextUser]}>{m.text}</Text>
+            {m.role === 'assistant' && (
+              <Pressable
+                onPress={() => speak({ title: rishi.name, text: m.text, language: contentLanguage })}
+                accessibilityRole="button"
+                accessibilityLabel={t('rishi.listenToReply')}
+                style={styles.listenButton}
+                hitSlop={8}
+              >
+                <Ionicons name="volume-medium-outline" size={18} color={colors.primary} />
+                <Text style={styles.listenButtonText}>{t('rishi.listenToReply')}</Text>
+              </Pressable>
+            )}
           </View>
         ))}
       </ScrollView>
@@ -261,6 +274,17 @@ const styles = StyleSheet.create({
   },
   bubbleTextUser: {
     color: colors.textInverse,
+  },
+  listenButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: spacing.xs,
+    alignSelf: 'flex-start',
+  },
+  listenButtonText: {
+    ...typography.caption,
+    color: colors.primary,
   },
   promptsRow: {
     flexGrow: 0,

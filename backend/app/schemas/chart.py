@@ -20,6 +20,12 @@ class PlanetPlacement(BaseModel):
     nakshatra_name_hi: str | None = None
     nakshatra_pada: int | None = None
     dignity: str | None = None  # exalted | debilitated | own_sign | neutral (7 classical planets only)
+    # True when within classical combustion orb of the Sun — always False for
+    # the Sun itself and for Rahu/Ketu (no combustion orb applies to them),
+    # null only when longitude is unavailable (pre-existing cached rows).
+    # A real-longitude fact, same convention as nakshatra/pada above:
+    # unaffected by which divisional chart is shown.
+    combust: bool | None = None
 
 
 class HouseBreakdown(BaseModel):

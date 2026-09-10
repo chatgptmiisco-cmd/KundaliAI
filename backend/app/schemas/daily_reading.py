@@ -45,5 +45,8 @@ class DailyReadingResponse(BaseModel):
     today_color: str
 
     doshas: list[DoshaSummaryItem]
+    jupiter_transiting_moon_sign: bool
+    lucky_number: int
+    today_guidance: list[str]
 
     cached: bool

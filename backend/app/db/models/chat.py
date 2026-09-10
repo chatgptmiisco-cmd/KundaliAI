@@ -19,4 +19,9 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(16))  # user | assistant
     content: Mapped[str] = mapped_column(Text)
     language: Mapped[str] = mapped_column(String(8))
+    # Which Rishi persona this message belongs to (vasishtha/parashara/gargi/
+    # agastya/bhrigu) — nullable because rows from before this column existed
+    # have no persona recorded; those just don't surface in any one Rishi's
+    # history rather than bleeding into all of them.
+    rishi_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

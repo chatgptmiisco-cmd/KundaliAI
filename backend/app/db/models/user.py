@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import JSON, Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -25,6 +25,13 @@ class User(Base):
     oauth_subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     preferred_language: Mapped[str] = mapped_column(String(16), default="en", server_default="en")
+    # Which Home focus areas (family/health/career/marriageRelationships/
+    # friends) this user picked during onboarding — stored server-side (not
+    # just in the client's local AsyncStorage) so a different device/browser
+    # signing into the same account sees the same swipeable focus tabs
+    # instead of an empty list, the same gap birth data had before it was
+    # fixed to hydrate from the server on login.
+    preferences: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 

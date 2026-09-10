@@ -2,7 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import React, { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { login, requestOtp, signup, verifyOtp } from '../api/client';
+import { getUserProfile, login, requestOtp, signup, verifyOtp } from '../api/client';
 import PrimaryButton from '../components/PrimaryButton';
 import { useUserStore } from '../store/useUserStore';
 import { colors, radius, spacing, typography } from '../theme/theme';
@@ -24,6 +24,9 @@ export default function AuthScreen() {
   const navigation = useNavigation<any>();
   const language = useUserStore((s) => s.language);
   const setAuthSession = useUserStore((s) => s.setAuthSession);
+  const hydrateBirthData = useUserStore((s) => s.hydrateBirthData);
+  const hydratePreferences = useUserStore((s) => s.hydratePreferences);
+  const finishOnboarding = useUserStore((s) => s.finishOnboarding);
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
   const [method, setMethod] = useState<'email' | 'phone'>('email');
   const [name, setName] = useState('');
@@ -39,6 +42,29 @@ export default function AuthScreen() {
 
   const clearError = (key: keyof FieldErrors) => {
     setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
+  };
+
+  // Runs after ANY successful authentication (signup, login, or OTP verify —
+  // OTP doesn't distinguish new vs returning phone numbers on this screen).
+  // A fresh signup will always come back with no birth data (harmless
+  // no-op, falls through to the normal BirthData entry screen below), but a
+  // returning user logging in on a new device/browser has one already saved
+  // server-side — skip straight to the dashboard instead of making them
+  // re-enter everything from scratch.
+  const resumeExistingAccountOrGoToBirthData = async () => {
+    try {
+      const { birthData, preferences } = await getUserProfile();
+      if (birthData) {
+        hydrateBirthData(birthData);
+        hydratePreferences(preferences);
+        finishOnboarding(); // flips RootNavigator over to MainTabs
+        return;
+      }
+    } catch {
+      // Profile check failed (e.g. transient network issue) — fall through
+      // to the normal onboarding entry rather than blocking the user here.
+    }
+    navigation.navigate('BirthData');
   };
 
   const handleContinue = async () => {
@@ -66,7 +92,7 @@ export default function AuthScreen() {
           ? await signup(email.trim(), password, name.trim(), contentLanguage)
           : await login(email.trim(), password);
       setAuthSession(result.accessToken, email.trim());
-      navigation.navigate('BirthData');
+      await resumeExistingAccountOrGoToBirthData();
     } catch (err: any) {
       if (mode === 'signup' && err?.status === 409) {
         Alert.alert(t('onboarding.accountExistsTitle'), t('onboarding.accountExistsMessage'), [
@@ -118,7 +144,7 @@ export default function AuthScreen() {
     try {
       const result = await verifyOtp(phone.trim(), otpCode.trim());
       setAuthSession(result.accessToken, phone.trim());
-      navigation.navigate('BirthData');
+      await resumeExistingAccountOrGoToBirthData();
     } catch (err: any) {
       Alert.alert(t('common.tryAgain'), err?.message ?? String(err));
     } finally {

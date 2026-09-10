@@ -74,10 +74,17 @@ async def chat_astro(
             "festival": daily.festival,
             "doshas": [d.model_dump() for d in daily.doshas],
         },
+        "rishi_id": body.rishi_id,
     }
 
+    # History is scoped per-Rishi (matches the frontend's separate
+    # conversation-per-Rishi state) so Vasishtha never sees what the user
+    # asked Gargi, and vice versa.
     result = await db.execute(
-        select(ChatMessage).where(ChatMessage.user_id == user.id).order_by(ChatMessage.created_at.desc()).limit(_HISTORY_LIMIT)
+        select(ChatMessage)
+        .where(ChatMessage.user_id == user.id, ChatMessage.rishi_id == body.rishi_id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(_HISTORY_LIMIT)
     )
     history_rows = list(reversed(result.scalars().all()))
     history = [{"role": row.role, "content": row.content} for row in history_rows]
@@ -86,8 +93,8 @@ async def chat_astro(
     interpreter = get_interpreter()
     reply = await interpreter.chat_reply(history, context, body.language)
 
-    db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language))
-    db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language))
+    db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
+    db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id))
     await db.commit()
 
     return ChatMessageOut(reply=reply, language=body.language)

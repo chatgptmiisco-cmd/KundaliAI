@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   getChart,
   getDashaTimeline,
+  getIdentity,
   getKundaliSummary,
   getManglikStatus,
   getValidationQuestions,
@@ -11,6 +12,7 @@ import {
   BirthChart,
   ChartType,
   DashaPeriod,
+  Identity,
   KundaliComplete,
   KundaliSummary,
   Language,
@@ -33,6 +35,7 @@ interface KundaliState {
   charts: ChartCacheEntry;
   dasha: CacheEntry<DashaPeriod[]>;
   validationQuestions: CacheEntry<ValidationQuestion[]>;
+  identity: Identity | null;
 
   summaryLoading: boolean;
   completeLoading: boolean;
@@ -40,6 +43,7 @@ interface KundaliState {
   chartLoading: boolean;
   dashaLoading: boolean;
   validationQuestionsLoading: boolean;
+  identityLoading: boolean;
 
   summaryError: boolean;
   completeError: boolean;
@@ -47,6 +51,7 @@ interface KundaliState {
   chartError: boolean;
   dashaError: boolean;
   validationQuestionsError: boolean;
+  identityError: boolean;
 
   fetchSummary: (lang: Language) => Promise<void>;
   fetchManglik: (lang: Language) => Promise<void>;
@@ -54,6 +59,7 @@ interface KundaliState {
   fetchChart: (type: ChartType, lang: Language) => Promise<void>;
   fetchDasha: (lang: Language, birthDateIso: string) => Promise<void>;
   fetchValidationQuestions: (lang: Language) => Promise<void>;
+  fetchIdentity: () => Promise<void>;
 
   /** Call when birth data changes to drop all cached reports. */
   invalidateAll: () => void;
@@ -66,6 +72,7 @@ export const useKundaliStore = create<KundaliState>((set, get) => ({
   charts: {},
   dasha: {},
   validationQuestions: {},
+  identity: null,
 
   summaryLoading: false,
   completeLoading: false,
@@ -73,6 +80,7 @@ export const useKundaliStore = create<KundaliState>((set, get) => ({
   chartLoading: false,
   dashaLoading: false,
   validationQuestionsLoading: false,
+  identityLoading: false,
 
   summaryError: false,
   completeError: false,
@@ -80,6 +88,7 @@ export const useKundaliStore = create<KundaliState>((set, get) => ({
   chartError: false,
   dashaError: false,
   validationQuestionsError: false,
+  identityError: false,
 
   fetchSummary: async (lang) => {
     if (get().summary[lang]) return;
@@ -153,6 +162,19 @@ export const useKundaliStore = create<KundaliState>((set, get) => ({
     }
   },
 
+  fetchIdentity: async () => {
+    if (get().identity) return;
+    set({ identityLoading: true, identityError: false });
+    try {
+      const data = await getIdentity();
+      set({ identity: data, identityLoading: false });
+    } catch {
+      set({ identityLoading: false, identityError: true });
+    }
+  },
+
   invalidateAll: () =>
-    set({ summary: {}, complete: {}, manglik: {}, charts: {}, dasha: {}, validationQuestions: {} }),
+    set({
+      summary: {}, complete: {}, manglik: {}, charts: {}, dasha: {}, validationQuestions: {}, identity: null,
+    }),
 }));

@@ -87,7 +87,13 @@ async def get_user_profile(db: AsyncSession, user: User) -> UserProfileOut:
         preferred_language=user.preferred_language,
         subscription_tier=subscription.tier,
         birth_data=decrypt_birth_data(profile) if profile else None,
+        preferences=user.preferences,
     )
+
+
+async def set_preferences(db: AsyncSession, user: User, preferences: list[str]) -> None:
+    user.preferences = preferences
+    await db.commit()
 
 
 async def delete_account(db: AsyncSession, user_id: str) -> None:

@@ -172,6 +172,7 @@
     "chartsCardTitle": "Charts",
     "gunaMilanButton": "Guna Milan",
     "seePeriods": "Periods",
+    "predictionsCardTitle": "Predictions",
     "profileButtonLabel": "Profile & birth details",
     "focusMeaningLabel": "What this means",
     "focusAvoidLabel": "Avoid today",
@@ -250,6 +251,8 @@
   },
   "charts": {
     "screenTitle": "Birth Charts",
+    "northIndianStyle": "North Indian",
+    "southIndianStyle": "South Indian",
     "lagnaCellLabel": "Lagna house, shown in colour",
     "keyPointsLabel": "Key points",
     "listenToThisChart": "Listen to this chart",
@@ -259,7 +262,70 @@
     "yogasSubtitle": "Real placement-based combinations found in this chart — not every chart has any.",
     "noYogasFound": "No classical yoga or dosha from this starter set was detected in this chart.",
     "houseByHouseTitle": "House by House",
-    "houseByHouseSubtitle": "What's placed in each house, and what that combination means in plain language."
+    "houseByHouseSubtitle": "What's placed in each house, and what that combination means in plain language.",
+    "identity": {
+      "lagnaLabel": "Lagna (Rising Sign)",
+      "moonLabel": "Rashi (Moon Sign)",
+      "sunLabel": "Sun Sign",
+      "nakshatraLabel": "Birth Nakshatra",
+      "nakshatraPada": "Pada {{pada}}",
+      "nakshatraLord": "Ruled by {{lord}}",
+      "nakshatraSymbol": "Symbol: {{symbol}}",
+      "elementModalityTitle": "Elements & Qualities in Your Chart",
+      "elementModalitySubtitle": "Which signs your Lagna and 9 planets occupy — a snapshot of what's active in your chart, not a personality score."
+    },
+    "purusharthas": {
+      "title": "The Four Pillars of Life",
+      "subtitle": "Your houses grouped by what they classically govern — tap a pillar to explore.",
+      "dharmaTitle": "Your Life Purpose & Talents",
+      "dharmaSubtitle": "Houses 1, 5, 9 — identity, creativity, and higher learning.",
+      "arthaTitle": "Career, Wealth & Finance",
+      "arthaSubtitle": "Houses 2, 6, 10 — money, daily work, and career.",
+      "kamaTitle": "Love, Relationships & Networks",
+      "kamaSubtitle": "Houses 3, 7, 11 — communication, partnership, and community.",
+      "mokshaTitle": "Inner Peace & Spirituality",
+      "mokshaSubtitle": "Houses 4, 8, 12 — home, transformation, and letting go.",
+      "directMode": "Direct",
+      "deepDiveMode": "Deep Dive",
+      "deepDivePlanetLine": "{{planet}}: {{degree}} · {{nakshatra}} pada {{pada}} · {{dignity}}"
+    },
+    "tooltip": {
+      "exaltedTerm": "Exalted",
+      "exaltedDefinition": "A planet placed in the one sign where it works at its strongest and best.",
+      "debilitatedTerm": "Debilitated",
+      "debilitatedDefinition": "A planet placed in the one sign where it struggles the most.",
+      "ownSignTerm": "Own Sign",
+      "ownSignDefinition": "A planet placed in a sign it naturally rules — comfortable and confident.",
+      "neutralTerm": "Neutral",
+      "neutralDefinition": "A planet placed in an ordinary sign — neither its best nor its most strained.",
+      "retrogradeTerm": "Retrograde",
+      "retrogradeDefinition": "A planet that appears to move backward from Earth's view — its themes turn inward and get revisited.",
+      "combustTerm": "Combust",
+      "combustDefinition": "A planet sitting too close to the Sun — its own effects get overpowered and harder to see clearly.",
+      "nakshatraTerm": "Nakshatra",
+      "nakshatraDefinition": "One of 27 lunar mansions the Moon passes through — a finer layer of meaning than the zodiac sign alone.",
+      "padaTerm": "Pada",
+      "padaDefinition": "A quarter-division of a nakshatra (1 to 4) that further refines its meaning."
+    },
+    "timeEngine": {
+      "title": "Why Things Happen Now",
+      "dashaSectionTitle": "Your Current Life Chapter",
+      "mahadashaLabel": "Mahadasha: {{lord}}",
+      "antardashaLabel": "Antardasha: {{lord}}",
+      "elapsedLabel": "{{percent}}% through this Mahadasha",
+      "dominantLifeArea": "Right now, this sub-period is mainly shaping your {{area}}.",
+      "periodType": {
+        "growth": "This is a genuinely strong stretch — real opportunities are opening up, worth acting on rather than playing it safe.",
+        "consolidation": "This period rewards steadily building on what you already have rather than chasing something new.",
+        "testing": "This period asks more of you than usual — patience and consistency matter more than big moves right now.",
+        "grind": "This is a genuinely hard stretch — progress will be slower than you'd like, but what you build carefully now tends to last.",
+        "instability": "This period brings real unpredictability — old patterns may not hold, so stay flexible rather than forcing a fixed plan."
+      },
+      "transitSectionTitle": "Active Transits on Your Moon",
+      "sadeSatiActive": "Saturn is currently transiting your Moon sign — Sade Sati ({{phase}}).",
+      "jupiterActive": "Jupiter is currently transiting your Moon sign — a classically favourable window.",
+      "noMajorTransit": "No major Saturn or Jupiter activation on your Moon sign right now — a genuinely calm stretch, without the extra pressure or the extra opening either. A good window to just keep steady."
+    }
   },
   "gunaMilan": {
     "screenTitle": "Guna Milan",
@@ -291,6 +357,26 @@
     "listenToThisPeriod": "Listen to this period",
     "lockedMessage": "Full details for this period are available with the Insight plan.",
     "unlockButton": "Unlock with Insight plan"
+  },
+  "predictions": {
+    "screenTitle": "Predictions",
+    "introText": "A real, computed outlook for your year ahead — built from your annual (Varshaphala) chart, your running dasha, and current planetary transits. Not AI-generated guesses.",
+    "viewMode": {
+      "this": "This Year",
+      "next": "Next Year",
+      "multi": "2-Year View"
+    },
+    "varsheshwarLabel": "This year's ruling planet (Varsheshwar): {{planet}}",
+    "opportunitiesLabel": "Opportunities",
+    "risksLabel": "Risks",
+    "errorTitle": "We could not load this prediction",
+    "errorMessage": "Something went wrong while computing this. Please try again.",
+    "marriageTiming": {
+      "sectionTitle": "Marriage Timing",
+      "introText": "Probable favorable windows for marriage or a serious partnership, ranked by real dasha and transit signals — not a fabricated exact date.",
+      "corroboratedBadge": "Transit-confirmed",
+      "noWindowsFound": "No strongly favorable window was found in the period this engine currently searches."
+    }
   },
   "profile": {
     "screenTitle": "Profile & Birth Details",
@@ -324,7 +410,8 @@
     "promptWeek": "This week's focus",
     "promptDasha": "My current Dasha",
     "promptCareer": "Career pattern",
-    "promptRemedy": "A practical remedy"
+    "promptRemedy": "A practical remedy",
+    "listenToReply": "Listen"
   },
   "voiceChat": {
     "promoTitle": "Ask your questions out loud",
@@ -392,7 +479,12 @@
     "screenTitle": "Today's Reading",
     "loadingMessage": "Reading today's chart…",
     "errorMessage": "Could not load today's reading. Please try again.",
+    "todaysHoroscopeTitle": "Today's Horoscope",
+    "yourRashiLabel": "Your Rashi (Moon Sign): {{rashi}}",
     "todaysRatingLabel": "Today's rating",
+    "todaysColorLabel": "Today's colour",
+    "todaysNumberLabel": "Today's number",
+    "todayGuidanceTitle": "How to Move Forward Today",
     "riskOpportunityTitle": "Risk & Opportunity",
     "keyRiskLabel": "Key risk today",
     "keyOpportunityLabel": "Key opportunity today",

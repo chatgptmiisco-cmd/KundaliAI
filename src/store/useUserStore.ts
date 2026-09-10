@@ -1,11 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { deleteAccount, invalidateKundaliMemo, putBirthData, restoreAuthToken } from '../api/client';
+import { deleteAccount, invalidateKundaliMemo, putBirthData, putPreferences, restoreAuthToken } from '../api/client';
 import { ALL_FEATURES_FREE } from '../config/env';
 import { useChatStore } from './useChatStore';
 import { useInsightsStore } from './useInsightsStore';
 import { useKundaliStore } from './useKundaliStore';
+import { usePredictionStore } from './usePredictionStore';
 import { AppLanguage, BirthData, PlanTier, PreferenceKey } from '../types/kundali';
 
 const FREE_TRIAL_CREDITS = 3;
@@ -19,6 +20,8 @@ const FREE_TRIAL_CREDITS = 3;
 // isn't a current, valid key.
 const VALID_PREFERENCE_KEYS: PreferenceKey[] = ['family', 'health', 'career', 'marriageRelationships', 'friends'];
 
+export type ChartStyle = 'north' | 'south';
+
 interface UserState {
   language: AppLanguage;
   plan: PlanTier;
@@ -30,10 +33,14 @@ interface UserState {
   accuracyScore: number | null;
   authToken: string | null;
   email: string | null;
+  chartStyle: ChartStyle;
   setLanguage: (lang: AppLanguage) => void;
   setPlan: (plan: PlanTier) => void;
+  setChartStyle: (style: ChartStyle) => void;
   setBirthData: (data: BirthData) => Promise<void>;
-  setPreferences: (prefs: PreferenceKey[]) => void;
+  hydrateBirthData: (data: BirthData) => void;
+  setPreferences: (prefs: PreferenceKey[]) => Promise<void>;
+  hydratePreferences: (prefs: PreferenceKey[]) => void;
   setAccuracyScore: (score: number) => void;
   setAuthSession: (token: string, email: string) => void;
   finishOnboarding: () => void;
@@ -63,18 +70,45 @@ export const useUserStore = create<UserState>()(
       accuracyScore: null,
       authToken: null,
       email: null,
+      chartStyle: 'north',
 
       setLanguage: (language) => set({ language }),
       setPlan: (plan) => set({ plan, isPremium: ALL_FEATURES_FREE || plan !== 'free' }),
+      setChartStyle: (chartStyle) => set({ chartStyle }),
 
       setBirthData: async (birthData) => {
         await putBirthData(birthData);
         set({ birthData });
         invalidateKundaliMemo();
         useKundaliStore.getState().invalidateAll();
+        usePredictionStore.getState().invalidateAll();
       },
 
-      setPreferences: (preferences) => set({ preferences }),
+      // Unlike setBirthData, this does NOT re-PUT to the server — it's for
+      // hydrating local state from a profile that ALREADY has birth data
+      // saved server-side (a returning user logging in on a new device),
+      // so it doesn't needlessly bump birth_profile_version and invalidate
+      // every chart/reading cache that's already correctly computed.
+      hydrateBirthData: (birthData) => set({ birthData }),
+
+      setPreferences: async (preferences) => {
+        set({ preferences });
+        // Best-effort — a failed save shouldn't block the local UI update;
+        // the next successful save (or the server round-trip on a future
+        // login) reconciles it. Preferences aren't safety-critical the way
+        // birth data is, so this doesn't need setBirthData's stricter
+        // await-then-commit ordering.
+        try {
+          await putPreferences(preferences);
+        } catch {
+          // ignore — see above
+        }
+      },
+
+      // Unlike setPreferences, this does NOT re-PUT to the server — for
+      // hydrating local state from a profile that already has preferences
+      // saved server-side (a returning user logging in on a new device).
+      hydratePreferences: (preferences) => set({ preferences }),
       setAccuracyScore: (accuracyScore) => set({ accuracyScore }),
 
       setAuthSession: (authToken, email) => {
@@ -103,6 +137,7 @@ export const useUserStore = create<UserState>()(
           isPremium: ALL_FEATURES_FREE,
         });
         useKundaliStore.getState().invalidateAll();
+        usePredictionStore.getState().invalidateAll();
         useInsightsStore.getState().reset();
         useChatStore.getState().reset();
       },
@@ -125,6 +160,7 @@ export const useUserStore = create<UserState>()(
           isPremium: ALL_FEATURES_FREE,
         });
         useKundaliStore.getState().invalidateAll();
+        usePredictionStore.getState().invalidateAll();
         useInsightsStore.getState().reset();
         useChatStore.getState().reset();
       },

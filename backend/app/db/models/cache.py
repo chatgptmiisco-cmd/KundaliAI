@@ -128,6 +128,41 @@ class FocusReadingCache(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class YearOutlookCache(Base):
+    """A year-ahead Varshaphala + dasha/transit outlook, cached per (user,
+    year, language, birth profile version) — same invalidation story as
+    ChartCache."""
+
+    __tablename__ = "year_outlook_cache"
+    __table_args__ = (UniqueConstraint("user_id", "year", "language", "birth_profile_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    year: Mapped[int] = mapped_column(Integer)
+    language: Mapped[str] = mapped_column(String(8))
+    birth_profile_version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MarriageTimingCache(Base):
+    """Ranked marriage-timing windows, cached per (user, language, birth
+    profile version) — same invalidation story as ChartCache. Not date-keyed
+    like YearOutlookCache: "now" is recomputed fresh whenever the cache is
+    stale (a birth-data edit), not on every calendar day, since the window
+    scan already searches years ahead from whenever it was last computed."""
+
+    __tablename__ = "marriage_timing_cache"
+    __table_args__ = (UniqueConstraint("user_id", "language", "birth_profile_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    language: Mapped[str] = mapped_column(String(8))
+    birth_profile_version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class UsageCounter(Base):
     """Tracks free-tier monthly quota usage (e.g. deep period analyses)."""
 

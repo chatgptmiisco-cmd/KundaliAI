@@ -116,6 +116,7 @@ export interface PlanetDetail {
   nakshatraName: string | null;
   nakshatraPada: number | null;
   dignity: Dignity | null;
+  combust: boolean | null;
 }
 
 /** What's in one house and what that combination means in plain language —
@@ -194,6 +195,50 @@ export interface PeriodAnalysis {
   summary: string;
 }
 
+/** One quarter of a year-ahead outlook — real dasha + Varshaphala + transit
+ * facts for that specific stretch, not a repeated per-lord canned block. */
+export interface QuarterOutlook {
+  startDate: string;
+  endDate: string;
+  dominantDashaLord: PlanetKey;
+  dominantDashaLordName: string;
+  theme: string;
+  rating: number; // 1-10
+  opportunities: string[];
+  risks: string[];
+}
+
+/** A full year's Prediction Engine outlook: Varshaphala (annual chart) +
+ * running dasha + transit doshas, broken into quarters. */
+export interface YearOutlook {
+  year: number;
+  overallRating: number; // 1-10
+  overallTheme: string;
+  varsheshwar: PlanetKey;
+  varsheshwarName: string;
+  munthaHouse: number;
+  quarters: QuarterOutlook[];
+}
+
+/** A ranked, probable-favorable window for marriage/partnership — never a
+ * fabricated exact date, always backed by real dasha + transit facts. */
+export interface MarriageTimingWindow {
+  startDate: string;
+  endDate: string;
+  mahadashaLord: PlanetKey;
+  mahadashaLordName: string;
+  antardashaLord: PlanetKey;
+  antardashaLordName: string;
+  score: number;
+  reason: string;
+  transitCorroborated: boolean;
+}
+
+export interface MarriageTimingPrediction {
+  windows: MarriageTimingWindow[];
+  manglikNote: string | null;
+}
+
 export interface DoshaSummaryItem {
   key: string;
   label: string;
@@ -230,7 +275,10 @@ export interface DailyReading {
   lunarMonth: string;
   festival: string | null;
   todayColor: string;
+  luckyNumber: number;
+  todayGuidance: string[];
   doshas: DoshaSummaryItem[];
+  jupiterTransitingMoonSign: boolean;
 }
 
 /** How today looks for one specific focus area (family/health/career/
@@ -250,6 +298,55 @@ export interface FocusAreaReading {
   avoidToday: string;
   focusToday: string;
   transitNote: string | null;
+}
+
+/** Layer 1 of the Charts redesign — the "Identity Basics" hook: Big Three
+ * (Lagna/Moon-sign/Sun-sign) with a fixed one-line meaning each, the birth
+ * (Moon) nakshatra with its lord/symbol/meaning, and an element+modality
+ * breakdown across Lagna + the 9 grahas. Both languages come in one payload
+ * (same convention as BirthChart's houseBreakdown), so this is fetched once. */
+export interface SignIdentity {
+  signEn: string;
+  signHi: string;
+  // What this point classically represents — fixed reference copy, the same
+  // for anyone with this Lagna/Moon/Sun.
+  meaningEn: string;
+  meaningHi: string;
+  // The real, per-chart consequence: where this point sits and how well
+  // placed it is, and what that means for this specific user. Lead with
+  // this; `meaning*` is the secondary glossary note.
+  realEffectEn: string;
+  realEffectHi: string;
+}
+
+export interface NakshatraIdentity {
+  nameEn: string;
+  nameHi: string;
+  pada: number;
+  lordEn: string;
+  lordHi: string;
+  symbolEn: string;
+  symbolHi: string;
+  meaningEn: string;
+  meaningHi: string;
+}
+
+export interface ElementModalityPoint {
+  pointKey: string; // "Lagna" | PlanetKey
+  pointLabelEn: string;
+  pointLabelHi: string;
+  elementEn: string;
+  elementHi: string;
+  modalityEn: string;
+  modalityHi: string;
+}
+
+export interface Identity {
+  lagna: SignIdentity;
+  moonSign: SignIdentity;
+  sunSign: SignIdentity;
+  nakshatra: NakshatraIdentity;
+  elementModality: ElementModalityPoint[];
 }
 
 export type RishiTone = 'direct' | 'traditional' | 'practical' | 'spiritual' | 'analytical';

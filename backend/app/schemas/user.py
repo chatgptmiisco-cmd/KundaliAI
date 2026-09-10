@@ -1,6 +1,12 @@
 from datetime import date
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# Must match the frontend's PreferenceKey union (src/types/kundali.ts) — the
+# five Home focus areas a user can follow. Kept as an explicit allow-list
+# (not a free-form string) so a stale/renamed key from an old client build
+# can never get silently persisted server-side.
+VALID_PREFERENCE_KEYS = {"family", "health", "career", "marriageRelationships", "friends"}
 
 
 class BirthDataIn(BaseModel):
@@ -26,8 +32,21 @@ class UserProfileOut(BaseModel):
     preferred_language: str
     subscription_tier: str
     birth_data: BirthDataOut | None
+    preferences: list[str]
 
 
 class UserProfileUpdate(BaseModel):
     preferred_language: str | None = None
     birth_data: BirthDataIn | None = None
+
+
+class PreferencesIn(BaseModel):
+    preferences: list[str]
+
+    @field_validator("preferences")
+    @classmethod
+    def check_valid_keys(cls, v: list[str]) -> list[str]:
+        invalid = [p for p in v if p not in VALID_PREFERENCE_KEYS]
+        if invalid:
+            raise ValueError(f"invalid preference keys: {invalid}")
+        return v

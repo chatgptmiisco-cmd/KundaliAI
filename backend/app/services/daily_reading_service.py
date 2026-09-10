@@ -22,6 +22,7 @@ from app.astro.constants import (
     NAKSHATRA_SPAN_DEG,
     PLANET_NAMES_EN,
     PLANET_NAMES_HI,
+    PLANET_NUMBER,
     PlanetKey,
 )
 from app.astro.doshas import (
@@ -131,6 +132,67 @@ def _period_type(period_rating: int, maha_key: PlanetKey, antar_key: PlanetKey) 
     if period_rating >= 4:
         return "testing"
     return "grind"
+
+
+def _today_guidance(energy_mode: str, rating: int, tithi_tag: str, hi: bool) -> list[str]:
+    """Plain "how should I move forward today" advice — real, computed facts
+    (today's energy mode, rating, and tithi's classical 5-fold grouping)
+    restated as direct do/avoid statements, instead of leaving the user to
+    infer that from the rating number and theme alone."""
+    lines: list[str] = []
+
+    if energy_mode == "conflict_prone" or rating <= 4:
+        lines.append(
+            "आज शांत रहें और टकराव से बचें — जल्दबाज़ी में प्रतिक्रिया देने का दिन नहीं है।"
+            if hi else
+            "Stay calm today and avoid confrontations — this isn't the day to react quickly."
+        )
+    else:
+        lines.append(
+            "आज का दिन स्थिर है — अपनी योजनाओं पर सामान्य गति से आगे बढ़ें।"
+            if hi else
+            "A steady day — go ahead with your plans at a normal pace."
+        )
+
+    if tithi_tag == "avoid_starts":
+        lines.append(
+            "आज कुछ नया शुरू करने से बचें — पुराना काम पूरा करना इस तिथि के लिए बेहतर है।"
+            if hi else
+            "Avoid starting anything new today — finishing old business suits this tithi better."
+        )
+    elif tithi_tag == "start":
+        lines.append(
+            "अगर आप इंतज़ार कर रहे थे, तो आज कुछ नया शुरू करने के लिए अच्छी तिथि है।"
+            if hi else
+            "A good tithi for starting something new, if you've been waiting for the right day."
+        )
+    elif tithi_tag == "finish":
+        lines.append(
+            "आज का दिन नए काम शुरू करने के बजाय पुराने काम पूरे करने के लिए बेहतर है।"
+            if hi else
+            "Better used for finishing pending work than for launching anything new."
+        )
+    else:
+        lines.append(
+            "आज बड़े नए फैसलों के बजाय मौजूदा काम पर स्थिर ध्यान दें।"
+            if hi else
+            "Focus on steady, existing work rather than big new decisions today."
+        )
+
+    if rating >= 8:
+        lines.append(
+            "यह वाकई एक अनुकूल दिन है — भरोसे के साथ आगे बढ़ना सुरक्षित है।"
+            if hi else
+            "A genuinely favourable day — safe to move forward with confidence."
+        )
+    elif rating <= 3:
+        lines.append(
+            "आज का दिन हल्का रखें — बड़े जोखिम लेने से बचें और उम्मीदें सीमित रखें।"
+            if hi else
+            "Keep today low-key — avoid big risks and keep expectations modest."
+        )
+
+    return lines
 
 
 def _pick_transit_highlight_planet(house_from_lagna: dict[PlanetKey, int]) -> PlanetKey:
@@ -319,6 +381,8 @@ def _build_reading(
         )
 
     today_color = weekday_color[weekday_lord(for_date)]
+    lucky_number = PLANET_NUMBER[weekday_lord(for_date)]
+    today_guidance = _today_guidance(energy_mode, rating, tithi.energy_tag, hi)
 
     # --- doshas (Manglik + Kaal Sarp + Sade Sati + Kemadruma) -----------
     manglik = compute_manglik_facts(
@@ -384,7 +448,14 @@ def _build_reading(
             )
         ),
         "today_color": today_color,
+        "lucky_number": lucky_number,
+        "today_guidance": today_guidance,
         "doshas": [d.model_dump() for d in doshas],
+        # Jupiter transiting the natal Moon's own sign — a classically
+        # favourable "Guru over Moon" alignment, the Jupiter-side counterpart
+        # to the already-computed Sade Sati (Saturn-over-Moon) dosha above.
+        # `transit_snapshot` already carries this, so no new ephemeris call.
+        "jupiter_transiting_moon_sign": transit_snapshot.planet_house_from_moon["Ju"] == 1,
     }
 
 
@@ -400,11 +471,18 @@ def _select_stmt(profile: BirthProfile, for_date: date, language: str):
 async def get_daily_reading(
     db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, for_date: date, language: str,
 ) -> DailyReadingResponse:
-    _PANCHANG_KEYS = ("tithi_name", "paksha", "lunar_month", "festival")
+    # Fields added after this cache table first shipped — a cached row from
+    # before one of these existed is treated as stale and recomputed (see
+    # below) rather than crashing DailyReadingResponse's validation on a
+    # missing required field.
+    _REQUIRED_CACHE_KEYS = (
+        "tithi_name", "paksha", "lunar_month", "festival", "jupiter_transiting_moon_sign",
+        "lucky_number", "today_guidance",
+    )
 
     result = await db.execute(_select_stmt(profile, for_date, language))
     cached_row = result.scalar_one_or_none()
-    if cached_row is not None and all(key in cached_row.data for key in _PANCHANG_KEYS):
+    if cached_row is not None and all(key in cached_row.data for key in _REQUIRED_CACHE_KEYS):
         return DailyReadingResponse(date=for_date, language=language, cached=True, **cached_row.data)
 
     d1 = await get_chart(db, profile, birth, "D1")

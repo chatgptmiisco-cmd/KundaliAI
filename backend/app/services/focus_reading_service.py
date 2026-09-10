@@ -154,10 +154,24 @@ def _build_focus_readings(
         transit_note = None
         priority_planet = next((p for p in _TRANSIT_NOTE_PRIORITY if p in transiting_here), None)
         if priority_planet:
+            # State the real consequence (which way this pushes {theme} today),
+            # not just the bare fact that a planet is passing through — a
+            # benefic and a malefic transit through the same house mean
+            # opposite things for the day, reusing the same benefic/malefic
+            # classification already driving the rating adjustment above.
+            if priority_planet in _BENEFIC_TRANSITS:
+                effect_en = f"a genuinely good window to make real progress on {theme} today"
+                effect_hi = f"आज {theme} में वास्तविक प्रगति करने का अच्छा मौका है"
+            elif priority_planet in _MALEFIC_TRANSITS:
+                effect_en = f"more friction or delay than usual around {theme} — patience will serve you better than pushing"
+                effect_hi = f"आज {theme} में सामान्य से ज़्यादा रुकावट या देरी हो सकती है — जल्दबाज़ी से बेहतर है धैर्य रखना"
+            else:
+                effect_en = f"{theme} is more active and attention-grabbing than usual today"
+                effect_hi = f"आज {theme} सामान्य से ज़्यादा सक्रिय और ध्यान खींचने वाला रहेगा"
             transit_note = (
-                f"{names[priority_planet]} अभी इस भाव से गुज़र रहा है, जिससे आज इसका असर बढ़ जाता है।"
+                f"{names[priority_planet]} अभी इस भाव से गुज़र रहा है — इसका मतलब है {effect_hi}।"
                 if hi
-                else f"{names[priority_planet]} is transiting this house right now, sharpening its effect today."
+                else f"{names[priority_planet]} is transiting this house right now — that means {effect_en}."
             )
 
         readings.append(

@@ -79,6 +79,8 @@ export default function HomeDashboardScreen() {
   // and had nothing to do with today.
   const summary = useKundaliStore((s) => s.summary[language]);
   const fetchSummary = useKundaliStore((s) => s.fetchSummary);
+  const identity = useKundaliStore((s) => s.identity);
+  const fetchIdentity = useKundaliStore((s) => s.fetchIdentity);
 
   const unreadInsights = useInsightsStore((s) => s.unreadCount);
   const generateInsights = useInsightsStore((s) => s.generate);
@@ -94,6 +96,10 @@ export default function HomeDashboardScreen() {
   useEffect(() => {
     fetchSummary(language);
   }, [language]);
+
+  useEffect(() => {
+    fetchIdentity();
+  }, []);
 
   const loadReading = () => {
     setReadingError(false);
@@ -151,6 +157,12 @@ export default function HomeDashboardScreen() {
       icon: 'time-outline',
       label: t('home.seePeriods'),
       onPress: () => navigation.navigate('PeriodAnalysis'),
+    },
+    {
+      key: 'predictions',
+      icon: 'trending-up-outline',
+      label: t('home.predictionsCardTitle'),
+      onPress: () => navigation.navigate('Predictions'),
     },
   ];
 
@@ -282,6 +294,16 @@ export default function HomeDashboardScreen() {
             />
           )}
           {!reading && !readingError && <LoadingState message={t('horoscope.loadingMessage')} />}
+          {reading && identity && (
+            <Card style={styles.horoscopeHeaderCard}>
+              <Text style={styles.horoscopeHeaderTitle}>{t('horoscope.todaysHoroscopeTitle')}</Text>
+              <Text style={styles.horoscopeHeaderRashi}>
+                {t('horoscope.yourRashiLabel', {
+                  rashi: language === 'hi' ? identity.moonSign.signHi : identity.moonSign.signEn,
+                })}
+              </Text>
+            </Card>
+          )}
           {reading && <DailyReadingSections reading={reading} />}
 
           <View style={styles.quickActionsRow}>
@@ -546,6 +568,22 @@ const styles = StyleSheet.create({
   },
   doLabel: {
     color: colors.success,
+  },
+  horoscopeHeaderCard: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primary,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  horoscopeHeaderTitle: {
+    ...typography.sectionTitle,
+    color: colors.primaryDark,
+  },
+  horoscopeHeaderRashi: {
+    ...typography.title,
+    color: colors.primary,
+    marginTop: spacing.xs,
+    fontFamily: fontFamily.displayBold,
   },
   quickActionsRow: {
     flexDirection: 'row',

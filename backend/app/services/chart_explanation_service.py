@@ -31,12 +31,44 @@ from app.services.interpretation.templates import (
     _DIGNITY_QUALIFIER_HI,
     _FOCUS_BY_HOUSE_EN,
     _FOCUS_BY_HOUSE_HI,
+    _LIFE_FRAMING_EN,
+    _LIFE_FRAMING_HI,
     _TONE_BY_LORD_EN,
     _TONE_BY_LORD_HI,
     _a_or_an,
     _hindi_house,
     _ordinal,
+    _strip_trailing_stop,
 )
+
+# Natal-placement framing for a *neutral*-dignity planet (or Rahu/Ketu, which
+# have no classical dignity) — deliberately NOT reusing _PERIOD_CONTENT's
+# one-liners here, since those are written for "this is currently your
+# running dasha period" (time-bound) and would misleadingly imply a natal
+# placement fact is temporary. This says WHERE this planet's effect
+# concretely shows up in the person's life, as a permanent chart fact.
+_NEUTRAL_EFFECT_EN: dict[PlanetKey, str] = {
+    "Su": "This is where you naturally look for recognition and validation.",
+    "Mo": "This is where your moods and emotional needs show up most.",
+    "Ma": "This is where you act fast and can be impatient.",
+    "Me": "This is where your mind stays busiest and most active.",
+    "Ju": "This is where you naturally look for growth and expansion.",
+    "Ve": "This is where you seek comfort, beauty, and connection.",
+    "Sa": "This is where you move slowly but build something lasting.",
+    "Ra": "This is where restless, unconventional energy tends to show up.",
+    "Ke": "This is where you may feel detached or want to let go.",
+}
+_NEUTRAL_EFFECT_HI: dict[PlanetKey, str] = {
+    "Su": "यहां आप आमतौर पर पहचान और सराहना की तलाश करते हैं।",
+    "Mo": "यहां आपके मूड और भावनात्मक ज़रूरतें सबसे ज़्यादा दिखती हैं।",
+    "Ma": "यहां आप तेज़ी से काम करते हैं और अधीर हो सकते हैं।",
+    "Me": "यहां आपका मन सबसे ज़्यादा सक्रिय और व्यस्त रहता है।",
+    "Ju": "यहां आप स्वाभाविक रूप से विकास और विस्तार की तलाश करते हैं।",
+    "Ve": "यहां आप सुख, सुंदरता और जुड़ाव की तलाश करते हैं।",
+    "Sa": "यहां आप धीरे चलते हैं पर कुछ टिकाऊ बनाते हैं।",
+    "Ra": "यहां बेचैन, अपरंपरागत ऊर्जा दिखने की संभावना रहती है।",
+    "Ke": "यहां आप अलगाव महसूस कर सकते हैं या छोड़ना चाहते हैं।",
+}
 
 _MAHAPURUSHA_DESCRIPTIONS_EN = {
     "Ma": "Mars is exalted or in its own sign in an angular (Kendra) house — classical Ruchaka Yoga, giving real courage, physical drive, and a natural instinct to lead rather than follow.",
@@ -61,6 +93,27 @@ def _join_and(names: list[str]) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+def _planet_effect(planet: PlanetKey, dignity: str | None) -> tuple[str, str]:
+    """The real, concrete consequence of this planet's placement — not
+    another restatement of its dignity/tone, but what that dignity actually
+    does for the person: a genuine strength, a genuine challenge, or (for
+    Rahu/Ketu, which have no classical dignity, and neutral placements) its
+    general character. Reuses the same hand-written per-planet toolkit
+    already shared with daily_reading_service/focus_reading_service rather
+    than inventing new copy."""
+    if dignity == "exalted" or dignity == "own_sign":
+        return (
+            f"{_strip_trailing_stop(_LIFE_FRAMING_EN[planet]['core_strength'])} — a real strength here.",
+            f"यहां {_strip_trailing_stop(_LIFE_FRAMING_HI[planet]['core_strength'])} — यह एक वास्तविक ताकत है।",
+        )
+    if dignity == "debilitated":
+        return (
+            f"{_strip_trailing_stop(_LIFE_FRAMING_EN[planet]['core_challenge'])} — a real challenge here.",
+            f"यहां {_strip_trailing_stop(_LIFE_FRAMING_HI[planet]['core_challenge'])} — यह एक वास्तविक चुनौती है।",
+        )
+    return (_NEUTRAL_EFFECT_EN[planet], _NEUTRAL_EFFECT_HI[planet])
+
+
 def build_house_breakdown(chart: ChartResult) -> list[dict]:
     names_en, names_hi = PLANET_NAMES_EN, PLANET_NAMES_HI
     focus_en, focus_hi = _FOCUS_BY_HOUSE_EN, _FOCUS_BY_HOUSE_HI
@@ -80,18 +133,20 @@ def build_house_breakdown(chart: ChartResult) -> list[dict]:
             lord = house_lord(house, chart.lagna_sign_index)
             lord_house = chart.planet_house[lord]
             lord_dignity = planet_dignity(lord, chart.planet_sign_index[lord])
+            effect_en, effect_hi = _planet_effect(lord, lord_dignity)
             explanation_en = (
                 f"No planet sits here — how {focus_en[house]} plays out depends mainly on "
                 f"{names_en[lord]}, this house's lord, who sits in your {_ordinal(lord_house)} house, "
-                f"{qualifier_en[lord_dignity]}."
+                f"{qualifier_en[lord_dignity]}. Real effect: {effect_en}"
             )
             explanation_hi = (
                 f"इस भाव में कोई ग्रह नहीं है — {focus_hi[house]} का अनुभव मुख्यतः इस भाव के स्वामी "
                 f"{names_hi[lord]} की स्थिति से तय होगा, जो आपके {_hindi_house(lord_house)} में है और "
-                f"{qualifier_hi[lord_dignity]}।"
+                f"{qualifier_hi[lord_dignity]}। असली असर: {effect_hi}"
             )
         else:
             parts_en, parts_hi = [], []
+            effects_en, effects_hi = [], []
             for p in planets_here:
                 retro_en = " (retrograde)" if chart.planet_retrograde.get(p) else ""
                 retro_hi = " (वक्री)" if chart.planet_retrograde.get(p) else ""
@@ -103,8 +158,12 @@ def build_house_breakdown(chart: ChartResult) -> list[dict]:
                     )
                     parts_hi.append(f"{names_hi[p]}{retro_hi} {qualifier_hi[dignity]}, जो {tone_hi[p]} भाव लाता है")
                 else:
+                    dignity = None
                     parts_en.append(f"{names_en[p]}{retro_en} sits here")
                     parts_hi.append(f"{names_hi[p]}{retro_hi} यहां स्थित है")
+                effect_en, effect_hi = _planet_effect(p, dignity)
+                effects_en.append(f"{names_en[p]}: {effect_en}")
+                effects_hi.append(f"{names_hi[p]}: {effect_hi}")
 
             conjunction_en = (
                 f" {_join_and([names_en[p] for p in planets_here])} are conjunct here (sharing the same "
@@ -120,11 +179,11 @@ def build_house_breakdown(chart: ChartResult) -> list[dict]:
             )
             explanation_en = (
                 f"{'; '.join(parts_en)} — this house governs {focus_en[house]}, so that's where the effect lands most directly."
-                f"{conjunction_en}"
+                f"{conjunction_en} Real effect — {' '.join(effects_en)}"
             )
             explanation_hi = (
                 f"{'; '.join(parts_hi)} — यह भाव {focus_hi[house]} को दर्शाता है, इसलिए असर सीधे यहीं दिखता है।"
-                f"{conjunction_hi}"
+                f"{conjunction_hi} असली असर — {' '.join(effects_hi)}"
             )
 
         breakdown.append(
@@ -141,8 +200,12 @@ def build_house_breakdown(chart: ChartResult) -> list[dict]:
 
 
 def detect_yogas(chart: ChartResult) -> list[dict]:
-    """Only meaningful for D1 — these are natal-chart-level yoga/dosha
-    checks; callers should skip this for D9/D10."""
+    """Classically devised for D1 charts; also applied to D9/D10 as the same
+    real, placement-based checks against that divisional chart's own sign
+    positions — a documented simplification (see chart_service.get_chart),
+    not a fabricated fact: whatever this finds is a genuine structural
+    pattern in the chart it was given, just not universally endorsed by
+    every classical text for non-D1 use."""
     findings = []
 
     moon_sign = chart.planet_sign_index["Mo"]

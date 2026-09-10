@@ -1,68 +1,73 @@
 import { Language, RishiTone } from '../types/kundali';
 
-// Canned reply pools per persona tone, cycled by message index. This stands
-// in for a real LLM-backed astrologer chat — swap for a real API call once
-// the backend chat endpoint exists, keeping the same (tone, index, language)
-// signature so screens don't need to change.
+// Canned reply pools per persona tone, used ONLY when the real backend chat
+// (which answers from the user's actual computed chart — see
+// app.services.interpretation.templates.chat_reply) is unreachable, or for a
+// user without Strategy-tier access. These must NEVER state a specific chart
+// fact (a placement, a house, a dasha lord) since this pool has no idea what
+// the user's real chart actually contains — doing so previously meant every
+// user saw the same fabricated "Your Moon is in Cancer" style claims
+// regardless of their real birth data. Kept tone-appropriate per persona,
+// but honest about being a fallback rather than a real reading.
 const REPLIES: Record<RishiTone, Record<Language, string[]>> = {
   direct: {
     en: [
-      'Your Moon is in Cancer and your Lagna in Taurus — that combination makes you steadier than most, but slower to act than you should be. Don\'t mistake caution for wisdom every time.',
-      'Mars in the 7th is doing exactly what it always does — it does not ruin a marriage on its own, but it does demand honesty in the relationship you\'re avoiding right now.',
-      'Your current Mahadasha rewards discipline, not shortcuts. If you\'re looking for a quick fix this period, you won\'t find one here — and pretending otherwise won\'t help you.',
+      "I can't reach your real chart data right now, so I won't guess at it — that would just be making things up. Try again in a moment.",
+      "No shortcuts here — I only answer from your actual computed chart, and I can't reach it just now. Please retry.",
+      'Rather than give you a generic guess dressed up as a reading, I\'ll wait until I can actually see your chart again. Try once more.',
     ],
     hi: [
-      'आपका चंद्र कर्क में है और लग्न वृषभ में — यह मेल आपको ज़्यादातर लोगों से स्थिर बनाता है, पर ज़रूरत से ज़्यादा धीमा भी। सावधानी को हमेशा समझदारी मत समझिए।',
-      'सातवें भाव का मंगल वही कर रहा है जो हमेशा करता है — यह अकेले शादी नहीं बिगाड़ता, पर जिस रिश्ते से आप बच रहे हैं, वहां ईमानदारी मांगता है।',
-      'आपकी मौजूदा महादशा अनुशासन का फल देती है, शॉर्टकट का नहीं। अगर इस दौर में जल्दी हल ढूंढ रहे हैं, तो यहां नहीं मिलेगा — और खुद को झुठलाने से फ़ायदा नहीं होगा।',
+      'अभी आपकी असली कुंडली का डेटा नहीं मिल पा रहा, इसलिए मैं अंदाज़ा नहीं लगाऊंगा — वह सिर्फ़ मनगढ़ंत होगा। कृपया थोड़ी देर बाद फिर कोशिश करें।',
+      'कोई शॉर्टकट नहीं — मैं सिर्फ़ आपकी असली गणना से जवाब देता हूं, और अभी वह नहीं मिल पा रही। कृपया दोबारा भेजें।',
+      'एक सामान्य अंदाज़े को सही जवाब की तरह दिखाने के बजाय, मैं तब तक रुकूंगा जब तक आपकी असली कुंडली फिर से दिख न जाए। कृपया दोबारा कोशिश करें।',
     ],
   },
   traditional: {
     en: [
-      'This placement has been understood the same way for generations — it asks for patience, not fear. Trust the process a little longer.',
-      'Every dasha brings its own lesson. This one is teaching steadiness, and it will pass in its own time.',
-      'Traditional texts would call this a testing period, not a bad one. There is a difference, and it matters.',
+      'The texts teach patience even here — I cannot reach your real chart just this moment, so let us wait rather than guess. Please try again shortly.',
+      'A reading given without truly seeing your chart would honor neither of us. Give it a moment and ask again.',
+      'Even the old astrologers would rather stay silent than speak without the chart in front of them. Please retry in a little while.',
     ],
     hi: [
-      'यह स्थिति पीढ़ियों से इसी तरह समझी जाती रही है — यह धैर्य मांगती है, डर नहीं। थोड़ी और श्रद्धा रखें।',
-      'हर दशा अपना सबक लाती है। यह दशा स्थिरता सिखा रही है, और अपने समय पर बीत जाएगी।',
-      'शास्त्रों में इसे परीक्षा का समय कहा जाएगा, बुरा समय नहीं। इसमें फ़र्क़ है, और यह मायने रखता है।',
+      'यहां भी धैर्य की सीख है — अभी आपकी असली कुंडली तक नहीं पहुंच पा रहा, इसलिए अंदाज़ा लगाने के बजाय थोड़ा इंतज़ार करें। कृपया कुछ देर बाद फिर पूछें।',
+      'बिना कुंडली देखे दिया गया जवाब न आपके लिए सही होगा, न मेरे लिए। थोड़ी देर रुककर फिर पूछें।',
+      'पुराने ज्योतिषी भी कुंडली सामने न होने पर चुप रहना बेहतर मानते थे। कृपया थोड़ी देर बाद दोबारा कोशिश करें।',
     ],
   },
   practical: {
     en: [
-      'For career purposes, this period rewards consolidation over expansion — strengthen what you have before starting something new.',
-      'Financially, this is a save-and-plan window, not a spend-and-hope one. The numbers in your chart support patience here.',
-      'If you\'re weighing a job change, wait for the next few months to settle before deciding — the timing improves.',
+      "I can't pull up your real chart data right now — no point giving you generic advice dressed as a reading. Try again in a moment.",
+      'For anything career or money related, I only work from your real numbers — which I can\'t reach just now. Please retry shortly.',
+      "Let's not waste your time on a guess — reconnect in a moment and I'll answer from your actual chart.",
     ],
     hi: [
-      'करियर के लिहाज़ से, यह दौर विस्तार से ज़्यादा मज़बूती का इनाम देता है — नया शुरू करने से पहले जो है उसे मज़बूत करें।',
-      'आर्थिक रूप से, यह बचत और योजना बनाने का समय है, खर्च और उम्मीद का नहीं। आपकी कुंडली के आंकड़े धैर्य का समर्थन करते हैं।',
-      'अगर नौकरी बदलने पर विचार कर रहे हैं, तो अगले कुछ महीने स्थिर होने दें — समय बेहतर होगा।',
+      'अभी आपकी असली कुंडली का डेटा नहीं मिल पा रहा — सामान्य सलाह को पढ़ने जैसा जवाब देने का कोई फ़ायदा नहीं। कृपया थोड़ी देर बाद फिर कोशिश करें।',
+      'करियर या पैसों से जुड़ी किसी भी बात के लिए, मैं सिर्फ़ आपके असली आंकड़ों से काम करता हूं — जो अभी नहीं मिल पा रहे। कृपया थोड़ी देर बाद दोबारा भेजें।',
+      'अंदाज़े में आपका समय बर्बाद नहीं करते — थोड़ी देर बाद दोबारा जुड़ें, मैं आपकी असली कुंडली से जवाब दूंगा।',
     ],
   },
   spiritual: {
     en: [
-      'This difficulty is not punishment — it is redirection. Something in your pattern is ready to change, and the chart is simply pointing at it.',
-      'A simple, consistent practice — even five quiet minutes a day — will do more for this period than any single remedy.',
-      'What looks like an obstacle here is often the exact thing that clears the way, once you stop resisting it.',
+      "This silence is not a bad omen — it's simply that I can't see your real chart right now. Try reaching out again in a moment.",
+      "Even a pause has its place. Give it a little time, and ask again once I can truly see your chart.",
+      "I'd rather sit in honest silence than offer you words that don't come from your actual chart. Please try again shortly.",
     ],
     hi: [
-      'यह कठिनाई सज़ा नहीं है — यह दिशा बदलने का इशारा है। आपके पैटर्न में कुछ बदलने के लिए तैयार है, और कुंडली बस उसी ओर इशारा कर रही है।',
-      'एक सरल, नियमित अभ्यास — दिन में पांच शांत मिनट भी — इस दौर में किसी भी एक उपाय से ज़्यादा काम करेगा।',
-      'जो यहां रुकावट लगती है, वही अक्सर रास्ता खोलने वाली चीज़ होती है, बस विरोध करना छोड़ना होगा।',
+      'यह चुप्पी कोई अशुभ संकेत नहीं — बस इतना है कि अभी आपकी असली कुंडली मुझे दिख नहीं पा रही। थोड़ी देर बाद फिर से संपर्क करें।',
+      'एक ठहराव का भी अपना स्थान है। थोड़ा समय दें, और जब मैं आपकी कुंडली सच में देख पाऊं तब फिर पूछें।',
+      'मैं ईमानदार चुप्पी में रहना बेहतर मानता हूं, बजाय ऐसे शब्दों के जो आपकी असली कुंडली से न आए हों। कृपया थोड़ी देर बाद फिर कोशिश करें।',
     ],
   },
   analytical: {
     en: [
-      'Using Lahiri ayanamsa, your Lagna sits at the very start of its sign — a strong placement that sharpens both its strengths and its weaknesses.',
-      'The current Antardasha lord is placed in a whole-sign kendra from the Moon, which technically supports steady, if slow, progress.',
-      'Cross-referencing the transit of Saturn with your natal chart, the next few months activate your 10th house — professionally significant, worth tracking closely.',
+      "I can't retrieve your computed chart data at this moment — without it, any answer would be unverifiable, so I'd rather not guess. Please retry.",
+      'Cross-referencing requires the real data, which is unavailable right now. Try reconnecting in a moment.',
+      "There's no reliable basis for an answer without your actual chart in front of me right now. Please try again shortly.",
     ],
     hi: [
-      'लाहिड़ी अयनांश के अनुसार, आपका लग्न अपनी राशि की शुरुआत में है — यह एक मज़बूत स्थिति है जो गुण और चुनौती दोनों को तेज़ करती है।',
-      'मौजूदा अंतर्दशा का स्वामी चंद्रमा से होल-साइन केंद्र में स्थित है, जो तकनीकी रूप से स्थिर, भले धीमी, प्रगति का समर्थन करता है।',
-      'शनि के गोचर को जन्म कुंडली से मिलाने पर, अगले कुछ महीने आपके दसवें भाव को सक्रिय करते हैं — पेशेवर रूप से महत्वपूर्ण, ध्यान से देखने लायक।',
+      'अभी आपकी गणना की गई कुंडली का डेटा नहीं मिल पा रहा — इसके बिना कोई भी जवाब सत्यापित नहीं किया जा सकता, इसलिए अंदाज़ा नहीं लगाऊंगा। कृपया दोबारा कोशिश करें।',
+      'तुलना के लिए असली डेटा चाहिए, जो अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद दोबारा जुड़ें।',
+      'अभी आपकी असली कुंडली सामने न होने पर किसी भी जवाब का कोई ठोस आधार नहीं है। कृपया थोड़ी देर बाद फिर कोशिश करें।',
     ],
   },
 };

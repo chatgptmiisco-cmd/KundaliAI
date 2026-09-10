@@ -19,6 +19,17 @@ SIGN_NAMES_HI = [
 # 0 = movable (chara), 1 = fixed (sthira), 2 = dual (dwiswabhava) — indexed by
 # sign index 0=Aries..11=Pisces. Used to derive the Navamsa starting sign.
 SIGN_MODALITY = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2]
+MODALITY_NAMES_EN = ["Movable", "Fixed", "Dual"]
+MODALITY_NAMES_HI = ["चर", "स्थिर", "द्विस्वभाव"]
+
+# 0 = fire, 1 = earth, 2 = air, 3 = water — indexed by sign index 0=Aries..
+# 11=Pisces. The classical element cycle repeats every 4 signs starting at
+# Aries=fire, so this is `sign_index % 4`, kept as an explicit table (rather
+# than computed inline everywhere) for the same readability reason as
+# SIGN_MODALITY above.
+SIGN_ELEMENT = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
+ELEMENT_NAMES_EN = ["Fire", "Earth", "Air", "Water"]
+ELEMENT_NAMES_HI = ["अग्नि", "पृथ्वी", "वायु", "जल"]
 
 # Natural rulership (sign lord), indexed by sign index 0=Aries..11=Pisces —
 # used to work out which house a given house-lord occupies, the backbone of
@@ -62,6 +73,90 @@ PLANET_NAMES_HI: dict[PlanetKey, str] = {
     "Su": "सूर्य", "Mo": "चंद्र", "Ma": "मंगल", "Me": "बुध", "Ju": "गुरु",
     "Ve": "शुक्र", "Sa": "शनि", "Ra": "राहु", "Ke": "केतु",
 }
+
+# Classical Vedic/Chaldean numerology number per planet (1-9, Rahu/Ketu take
+# the traditional 4/7 substitutes) — standard reference table, same category
+# as the name tables above. Used for "today's number" (the weekday lord's
+# number), not a per-user claim.
+PLANET_NUMBER: dict[PlanetKey, int] = {
+    "Su": 1, "Mo": 2, "Ju": 3, "Ra": 4, "Me": 5, "Ve": 6, "Ke": 7, "Sa": 8, "Ma": 9,
+}
+
+# Classical symbol and core theme per nakshatra (standard Jyotish reference
+# facts, same category as NAKSHATRA_NAMES_EN/HI above — not a per-user claim).
+# Index 0=Ashwini .. 26=Revati, matching NAKSHATRA_NAMES_EN/HI order.
+NAKSHATRA_SYMBOL_EN = [
+    "Horse's head", "Yoni (womb)", "Razor", "Chariot", "Deer's head", "Teardrop/gem",
+    "Bow and quiver", "Cow's udder", "Coiled serpent", "Royal throne", "Front legs of a bed",
+    "Back legs of a bed", "Hand", "Bright jewel", "Young shoot swaying in wind", "Triumphal arch",
+    "Lotus", "Circular earring", "Bunch of tied roots", "Elephant tusk (front)", "Elephant tusk (rear)",
+    "Ear", "Drum", "Empty circle", "Front legs of a funeral cot", "Back legs of a funeral cot", "Fish",
+]
+NAKSHATRA_SYMBOL_HI = [
+    "घोड़े का सिर", "योनि", "उस्तरा", "रथ", "हिरण का सिर", "आंसू/रत्न",
+    "धनुष और तरकश", "गाय का थन", "कुंडलित सर्प", "राजसिंहासन", "पलंग के अगले पैर",
+    "पलंग के पिछले पैर", "हाथ", "चमकीला रत्न", "हवा में हिलती नई कोंपल", "विजय द्वार",
+    "कमल", "गोलाकार बाली", "जड़ों का बंधा गुच्छा", "हाथी का दांत (अगला भाग)", "हाथी का दांत (पिछला भाग)",
+    "कान", "ढोल", "खाली वृत्त", "शवयान के अगले पैर", "शवयान के पिछले पैर", "मछली",
+]
+NAKSHATRA_MEANING_EN = [
+    "Speed, healing, and new beginnings.",
+    "Restraint, transformation, and the strength to bear burdens.",
+    "Sharp focus and the courage to cut through what doesn't serve you.",
+    "Growth, beauty, and material abundance.",
+    "A searching, curious mind always chasing the next discovery.",
+    "Storms that clear the way for renewal.",
+    "Renewal, and the return of what was once lost.",
+    "Nourishment, care, and steady support for others.",
+    "Penetrating insight and a magnetic pull.",
+    "Ancestral pride, authority, and legacy.",
+    "Rest, pleasure, and creative enjoyment.",
+    "Generosity, partnership, and steady goodwill.",
+    "Skillful hands and practical resourcefulness.",
+    "A gift for design, brilliance, and standing out.",
+    "Independence and the flexibility to move with change.",
+    "Determined ambition focused on a clear goal.",
+    "Devotion, friendship, and cooperative success.",
+    "Protective leadership and quiet authority.",
+    "Getting to the root of things, even if it means uprooting first.",
+    "Early confidence and persuasive strength.",
+    "Lasting victory earned through discipline.",
+    "Listening, learning, and connecting through communication.",
+    "Rhythm, prosperity, and a drive for recognition.",
+    "Healing, and an independent, unconventional streak.",
+    "Intense transformation through fire and passion.",
+    "Deep wisdom and quiet, steady inner strength.",
+    "Compassion, guidance, and a gentle journey's end.",
+]
+NAKSHATRA_MEANING_HI = [
+    "गति, उपचार और नई शुरुआत।",
+    "संयम, रूपांतरण और बोझ उठाने की शक्ति।",
+    "तीव्र एकाग्रता और जो काम न आए उसे काटने का साहस।",
+    "वृद्धि, सुंदरता और भौतिक समृद्धि।",
+    "खोजी और जिज्ञासु मन, हमेशा नई खोज के पीछे।",
+    "तूफ़ान जो नवीनीकरण का रास्ता साफ़ करते हैं।",
+    "नवीनीकरण, और जो खो गया था उसकी वापसी।",
+    "पोषण, देखभाल और दूसरों को स्थिर सहारा।",
+    "गहरी अंतर्दृष्टि और एक चुंबकीय खिंचाव।",
+    "पारिवारिक गौरव, अधिकार और विरासत।",
+    "आराम, आनंद और रचनात्मक सुख।",
+    "उदारता, साझेदारी और स्थिर सद्भावना।",
+    "कुशल हाथ और व्यावहारिक साधन-संपन्नता।",
+    "डिज़ाइन की प्रतिभा, चमक और अलग दिखने की क्षमता।",
+    "स्वतंत्रता और बदलाव के साथ ढलने का लचीलापन।",
+    "स्पष्ट लक्ष्य पर केंद्रित दृढ़ महत्वाकांक्षा।",
+    "समर्पण, मित्रता और सहयोगी सफलता।",
+    "सुरक्षात्मक नेतृत्व और शांत अधिकार।",
+    "चीज़ों की जड़ तक पहुंचना, भले ही पहले उखाड़ना पड़े।",
+    "शुरुआती आत्मविश्वास और प्रेरक शक्ति।",
+    "अनुशासन से अर्जित स्थायी विजय।",
+    "सुनना, सीखना और संवाद से जुड़ना।",
+    "लय, समृद्धि और पहचान पाने की चाह।",
+    "उपचार, और एक स्वतंत्र, अपरंपरागत प्रवृत्ति।",
+    "आग और जुनून से गुज़रता गहरा रूपांतरण।",
+    "गहरी बुद्धि और शांत, स्थिर आंतरिक शक्ति।",
+    "करुणा, मार्गदर्शन और यात्रा का सौम्य समापन।",
+]
 
 NAKSHATRA_SPAN_DEG = 360 / 27  # 13°20'
 

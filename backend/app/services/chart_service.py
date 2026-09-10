@@ -24,7 +24,7 @@ from app.astro.constants import (
     SIGN_NAMES_HI,
 )
 from app.astro.ephemeris import julian_day_ut
-from app.astro.natal_insights import planet_dignity
+from app.astro.natal_insights import is_combust, planet_dignity
 from app.astro.panchang import nakshatra_pada
 from app.db.models.birth_profile import BirthProfile
 from app.db.models.cache import ChartCache
@@ -81,6 +81,7 @@ def _dict_to_response(data: dict, cached: bool) -> ChartResponse:
         nakshatra_name_en = nakshatra_name_hi = None
         pada = None
         dignity = None
+        combust = None
         if longitude is not None:
             # Exact degree-within-sign only makes sense for D1 — a D9/D10
             # sign is a discretized bucket, not a position with its own
@@ -101,6 +102,9 @@ def _dict_to_response(data: dict, cached: bool) -> ChartResponse:
             # entry in the exaltation/debilitation/own-sign tables.
             if planet in ("Su", "Mo", "Ma", "Me", "Ju", "Ve", "Sa"):
                 dignity = planet_dignity(planet, sign)
+            sun_longitude = planet_longitude.get("Su")
+            if sun_longitude is not None:
+                combust = is_combust(planet, longitude, sun_longitude)
 
         planets.append(
             PlanetPlacement(
@@ -118,6 +122,7 @@ def _dict_to_response(data: dict, cached: bool) -> ChartResponse:
                 nakshatra_name_hi=nakshatra_name_hi,
                 nakshatra_pada=pada,
                 dignity=dignity,
+                combust=combust,
             )
         )
     lagna_sign = data["lagna_sign_index"]
@@ -150,9 +155,16 @@ def _select_stmt(profile: BirthProfile, chart_type: ChartType):
 
 
 async def get_chart(db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, chart_type: ChartType) -> ChartResponse:
+    # Fields added after this cache table first shipped — a cached row from
+    # before house_breakdown/yogas existed is treated as stale and
+    # recomputed (see below), rather than silently serving an empty [] for
+    # both forever (the ChartResponse defaults exist for backward-compat
+    # deserialization, not to mask genuinely missing data on an old row).
+    _REQUIRED_CACHE_KEYS = ("house_breakdown", "yogas")
+
     result = await db.execute(_select_stmt(profile, chart_type))
     cached_row = result.scalar_one_or_none()
-    if cached_row is not None:
+    if cached_row is not None and all(key in cached_row.data for key in _REQUIRED_CACHE_KEYS):
         return _dict_to_response(cached_row.data, cached=True)
 
     jd_ut = julian_day_ut(birth_datetime_utc(birth))
@@ -171,9 +183,18 @@ async def get_chart(db: AsyncSession, profile: BirthProfile, birth: BirthDataOut
 
     data["house_breakdown"] = build_house_breakdown(chart_result)
     # Yoga/dosha detection (Gajakesari, Panch Mahapurusha, Raj Yoga, Manglik,
-    # Kaal Sarp, Kemadruma) is a natal (D1) reading convention — a D9/D10
-    # sign is a computed bucket, not a placement these classical checks apply to.
-    data["yogas"] = detect_yogas(chart_result) if chart_type == "D1" else []
+    # Kaal Sarp, Kemadruma) was classically devised for D1 charts, but the
+    # detection rules themselves (mutual Kendra, dignity, house placement)
+    # are structurally well-defined for any divisional chart's own sign
+    # placements — applying the same real, placement-based checks to D9/D10
+    # is a documented simplification (not every classical text endorses
+    # checking Panch Mahapurusha in Navamsha/Dashamsha), not a fabricated one.
+    data["yogas"] = detect_yogas(chart_result)
+
+    if cached_row is not None:
+        cached_row.data = data
+        await db.commit()
+        return _dict_to_response(data, cached=False)
 
     row = ChartCache(user_id=profile.user_id, chart_type=chart_type, birth_profile_version=profile.version, data=data)
     data, was_race = await add_and_commit_or_fetch_existing(db, row, _select_stmt(profile, chart_type))

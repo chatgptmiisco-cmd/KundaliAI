@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import BulletList from '../components/BulletList';
 import Card from '../components/Card';
@@ -13,6 +13,7 @@ import PlanetPositionsTable from '../components/PlanetPositionsTable';
 import PremiumModal from '../components/PremiumModal';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionHeader from '../components/SectionHeader';
+import NorthIndianChart from '../components/NorthIndianChart';
 import SouthIndianChart from '../components/SouthIndianChart';
 import SpeakerButton from '../components/SpeakerButton';
 import { trackEvent } from '../analytics/analytics';
@@ -26,6 +27,8 @@ export default function CompleteKundaliScreen() {
   const navigation = useNavigation<any>();
   const language = toContentLanguage(useUserStore((s) => s.language));
   const isPremium = useUserStore((s) => s.isPremium);
+  const chartStyle = useUserStore((s) => s.chartStyle);
+  const setChartStyle = useUserStore((s) => s.setChartStyle);
 
   const complete = useKundaliStore((s) => s.complete[language]);
   const loading = useKundaliStore((s) => s.completeLoading);
@@ -102,8 +105,30 @@ export default function CompleteKundaliScreen() {
       {d1Chart && (
         <Card style={styles.chartCard}>
           <SectionHeader title={t('kundali.yourKundaliTitle')} />
+          <View style={styles.styleToggle}>
+            <Pressable
+              onPress={() => setChartStyle('north')}
+              style={[styles.styleToggleButton, chartStyle === 'north' && styles.styleToggleButtonActive]}
+            >
+              <Text style={[styles.styleToggleText, chartStyle === 'north' && styles.styleToggleTextActive]}>
+                {t('charts.northIndianStyle')}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setChartStyle('south')}
+              style={[styles.styleToggleButton, chartStyle === 'south' && styles.styleToggleButtonActive]}
+            >
+              <Text style={[styles.styleToggleText, chartStyle === 'south' && styles.styleToggleTextActive]}>
+                {t('charts.southIndianStyle')}
+              </Text>
+            </Pressable>
+          </View>
           <View style={styles.chartWrap}>
-            <SouthIndianChart chart={d1Chart} language={language} size={280} />
+            {chartStyle === 'north' ? (
+              <NorthIndianChart chart={d1Chart} language={language} size={280} />
+            ) : (
+              <SouthIndianChart chart={d1Chart} language={language} size={280} />
+            )}
           </View>
         </Card>
       )}
@@ -209,6 +234,31 @@ const styles = StyleSheet.create({
   },
   chartCard: {
     alignItems: 'center',
+  },
+  styleToggle: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    padding: spacing.xs,
+    alignSelf: 'stretch',
+    marginTop: spacing.sm,
+  },
+  styleToggleButton: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.sm,
+  },
+  styleToggleButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  styleToggleText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+  },
+  styleToggleTextActive: {
+    color: colors.textInverse,
   },
   chartWrap: {
     paddingVertical: spacing.sm,

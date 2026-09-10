@@ -10,6 +10,7 @@ from app.db.models.birth_profile import BirthProfile
 from app.schemas.daily_reading import DailyReadingResponse
 from app.schemas.focus_reading import FocusReadingsResponse
 from app.schemas.guna_milan import GunaMilanRequest, GunaMilanResponse
+from app.schemas.identity import IdentityResponse
 from app.schemas.kundali import CompleteKundaliResponse
 from app.schemas.manglik import ManglikStatusResponse
 from app.schemas.validation import ValidationQuestionsResponse
@@ -17,6 +18,7 @@ from app.services import user_service
 from app.services.daily_reading_service import get_daily_reading
 from app.services.focus_reading_service import get_focus_readings
 from app.services.guna_milan_service import get_guna_milan
+from app.services.identity_service import get_identity
 from app.services.kundali_service import get_complete_kundali
 from app.services.manglik_service import get_manglik_status
 from app.services.validation_service import get_validation_questions
@@ -35,6 +37,17 @@ async def daily_reading(
 ):
     birth = user_service.decrypt_birth_data(profile)
     return await get_daily_reading(db, profile, birth, date, language)
+
+
+@router.get("/identity", response_model=IdentityResponse)
+@limiter.limit("30/minute")
+async def identity(
+    request: Request,
+    profile: BirthProfile = Depends(require_birth_profile),
+    db: AsyncSession = Depends(get_db),
+):
+    birth = user_service.decrypt_birth_data(profile)
+    return await get_identity(db, profile, birth)
 
 
 @router.get("/focus-readings", response_model=FocusReadingsResponse)

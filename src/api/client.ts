@@ -10,15 +10,20 @@ import {
   Dignity,
   FocusAreaReading,
   GunaMilanResult,
+  Identity,
   KundaliComplete,
   KundaliSection,
   KundaliSummary,
   Language,
   ManglikStatus,
+  MarriageTimingPrediction,
   PeriodAnalysis,
   PlanetDetail,
   PlanetKey,
+  PreferenceKey,
+  QuarterOutlook,
   ValidationQuestion,
+  YearOutlook,
 } from '../types/kundali';
 
 // ---------------------------------------------------------------------------
@@ -100,6 +105,54 @@ export function restoreAuthToken(token: string | null) {
 export async function deleteAccount(): Promise<void> {
   await apiRequest<void>('/user/account', { method: 'DELETE' });
   setAuthToken(null);
+}
+
+// ---------------------------------------------------------------------------
+// Profile — used right after auth to check whether this account already has
+// birth data saved (a returning user on a new device/browser), so onboarding
+// can be skipped instead of asking them to re-enter everything.
+// ---------------------------------------------------------------------------
+
+interface UserProfileApi {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  preferred_language: string;
+  subscription_tier: string;
+  birth_data: {
+    name: string;
+    date_of_birth: string;
+    time_of_birth: string;
+    place_of_birth: string;
+  } | null;
+  preferences: string[];
+}
+
+export async function getUserProfile(): Promise<{ birthData: BirthData | null; preferences: PreferenceKey[] }> {
+  const data = await apiRequest<UserProfileApi>('/user/profile');
+  return {
+    birthData: data.birth_data
+      ? {
+          name: data.birth_data.name,
+          dateOfBirth: data.birth_data.date_of_birth,
+          timeOfBirth: data.birth_data.time_of_birth,
+          placeOfBirth: data.birth_data.place_of_birth,
+        }
+      : null,
+    // Defensive filter (same convention as useUserStore's persisted-state
+    // migration) so a preference key from a since-renamed build never
+    // reaches an icon/label lookup keyed by the current PreferenceKey union.
+    preferences: data.preferences.filter((p): p is PreferenceKey =>
+      (['family', 'health', 'career', 'marriageRelationships', 'friends'] as string[]).includes(p),
+    ),
+  };
+}
+
+export async function putPreferences(preferences: PreferenceKey[]): Promise<void> {
+  await apiRequest('/user/profile/preferences', {
+    method: 'PUT',
+    body: { preferences },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +385,7 @@ interface PlanetPlacementApi {
   nakshatra_name_hi: string | null;
   nakshatra_pada: number | null;
   dignity: Dignity | null;
+  combust: boolean | null;
 }
 
 interface HouseBreakdownApi {
@@ -386,6 +440,7 @@ export async function getChart(type: ChartType, lang: Language): Promise<BirthCh
         nakshatraName: lang === 'hi' ? p.nakshatra_name_hi : p.nakshatra_name_en,
         nakshatraPada: p.nakshatra_pada,
         dignity: p.dignity,
+        combust: p.combust,
       },
     ]),
   ) as Partial<Record<PlanetKey, PlanetDetail>>;
@@ -413,6 +468,88 @@ export async function getChart(type: ChartType, lang: Language): Promise<BirthCh
       nameHi: y.name_hi,
       descriptionEn: y.description_en,
       descriptionHi: y.description_hi,
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Identity basics — Big Three (Lagna/Moon/Sun), birth Nakshatra, and an
+// element/modality breakdown across Lagna + the 9 grahas. Both languages
+// come back in one payload (same bilingual-in-one-response convention as
+// getChart above), so this is cached once, not per-language.
+// ---------------------------------------------------------------------------
+
+interface SignIdentityApi {
+  sign_en: string;
+  sign_hi: string;
+  meaning_en: string;
+  meaning_hi: string;
+  real_effect_en: string;
+  real_effect_hi: string;
+}
+
+interface NakshatraIdentityApi {
+  name_en: string;
+  name_hi: string;
+  pada: number;
+  lord_en: string;
+  lord_hi: string;
+  symbol_en: string;
+  symbol_hi: string;
+  meaning_en: string;
+  meaning_hi: string;
+}
+
+interface ElementModalityPointApi {
+  point_key: string;
+  point_label_en: string;
+  point_label_hi: string;
+  element_en: string;
+  element_hi: string;
+  modality_en: string;
+  modality_hi: string;
+}
+
+interface IdentityApi {
+  lagna: SignIdentityApi;
+  moon_sign: SignIdentityApi;
+  sun_sign: SignIdentityApi;
+  nakshatra: NakshatraIdentityApi;
+  element_modality: ElementModalityPointApi[];
+}
+
+function mapSignIdentity(s: SignIdentityApi) {
+  return {
+    signEn: s.sign_en, signHi: s.sign_hi, meaningEn: s.meaning_en, meaningHi: s.meaning_hi,
+    realEffectEn: s.real_effect_en, realEffectHi: s.real_effect_hi,
+  };
+}
+
+export async function getIdentity(): Promise<Identity> {
+  const data = await apiRequest<IdentityApi>('/kundali/identity');
+  return {
+    lagna: mapSignIdentity(data.lagna),
+    moonSign: mapSignIdentity(data.moon_sign),
+    sunSign: mapSignIdentity(data.sun_sign),
+    nakshatra: {
+      nameEn: data.nakshatra.name_en,
+      nameHi: data.nakshatra.name_hi,
+      pada: data.nakshatra.pada,
+      lordEn: data.nakshatra.lord_en,
+      lordHi: data.nakshatra.lord_hi,
+      symbolEn: data.nakshatra.symbol_en,
+      symbolHi: data.nakshatra.symbol_hi,
+      meaningEn: data.nakshatra.meaning_en,
+      meaningHi: data.nakshatra.meaning_hi,
+    },
+    elementModality: data.element_modality.map((p) => ({
+      pointKey: p.point_key,
+      pointLabelEn: p.point_label_en,
+      pointLabelHi: p.point_label_hi,
+      elementEn: p.element_en,
+      elementHi: p.element_hi,
+      modalityEn: p.modality_en,
+      modalityHi: p.modality_hi,
     })),
   };
 }
@@ -517,6 +654,111 @@ export async function getPeriodAnalysis(
 }
 
 // ---------------------------------------------------------------------------
+// Prediction Engine — Varshaphala (annual chart) + dasha/transit-based year
+// outlook, and a dasha/transit window scan for marriage timing. Real
+// computed astrology only, same as everywhere else in this app — no LLM.
+// ---------------------------------------------------------------------------
+
+interface QuarterOutlookApi {
+  start_date: string;
+  end_date: string;
+  dominant_dasha_lord: string;
+  dominant_dasha_lord_name: string;
+  theme: string;
+  rating: number;
+  opportunities: string[];
+  risks: string[];
+}
+
+interface YearOutlookApi {
+  year: number;
+  overall_rating: number;
+  overall_theme: string;
+  varsheshwar: string;
+  varsheshwar_name: string;
+  muntha_house: number;
+  quarters: QuarterOutlookApi[];
+  cached: boolean;
+}
+
+function mapQuarterOutlook(q: QuarterOutlookApi): QuarterOutlook {
+  return {
+    startDate: q.start_date,
+    endDate: q.end_date,
+    dominantDashaLord: q.dominant_dasha_lord as PlanetKey,
+    dominantDashaLordName: q.dominant_dasha_lord_name,
+    theme: q.theme,
+    rating: q.rating,
+    opportunities: q.opportunities,
+    risks: q.risks,
+  };
+}
+
+function mapYearOutlook(y: YearOutlookApi): YearOutlook {
+  return {
+    year: y.year,
+    overallRating: y.overall_rating,
+    overallTheme: y.overall_theme,
+    varsheshwar: y.varsheshwar as PlanetKey,
+    varsheshwarName: y.varsheshwar_name,
+    munthaHouse: y.muntha_house,
+    quarters: y.quarters.map(mapQuarterOutlook),
+  };
+}
+
+export async function getYearAheadOutlook(lang: Language, year?: number): Promise<YearOutlook> {
+  const data = await apiRequest<YearOutlookApi>('/prediction/year-ahead', {
+    query: { language: lang, year },
+  });
+  return mapYearOutlook(data);
+}
+
+export async function getMultiYearOutlook(lang: Language, years: number): Promise<YearOutlook[]> {
+  const data = await apiRequest<{ years: YearOutlookApi[] }>('/prediction/multi-year', {
+    query: { language: lang, years },
+  });
+  return data.years.map(mapYearOutlook);
+}
+
+interface MarriageWindowApi {
+  start_date: string;
+  end_date: string;
+  mahadasha_lord: string;
+  mahadasha_lord_name: string;
+  antardasha_lord: string;
+  antardasha_lord_name: string;
+  score: number;
+  reason: string;
+  transit_corroborated: boolean;
+}
+
+interface MarriageTimingApi {
+  windows: MarriageWindowApi[];
+  manglik_note: string | null;
+  cached: boolean;
+}
+
+export async function getMarriageTimingPrediction(lang: Language): Promise<MarriageTimingPrediction> {
+  const data = await apiRequest<MarriageTimingApi>('/prediction/marriage-timing', {
+    query: { language: lang },
+  });
+  return {
+    windows: data.windows.map((w) => ({
+      startDate: w.start_date,
+      endDate: w.end_date,
+      mahadashaLord: w.mahadasha_lord as PlanetKey,
+      mahadashaLordName: w.mahadasha_lord_name,
+      antardashaLord: w.antardasha_lord as PlanetKey,
+      antardashaLordName: w.antardasha_lord_name,
+      score: w.score,
+      reason: w.reason,
+      transitCorroborated: w.transit_corroborated,
+    })),
+    manglikNote: data.manglik_note,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Daily reading — the full "today" engine output (rating, theme, doshas,
 // panchang, etc.), all backend-calculated.
 // ---------------------------------------------------------------------------
@@ -549,7 +791,10 @@ interface DailyReadingApi {
   lunar_month: string;
   festival: string | null;
   today_color: string;
+  lucky_number: number;
+  today_guidance: string[];
   doshas: { key: string; label: string; is_present: boolean }[];
+  jupiter_transiting_moon_sign: boolean;
 }
 
 export async function getDailyReading(lang: Language): Promise<DailyReading> {
@@ -582,7 +827,10 @@ export async function getDailyReading(lang: Language): Promise<DailyReading> {
     lunarMonth: data.lunar_month,
     festival: data.festival,
     todayColor: data.today_color,
+    luckyNumber: data.lucky_number,
+    todayGuidance: data.today_guidance,
     doshas: data.doshas.map((d) => ({ key: d.key, label: d.label, isPresent: d.is_present })),
+    jupiterTransitingMoonSign: data.jupiter_transiting_moon_sign,
   };
 }
 
@@ -659,10 +907,10 @@ export async function checkoutSubscription(
 // credit-based fallback used below Strategy)
 // ---------------------------------------------------------------------------
 
-export async function postChatMessage(message: string, lang: Language): Promise<string> {
+export async function postChatMessage(message: string, lang: Language, rishiId: string): Promise<string> {
   const res = await apiRequest<{ reply: string }>('/chat/astro', {
     method: 'POST',
-    body: { message, language: lang },
+    body: { message, language: lang, rishi_id: rishiId },
   });
   return res.reply;
 }

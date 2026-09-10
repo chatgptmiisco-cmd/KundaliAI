@@ -70,6 +70,9 @@ def test_rating_reflects_dignity_house_placement_and_todays_transit():
     assert by_area["family"]["rating"] == 10
     assert by_area["family"]["transit_note"] is not None
     assert "Jupiter" in by_area["family"]["transit_note"]
+    # Jupiter is a benefic transit here — the note must say what that means
+    # (real progress), not just the bare fact that it's passing through.
+    assert "progress" in by_area["family"]["transit_note"]
 
     # Career: nothing transits house 10 in this snapshot -> no transit note,
     # but exalted dignity (+3) + growth-house placement (+1) still applies.

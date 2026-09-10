@@ -269,3 +269,118 @@ async def test_chat_reply_falls_back_to_chart_summary_when_nothing_matches():
 async def test_chat_reply_handles_empty_history_without_crashing():
     reply = await interpreter.chat_reply([], _CHAT_CONTEXT, "en")
     assert "Sagittarius" in reply
+
+
+# --- chat_reply: per-Rishi specialization -----------------------------------
+# "Vasishtha only answers life direction, Parashara only timing, Gargi only
+# relationships" — each Rishi answers questions in their own specialty from
+# the same real facts as above, and redirects anything else to whichever
+# Rishi actually owns it, instead of all five giving the same universal
+# answer to every topic.
+
+def _rishi_context(rishi_id: str) -> dict:
+    return {**_CHAT_CONTEXT, "rishi_id": rishi_id}
+
+
+async def test_bhrigu_answers_career_question_in_his_own_domain():
+    # In-domain answers are prefixed with a rotating in-character lead-in
+    # (see _pick_variant) rather than returned bare, so this checks
+    # containment of the real fact, not an exact string match.
+    reply = await interpreter.chat_reply(_history("How's my career looking?"), _rishi_context("bhrigu"), "en")
+    assert _CHAT_CONTEXT["house_breakdown"][10] in reply
+
+
+async def test_bhrigu_still_answers_a_marriage_question_but_points_to_gargi():
+    # Out-of-specialty no longer means a bare refusal — the user still gets
+    # the real, chart-grounded answer, just with a pointer to the specialist
+    # for more depth.
+    reply = await interpreter.chat_reply(_history("Tell me about my marriage prospects"), _rishi_context("bhrigu"), "en")
+    assert _CHAT_CONTEXT["house_breakdown"][7] in reply
+    assert "Gargi" in reply
+    assert reply != _CHAT_CONTEXT["house_breakdown"][7]  # the pointer is appended, not silently dropped
+
+
+async def test_gargi_answers_marriage_but_still_answers_career_with_a_pointer_to_bhrigu():
+    in_domain = await interpreter.chat_reply(_history("Tell me about my marriage prospects"), _rishi_context("gargi"), "en")
+    assert _CHAT_CONTEXT["house_breakdown"][7] in in_domain
+
+    out_of_domain = await interpreter.chat_reply(_history("How's my career looking?"), _rishi_context("gargi"), "en")
+    assert _CHAT_CONTEXT["house_breakdown"][10] in out_of_domain
+    assert "Bhrigu" in out_of_domain
+
+
+async def test_parashara_answers_dasha_but_still_answers_dosha_with_a_pointer_to_agastya():
+    in_domain = await interpreter.chat_reply(
+        _history("What dasha am I running right now?"), _rishi_context("parashara"), "en"
+    )
+    assert "Jupiter" in in_domain and "Saturn" in in_domain
+
+    out_of_domain = await interpreter.chat_reply(_history("Am I manglik?"), _rishi_context("parashara"), "en")
+    assert "Manglik" in out_of_domain  # the real dosha finding, not just a refusal
+    assert "Agastya" in out_of_domain
+
+
+async def test_agastya_answers_dosha_and_yoga_but_points_to_bhrigu_for_money():
+    dosha_reply = await interpreter.chat_reply(_history("Am I manglik?"), _rishi_context("agastya"), "en")
+    assert "Manglik" in dosha_reply
+
+    yoga_reply = await interpreter.chat_reply(_history("Do I have any yoga in my chart?"), _rishi_context("agastya"), "en")
+    assert "Gajakesari" in yoga_reply
+
+    # _CHAT_CONTEXT's house_breakdown fixture has no house 2 (money) entry —
+    # a real chart always would, but this exercises the "genuinely nothing to
+    # answer with" fallback path: a pure pointer to Bhrigu, not a fabricated
+    # answer.
+    money_reply = await interpreter.chat_reply(_history("What about money?"), _rishi_context("agastya"), "en")
+    assert "Bhrigu" in money_reply
+
+
+async def test_vasishtha_answers_today_question_but_points_to_parashara():
+    reply = await interpreter.chat_reply(_history("What's today looking like for me?"), _rishi_context("vasishtha"), "en")
+    assert "Diwali" in reply  # real content from the daily reading, not withheld
+    assert "Parashara" in reply
+
+
+async def test_each_rishi_gives_a_distinct_specialized_fallback_when_nothing_matches():
+    replies = {
+        rishi_id: await interpreter.chat_reply(_history("blah unrelated gibberish xyz"), _rishi_context(rishi_id), "en")
+        for rishi_id in ["vasishtha", "parashara", "gargi", "agastya", "bhrigu"]
+    }
+    # No longer the old universal "you can ask about career, marriage, money,
+    # health..." string identical for every persona — five distinct replies.
+    assert len(set(replies.values())) == 5
+
+
+async def test_rishi_specialization_answers_in_hindi_too():
+    reply = await interpreter.chat_reply(_history("मेरी शादी कैसी रहेगी?"), _rishi_context("gargi"), "hi")
+    assert _CHAT_CONTEXT["house_breakdown"][7] in reply
+
+
+def _history_with_length(message: str, total_length: int) -> list[dict[str, str]]:
+    filler = [{"role": "assistant", "content": "..."} for _ in range(total_length - 1)]
+    return filler + [{"role": "user", "content": message}]
+
+
+async def test_rishi_lead_in_and_fallback_rotate_instead_of_repeating():
+    # "Talk like a real person, not the same repeated template" — the same
+    # in-domain question asked at different points in a growing conversation
+    # gets a different (hand-written) lead-in each time, while the
+    # underlying real fact stays byte-for-byte identical.
+    replies = [
+        await interpreter.chat_reply(_history_with_length("How's my career looking?", n), _rishi_context("bhrigu"), "en")
+        for n in (1, 2, 3)
+    ]
+    assert len(set(replies)) == 3
+    for reply in replies:
+        assert _CHAT_CONTEXT["house_breakdown"][10] in reply
+
+    # Same rotation applies to the "nothing matched" fallback text.
+    fallback_replies = [
+        await interpreter.chat_reply(_history_with_length("blah unrelated gibberish xyz", n), _rishi_context("vasishtha"), "en")
+        for n in (1, 2, 3)
+    ]
+    assert len(set(fallback_replies)) == 3
+
+    redirect = await interpreter.chat_reply(_history("मेरा करियर कैसा रहेगा?"), _rishi_context("gargi"), "hi")
+    assert _CHAT_CONTEXT["house_breakdown"][10] in redirect
+    assert "भृगु" in redirect
