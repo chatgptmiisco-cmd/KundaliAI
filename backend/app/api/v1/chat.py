@@ -16,7 +16,14 @@ from app.services.chart_service import get_chart
 from app.services.daily_reading_service import get_daily_reading
 from app.services.dasha_service import get_current_dasha
 from app.services.interpretation.factory import get_interpreter
-from app.services.interpretation.templates import message_mentions_marriage_timing, message_mentions_year_ahead
+from app.services.interpretation.templates import (
+    message_mentions_career_timing,
+    message_mentions_children_timing,
+    message_mentions_foreign_travel_timing,
+    message_mentions_marriage_timing,
+    message_mentions_wealth_timing,
+    message_mentions_year_ahead,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -89,13 +96,37 @@ async def chat_astro(
             {"start_date": w.start_date.isoformat(), "end_date": w.end_date.isoformat(), "reason": w.reason}
             for w in marriage_timing.windows
         ]
+
+    # Career/wealth/children/foreign-travel timing — same conditional-fetch
+    # pattern as marriage timing above, one block per event type since each
+    # needs its own get_life_event_timing(event_type=...) call.
+    _LIFE_EVENT_CHECKS = (
+        ("career", message_mentions_career_timing, "career_timing_windows"),
+        ("wealth", message_mentions_wealth_timing, "wealth_timing_windows"),
+        ("children", message_mentions_children_timing, "children_timing_windows"),
+        ("foreign_travel", message_mentions_foreign_travel_timing, "foreign_travel_timing_windows"),
+    )
+    for event_type, mentions_fn, context_key in _LIFE_EVENT_CHECKS:
+        if mentions_fn(body.message):
+            life_event = await prediction_service.get_life_event_timing(db, profile, birth, event_type, body.language)
+            context[context_key] = [
+                {"start_date": w.start_date.isoformat(), "end_date": w.end_date.isoformat(), "reason": w.reason}
+                for w in life_event.windows
+            ]
+
     if message_mentions_year_ahead(body.message):
         current_year = datetime.now(timezone.utc).year
         year_ahead = await prediction_service.get_year_ahead(db, profile, birth, current_year, body.language)
+        today = date.today()
+        current_quarter = next(
+            (q for q in year_ahead.quarters if q.start_date <= today <= q.end_date), None
+        )
         context["year_ahead"] = {
             "year": year_ahead.year,
             "overall_rating": year_ahead.overall_rating,
             "overall_theme": year_ahead.overall_theme,
+            "current_quarter_opportunity": current_quarter.opportunities[0] if current_quarter and current_quarter.opportunities else None,
+            "current_quarter_risk": current_quarter.risks[0] if current_quarter and current_quarter.risks else None,
         }
 
     # History is scoped per-Rishi (matches the frontend's separate

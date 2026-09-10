@@ -1,5 +1,6 @@
 """Deterministic, no-LLM text composition for the Prediction Engine (year
-outlook + marriage timing). Standalone functions, deliberately NOT part of
+outlook, marriage timing, and life-event timing — career/wealth/children/
+foreign travel). Standalone functions, deliberately NOT part of
 the `Interpreter` ABC/factory (see app.services.interpretation.factory) — a
 prediction is astrology's own computed facts turned into plain language, and
 must stay rule-based even if the app's other prose (chat replies, etc.) is
@@ -208,4 +209,101 @@ def marriage_window_reason_text(
     text = " ".join(sentences)
     if transit_corroborated:
         text += " " + (_TRANSIT_CORROBORATION_HI if language == "hi" else _TRANSIT_CORROBORATION_EN)
+    return text
+
+
+# --- Life-event timing (career/wealth/children/foreign_travel) reason text -
+# Generic version of the marriage-reason composer above, parametrized by
+# event type — see app.astro.life_event_timing for the matching rule/reason
+# keys (f"{event_type}_house_lord_antardasha" etc.) this parses.
+
+_EVENT_HOUSE_PHRASE_EN: dict[str, str] = {
+    "career": "your 10th house of career", "wealth": "your 2nd house of wealth",
+    "children": "your 5th house of children", "foreign_travel": "your 12th house of foreign lands",
+}
+_EVENT_HOUSE_PHRASE_HI: dict[str, str] = {
+    "career": "आपके करियर के दसवें भाव", "wealth": "आपके धन के दूसरे भाव",
+    "children": "आपकी संतान के पांचवें भाव", "foreign_travel": "आपके विदेश के बारहवें भाव",
+}
+# Per-(event, karaka) framing — the SAME planet means something different
+# depending which event it's a karaka for (Jupiter is the children karaka
+# here, a wealth significator there), so this is keyed by pair, not by
+# planet alone. Name and description are kept SEPARATE (not one combined
+# comma-appositive string) so the Mahadasha sentence can attach "'s broader
+# Mahadasha" to the bare planet name — appending it after a full appositive
+# phrase ("Rahu, the significator of foreign lands and relocation's broader
+# Mahadasha") reads as though "relocation" possesses the Mahadasha, not Rahu.
+_EVENT_KARAKA_NAME_EN: dict[tuple[str, str], str] = {
+    ("career", "Sa"): "Saturn", ("career", "Su"): "the Sun",
+    ("wealth", "Ju"): "Jupiter", ("wealth", "Ve"): "Venus",
+    ("children", "Ju"): "Jupiter",
+    ("foreign_travel", "Ra"): "Rahu", ("foreign_travel", "Ju"): "Jupiter",
+}
+_EVENT_KARAKA_NAME_HI: dict[tuple[str, str], str] = {
+    ("career", "Sa"): "शनि", ("career", "Su"): "सूर्य",
+    ("wealth", "Ju"): "गुरु", ("wealth", "Ve"): "शुक्र",
+    ("children", "Ju"): "गुरु",
+    ("foreign_travel", "Ra"): "राहु", ("foreign_travel", "Ju"): "गुरु",
+}
+_EVENT_KARAKA_DESC_EN: dict[tuple[str, str], str] = {
+    ("career", "Sa"): "your karma/profession karaka",
+    ("career", "Su"): "the karaka for authority and status",
+    ("wealth", "Ju"): "a classical wealth significator",
+    ("wealth", "Ve"): "a classical wealth significator",
+    ("children", "Ju"): "the classical santan (children) karaka",
+    ("foreign_travel", "Ra"): "the classical significator of foreign lands and relocation",
+    ("foreign_travel", "Ju"): "co-significator of long journeys",
+}
+_EVENT_KARAKA_DESC_HI: dict[tuple[str, str], str] = {
+    ("career", "Sa"): "आपका कर्म/पेशा कारक",
+    ("career", "Su"): "अधिकार और प्रतिष्ठा का कारक",
+    ("wealth", "Ju"): "धन का एक शास्त्रीय कारक",
+    ("wealth", "Ve"): "धन का एक शास्त्रीय कारक",
+    ("children", "Ju"): "संतान का शास्त्रीय कारक",
+    ("foreign_travel", "Ra"): "विदेश और स्थानांतरण का शास्त्रीय कारक",
+    ("foreign_travel", "Ju"): "लंबी यात्राओं का सह-कारक",
+}
+_EVENT_TRANSIT_CORROBORATION_EN = "A relevant planet also transits {house} during this window — an extra classical signal pointing the same way."
+_EVENT_TRANSIT_CORROBORATION_HI = "इस अवधि के दौरान एक संबंधित ग्रह भी {house} से गुज़रता है — यह उसी दिशा में एक अतिरिक्त शास्त्रीय संकेत है।"
+
+
+def life_event_reason_text(
+    event_type: str, reason_keys: list[str], house_lord_name: str, transit_corroborated: bool, language: Language
+) -> str:
+    hi = language == "hi"
+    house_phrase = (_EVENT_HOUSE_PHRASE_HI if hi else _EVENT_HOUSE_PHRASE_EN)[event_type]
+    karaka_names = _EVENT_KARAKA_NAME_HI if hi else _EVENT_KARAKA_NAME_EN
+    karaka_descs = _EVENT_KARAKA_DESC_HI if hi else _EVENT_KARAKA_DESC_EN
+
+    sentences: list[str] = []
+    for key in reason_keys:
+        if key == f"{event_type}_house_lord_antardasha":
+            sentences.append(
+                f"{house_lord_name}, {house_phrase} के स्वामी, यहां अपनी अंतर्दशा में है — यह भाव सीधे सक्रिय है।"
+                if hi else
+                f"{house_lord_name}, the lord of {house_phrase}, is running its own Antardasha here — that house is directly activated."
+            )
+        elif key == f"{event_type}_house_lord_mahadasha":
+            sentences.append(
+                f"यह पूरी अवधि {house_lord_name} की व्यापक महादशा में आती है।"
+                if hi else
+                f"This whole stretch falls under {house_lord_name}'s broader Mahadasha."
+            )
+        elif key.startswith(f"{event_type}_karaka_antardasha_"):
+            karaka = key.rsplit("_", 1)[-1]
+            name, desc = karaka_names[(event_type, karaka)], karaka_descs[(event_type, karaka)]
+            sentences.append(f"{name}, {desc}, की यहां अपनी अंतर्दशा चल रही है।" if hi else f"{name}, {desc}, runs its own Antardasha here.")
+        elif key.startswith(f"{event_type}_karaka_mahadasha_"):
+            karaka = key.rsplit("_", 1)[-1]
+            name, desc = karaka_names[(event_type, karaka)], karaka_descs[(event_type, karaka)]
+            sentences.append(
+                f"यह अवधि {name} ({desc}) की व्यापक महादशा में आती है।"
+                if hi else
+                f"This stretch falls under {name}'s broader Mahadasha ({desc})."
+            )
+
+    text = " ".join(sentences)
+    if transit_corroborated:
+        template = _EVENT_TRANSIT_CORROBORATION_HI if hi else _EVENT_TRANSIT_CORROBORATION_EN
+        text += " " + template.format(house=house_phrase)
     return text

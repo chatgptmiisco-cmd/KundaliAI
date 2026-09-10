@@ -163,6 +163,23 @@ class MarriageTimingCache(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class LifeEventTimingCache(Base):
+    """Ranked life-event-timing windows (career/wealth/children/foreign
+    travel), cached per (user, event_type, language, birth profile version)
+    — same invalidation/staleness story as MarriageTimingCache."""
+
+    __tablename__ = "life_event_timing_cache"
+    __table_args__ = (UniqueConstraint("user_id", "event_type", "language", "birth_profile_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(32))
+    language: Mapped[str] = mapped_column(String(8))
+    birth_profile_version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class UsageCounter(Base):
     """Tracks free-tier monthly quota usage (e.g. deep period analyses)."""
 

@@ -47,3 +47,22 @@ class MarriageTimingResponse(BaseModel):
     windows: list[MarriageWindow]
     manglik_note: str | None
     cached: bool
+
+
+class LifeEventWindow(BaseModel):
+    start_date: date
+    end_date: date
+    mahadasha_lord: str
+    mahadasha_lord_name: str
+    antardasha_lord: str
+    antardasha_lord_name: str
+    score: float
+    reason: str
+    transit_corroborated: bool
+
+
+class LifeEventTimingResponse(BaseModel):
+    event_type: str
+    language: str
+    windows: list[LifeEventWindow]
+    cached: bool

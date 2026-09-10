@@ -4,10 +4,16 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_birth_profile
+from app.astro.life_event_timing import EventType
 from app.core.rate_limit import limiter
 from app.db.base import get_db
 from app.db.models.birth_profile import BirthProfile
-from app.schemas.prediction import MarriageTimingResponse, MultiYearOutlookResponse, YearOutlookResponse
+from app.schemas.prediction import (
+    LifeEventTimingResponse,
+    MarriageTimingResponse,
+    MultiYearOutlookResponse,
+    YearOutlookResponse,
+)
 from app.services import prediction_service, user_service
 from app.services.interpretation.base import Language
 
@@ -58,3 +64,16 @@ async def marriage_timing(
 ):
     birth = user_service.decrypt_birth_data(profile)
     return await prediction_service.get_marriage_timing(db, profile, birth, language)
+
+
+@router.get("/life-event-timing", response_model=LifeEventTimingResponse)
+@limiter.limit("20/minute")
+async def life_event_timing(
+    request: Request,
+    event_type: EventType = Query(...),
+    language: Language = Query(default="en"),
+    profile: BirthProfile = Depends(require_birth_profile),
+    db: AsyncSession = Depends(get_db),
+):
+    birth = user_service.decrypt_birth_data(profile)
+    return await prediction_service.get_life_event_timing(db, profile, birth, event_type, language)

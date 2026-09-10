@@ -371,8 +371,14 @@ _TOPIC_HOUSE: dict[str, int] = {
     "education": 9, "friends": 11, "travel": 9, "children": 5, "siblings": 3,
 }
 _TOPIC_KEYWORDS: dict[str, list[str]] = {
-    "career": ["career", "job", "profession", "naukri", "karobar", "नौकरी", "करियर", "पेशा", "व्यापार"],
-    "money": ["money", "finance", "wealth", "income", "paisa", "dhan", "पैसा", "धन", "आर्थिक", "वित्त"],
+    "career": [
+        "career", "job", "profession", "promotion", "business", "naukri", "karobar",
+        "नौकरी", "करियर", "पेशा", "व्यापार", "प्रमोशन",
+    ],
+    "money": [
+        "money", "finance", "financial", "wealth", "income", "paisa", "dhan",
+        "पैसा", "धन", "आर्थिक", "वित्त",
+    ],
     "marriage": [
         "marriage", "marry", "married", "shaadi", "vivah", "husband", "wife", "spouse", "partner",
         "शादी", "विवाह", "पति", "पत्नी", "जीवनसाथी",
@@ -402,7 +408,13 @@ _TODAY_KEYWORDS = ["today", "aaj", "आज", "daily", "din"]
 # "marriage" topic answers with — so it's detected as its own category,
 # reusing the marriage keyword list ANDed with a timing hint, checked before
 # the generic "dasha" category (which would otherwise swallow "when will…").
-_TIMING_HINT_KEYWORDS = ["when", "kab", "कब", "which year", "what age", "kis umar", "किस उम्र"]
+_TIMING_HINT_KEYWORDS = [
+    "when", "kab", "कब", "which year", "what age", "kis umar", "किस उम्र",
+    # Colloquial future-outcome phrasing ("will I ever settle abroad?", "will
+    # I get married?") is just as much a timing question as an explicit
+    # "when" — real users ask it this way at least as often.
+    "will i", "will my", "क्या मैं", "क्या मेरी", "क्या मेरा",
+]
 # "How's my year going" / "how's 2026 looking" likewise needs the real
 # Varshaphala-based Year-Ahead engine, not a bare dasha-lord sentence.
 # Deliberately NOT bare "this year"/"next year"/"yearly" — those show up as
@@ -439,6 +451,95 @@ def message_mentions_year_ahead(message: str) -> bool:
         return True
     return any(k in lowered for k in _YEAR_AHEAD_PHRASES)
 
+
+# Same pattern as marriage timing, generalized to career/wealth/children —
+# reuse the existing topic keyword lists, ANDed with the same timing hint,
+# so a plain non-timing topic question ("what career suits me?") still gets
+# the existing static house-text answer, unchanged.
+def message_mentions_career_timing(message: str) -> bool:
+    lowered = message.lower()
+    has_career = any(k in lowered for k in _TOPIC_KEYWORDS["career"])
+    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
+    return has_career and has_timing
+
+
+def message_mentions_wealth_timing(message: str) -> bool:
+    lowered = message.lower()
+    has_money = any(k in lowered for k in _TOPIC_KEYWORDS["money"])
+    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
+    return has_money and has_timing
+
+
+def message_mentions_children_timing(message: str) -> bool:
+    lowered = message.lower()
+    has_children = any(k in lowered for k in _TOPIC_KEYWORDS["children"])
+    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
+    return has_children and has_timing
+
+
+# Deliberately its own keyword list, not the generic "travel" topic (trip/
+# safar/etc., which stays a plain 9th-house answer) — a genuine foreign-
+# relocation question needs the life-event engine, an ordinary domestic-trip
+# question doesn't.
+_FOREIGN_TRAVEL_KEYWORDS = [
+    "abroad", "foreign country", "foreign", "immigrate", "immigration", "settle abroad",
+    "move overseas", "relocate abroad", "videsh", "pravas", "विदेश", "प्रवास",
+]
+
+
+def message_mentions_foreign_travel_timing(message: str) -> bool:
+    lowered = message.lower()
+    has_foreign = any(k in lowered for k in _FOREIGN_TRAVEL_KEYWORDS)
+    has_timing = any(k in lowered for k in _TIMING_HINT_KEYWORDS)
+    return has_foreign and has_timing
+
+
+# Shared chat-answer composer for the 4 life-event-timing categories — same
+# "top window + reason, or an honest no-window-found line" shape as the
+# marriage_timing branch below, factored out once instead of repeated 4x
+# since (unlike marriage) these have no bespoke copy of their own.
+_LIFE_EVENT_LABEL_EN: dict[str, str] = {
+    "career_timing": "a career or job change",
+    "wealth_timing": "your financial growth",
+    "children_timing": "having a child",
+    "foreign_travel_timing": "foreign travel or relocation",
+}
+_LIFE_EVENT_LABEL_HI: dict[str, str] = {
+    "career_timing": "करियर या नौकरी में बदलाव",
+    "wealth_timing": "आपकी आर्थिक वृद्धि",
+    "children_timing": "संतान प्राप्ति",
+    "foreign_travel_timing": "विदेश यात्रा या स्थानांतरण",
+}
+_LIFE_EVENT_CONTEXT_KEY: dict[str, str] = {
+    "career_timing": "career_timing_windows",
+    "wealth_timing": "wealth_timing_windows",
+    "children_timing": "children_timing_windows",
+    "foreign_travel_timing": "foreign_travel_timing_windows",
+}
+
+
+def _life_event_chat_answer(category: str, context: dict[str, Any], hi: bool) -> str:
+    windows: list[dict[str, Any]] = context.get(_LIFE_EVENT_CONTEXT_KEY[category]) or []
+    label = (_LIFE_EVENT_LABEL_HI if hi else _LIFE_EVENT_LABEL_EN)[category]
+    if windows:
+        top = windows[0]
+        if hi:
+            return (
+                f"आपकी कुंडली के अनुसार, {label} के लिए सबसे संभावित समय "
+                f"{top['start_date']} से {top['end_date']} के बीच लगता है। {top['reason']} ध्यान रहे, यह एक "
+                "संभावित अनुकूल समय है, कोई निश्चित तारीख नहीं।"
+            )
+        return (
+            f"Based on your chart, the most likely window for {label} looks like "
+            f"{top['start_date']} to {top['end_date']}. {top['reason']} Keep in mind this is a probable "
+            "favorable window, not a guaranteed exact date."
+        )
+    return (
+        "मुझे अभी जितनी अवधि खोजी है उसमें कोई खास तौर पर अनुकूल समय नहीं मिला।"
+        if hi
+        else "I didn't find a strongly favorable window in the period I can currently search."
+    )
+
 # Which Rishi persona owns which question category — the specialization the
 # user asked for ("Vasishtha only answers life direction, Parashara only
 # timing, Gargi only relationships") rather than all five personas answering
@@ -446,11 +547,11 @@ def message_mentions_year_ahead(message: str) -> bool:
 # dosha/yoga) plus every key in _TOPIC_HOUSE; every category is owned by
 # exactly one Rishi so a reverse lookup (_CATEGORY_RISHI) is unambiguous.
 _RISHI_SPECIALTY: dict[str, set[str]] = {
-    "vasishtha": {"education", "travel"},
+    "vasishtha": {"education", "travel", "foreign_travel_timing"},
     "parashara": {"dasha", "today", "year_ahead"},
-    "gargi": {"marriage", "family", "friends", "siblings", "children", "marriage_timing"},
+    "gargi": {"marriage", "family", "friends", "siblings", "children", "marriage_timing", "children_timing"},
     "agastya": {"dosha", "yoga", "health"},
-    "bhrigu": {"career", "money"},
+    "bhrigu": {"career", "money", "career_timing", "wealth_timing"},
 }
 _CATEGORY_RISHI: dict[str, str] = {
     category: rishi for rishi, categories in _RISHI_SPECIALTY.items() for category in categories
@@ -1003,6 +1104,14 @@ class TemplateInterpreter(Interpreter):
             category = "today"
         elif message_mentions_marriage_timing(message):
             category = "marriage_timing"
+        elif message_mentions_career_timing(message):
+            category = "career_timing"
+        elif message_mentions_wealth_timing(message):
+            category = "wealth_timing"
+        elif message_mentions_children_timing(message):
+            category = "children_timing"
+        elif message_mentions_foreign_travel_timing(message):
+            category = "foreign_travel_timing"
         elif message_mentions_year_ahead(message):
             category = "year_ahead"
         elif asked_about(_DASHA_KEYWORDS):
@@ -1049,6 +1158,9 @@ class TemplateInterpreter(Interpreter):
                     else "I didn't find a strongly favorable window in the period I can currently search."
                 )
 
+        elif category in _LIFE_EVENT_CONTEXT_KEY:
+            answer = _life_event_chat_answer(category, context, hi)
+
         elif category == "year_ahead":
             year_ahead: dict[str, Any] | None = context.get("year_ahead")
             if year_ahead:
@@ -1057,6 +1169,12 @@ class TemplateInterpreter(Interpreter):
                     if hi
                     else f"For {year_ahead['year']}, the overall rating is {year_ahead['overall_rating']}/10. {year_ahead['overall_theme']}"
                 )
+                current_opportunity = year_ahead.get("current_quarter_opportunity")
+                current_risk = year_ahead.get("current_quarter_risk")
+                if current_opportunity:
+                    answer += " " + (f"अभी के लिए: {current_opportunity}" if hi else f"Right now: {current_opportunity}")
+                if current_risk:
+                    answer += " " + (f"ध्यान रखें: {current_risk}" if hi else f"Watch out for: {current_risk}")
 
         elif category == "dasha" and mahadasha_lord and antardasha_lord:
             answer = (

@@ -9,6 +9,8 @@ interpreter unit in isolation (see test_interpretation_templates.py).
 with ALL_FEATURES_FREE forced off (see conftest.py) so tier-gating tests
 elsewhere stay meaningful, which means these tests bypass it explicitly the
 same way test_feature_gating.py does."""
+import pytest
+
 from app.core.config import Settings
 from tests.test_api_e2e import _signup_and_set_birth_data
 
@@ -120,6 +122,64 @@ async def test_chat_astro_answers_hows_my_year_from_the_real_prediction_engine(c
     assert resp.status_code == 200, resp.text
     reply = resp.json()["reply"]
     assert "overall rating is" in reply and "/10" in reply
+
+
+@pytest.mark.parametrize(
+    "message,rishi_id",
+    [
+        ("When will I get a promotion?", "bhrigu"),
+        ("When will my financial situation improve?", "bhrigu"),
+        ("When will I have children?", "gargi"),
+        ("When will I settle abroad?", "vasishtha"),
+        # Colloquial "will I" phrasing (no explicit "when") is just as common
+        # a real-world question and must reach the same engine, not the
+        # static topic fallback — caught live before this was added.
+        ("Will I settle abroad?", "vasishtha"),
+        ("Will I get married?", "gargi"),
+    ],
+)
+async def test_chat_astro_answers_life_event_timing_questions_from_the_real_engine(client, monkeypatch, message, rishi_id):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": message, "rishi_id": rishi_id, "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "probable favorable window" in reply or "I didn't find a strongly favorable window" in reply
+
+
+async def test_chat_astro_career_timing_question_redirects_to_bhrigu_from_another_rishi(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "When will I get a promotion?", "rishi_id": "vasishtha", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "Bhrigu" in resp.json()["reply"]
+
+
+async def test_chat_astro_plain_career_question_is_not_hijacked_by_career_timing(client, monkeypatch):
+    """Regression guard: a non-timing career question (no 'when'/'kab') must
+    still get the existing static house-text answer, not the life-event
+    engine's window text — same collision class the marriage/year-ahead
+    rollout already caught once."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "What career suits me?", "rishi_id": "bhrigu", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "probable favorable window" not in reply
+    assert "I didn't find a strongly favorable window" not in reply
 
 
 async def test_chat_astro_requires_birth_profile(client):

@@ -1,6 +1,7 @@
 import pytest
 
 from app.services.interpretation.prediction_templates import (
+    life_event_reason_text,
     marriage_window_reason_text,
     overall_year_theme,
     year_outlook_text,
@@ -95,3 +96,47 @@ def test_marriage_window_reason_text_omits_corroboration_when_absent():
         reason_keys=["venus_antardasha"], seventh_lord_name="Venus", transit_corroborated=False, language="en",
     )
     assert "Jupiter or Saturn" not in text
+
+
+@pytest.mark.parametrize("event_type,house_lord_name", [
+    ("career", "Saturn"), ("wealth", "Jupiter"), ("children", "Jupiter"), ("foreign_travel", "Rahu"),
+])
+@pytest.mark.parametrize("language", ["en", "hi"])
+def test_life_event_reason_text_composes_house_lord_reason(event_type, house_lord_name, language):
+    text = life_event_reason_text(
+        event_type=event_type,
+        reason_keys=[f"{event_type}_house_lord_antardasha"],
+        house_lord_name=house_lord_name,
+        transit_corroborated=False,
+        language=language,
+    )
+    assert house_lord_name in text
+    assert len(text) > 10
+
+
+def test_life_event_reason_text_composes_karaka_reasons_per_event_type():
+    career_text = life_event_reason_text(
+        "career", ["career_karaka_antardasha_Sa"], "Mercury", transit_corroborated=False, language="en"
+    )
+    wealth_text = life_event_reason_text(
+        "wealth", ["wealth_karaka_antardasha_Ju"], "Mercury", transit_corroborated=False, language="en"
+    )
+    # Same planet (Ju/Sa are different here, but the point is the karaka
+    # framing differs per event type) — texts must not collapse identically.
+    assert career_text != wealth_text
+    assert "Saturn" in career_text
+    assert "Jupiter" in wealth_text
+
+
+def test_life_event_reason_text_includes_corroboration_when_present():
+    text = life_event_reason_text(
+        "foreign_travel", ["foreign_travel_house_lord_antardasha"], "Rahu", transit_corroborated=True, language="en"
+    )
+    assert "extra classical signal" in text
+
+
+def test_life_event_reason_text_omits_corroboration_when_absent():
+    text = life_event_reason_text(
+        "foreign_travel", ["foreign_travel_house_lord_antardasha"], "Rahu", transit_corroborated=False, language="en"
+    )
+    assert "extra classical signal" not in text

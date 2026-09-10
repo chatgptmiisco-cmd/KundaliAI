@@ -14,20 +14,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.astro.constants import PLANET_NAMES_EN, PLANET_NAMES_HI
 from app.astro.dasha import find_current_antardasha, find_current_mahadasha
 from app.astro.doshas import compute_sade_sati
+from app.astro.event_window_scanner import ScoredWindow
+from app.astro.life_event_timing import EventType
+from app.astro.life_event_timing import EVENT_HOUSE as LIFE_EVENT_HOUSE
+from app.astro.life_event_timing import corroborate_with_transits as corroborate_life_event_with_transits
+from app.astro.life_event_timing import find_event_windows
 from app.astro.manglik import compute_manglik_facts
 from app.astro.marriage_timing import corroborate_with_transits, find_marriage_windows
 from app.astro.natal_insights import house_lord, planet_dignity
 from app.astro.transits import compute_transit_snapshot
 from app.astro.varshaphala import compute_solar_return, compute_varshaphala
 from app.db.models.birth_profile import BirthProfile
-from app.db.models.cache import MarriageTimingCache, YearOutlookCache
-from app.schemas.prediction import MarriageTimingResponse, MultiYearOutlookResponse, YearOutlookResponse
+from app.db.models.cache import LifeEventTimingCache, MarriageTimingCache, YearOutlookCache
+from app.schemas.prediction import (
+    LifeEventTimingResponse,
+    MarriageTimingResponse,
+    MultiYearOutlookResponse,
+    YearOutlookResponse,
+)
 from app.schemas.user import BirthDataOut
 from app.services.cache_utils import add_and_commit_or_fetch_existing
 from app.services.chart_service import birth_datetime_utc, get_chart
 from app.services.dasha_service import get_mahadashas_raw
 from app.services.interpretation.base import Language
 from app.services.interpretation.prediction_templates import (
+    life_event_reason_text,
     marriage_window_reason_text,
     overall_year_theme,
     year_outlook_text,
@@ -263,3 +274,77 @@ async def get_marriage_timing(
     )
     data, was_race = await add_and_commit_or_fetch_existing(db, row, select_stmt)
     return MarriageTimingResponse(language=language, cached=was_race, **data)
+
+
+def _life_event_select_stmt(profile: BirthProfile, event_type: EventType, language: Language):
+    return select(LifeEventTimingCache).where(
+        LifeEventTimingCache.user_id == profile.user_id,
+        LifeEventTimingCache.event_type == event_type,
+        LifeEventTimingCache.language == language,
+        LifeEventTimingCache.birth_profile_version == profile.version,
+    )
+
+
+async def get_life_event_timing(
+    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, event_type: EventType, language: Language
+) -> LifeEventTimingResponse:
+    """Career/wealth/children/foreign-travel timing — the generic sibling of
+    get_marriage_timing above, built on the same window scanner via
+    app.astro.life_event_timing instead of app.astro.marriage_timing."""
+    _REQUIRED_CACHE_KEYS = ("windows",)
+    select_stmt = _life_event_select_stmt(profile, event_type, language)
+    result = await db.execute(select_stmt)
+    cached_row = result.scalar_one_or_none()
+    if cached_row is not None and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS):
+        return LifeEventTimingResponse(event_type=event_type, language=language, cached=True, **cached_row.data)
+
+    d1 = await get_chart(db, profile, birth, "D1")
+    moon = next(p for p in d1.planets if p.planet == "Mo")
+    mahadashas = await get_mahadashas_raw(db, profile, birth)
+    house_lord_planet = house_lord(LIFE_EVENT_HOUSE[event_type], d1.lagna_sign_index)
+    now = datetime.now(timezone.utc)
+
+    def _compute_windows() -> list[tuple[ScoredWindow, bool]]:
+        windows = find_event_windows(mahadashas, event_type, house_lord_planet, now)
+        return [
+            (w, corroborate_life_event_with_transits(event_type, w, d1.lagna_sign_index, moon.sign_index))
+            for w in windows
+        ]
+
+    scored_windows = await anyio.to_thread.run_sync(_compute_windows)
+
+    names = PLANET_NAMES_HI if language == "hi" else PLANET_NAMES_EN
+    house_lord_name = names[house_lord_planet]
+    windows_out = []
+    for w, corroborated in scored_windows:
+        reason = life_event_reason_text(event_type, w.reason_keys, house_lord_name, corroborated, language)
+        windows_out.append(
+            {
+                "start_date": w.start.date().isoformat(),
+                "end_date": w.end.date().isoformat(),
+                "mahadasha_lord": w.mahadasha_lord,
+                "mahadasha_lord_name": names[w.mahadasha_lord],
+                "antardasha_lord": w.antardasha_lord,
+                "antardasha_lord_name": names[w.antardasha_lord],
+                "score": w.score,
+                "reason": reason,
+                "transit_corroborated": corroborated,
+            }
+        )
+
+    data = {"windows": windows_out}
+
+    if cached_row is not None:
+        cached_row.data = data
+        await db.commit()
+        return LifeEventTimingResponse(event_type=event_type, language=language, cached=False, **data)
+
+    row = LifeEventTimingCache(
+        user_id=profile.user_id,
+        event_type=event_type,
+        language=language,
+        birth_profile_version=profile.version,
+        data=data,
+    )
+    data, was_race = await add_and_commit_or_fetch_existing(db, row, select_stmt)
+    return LifeEventTimingResponse(event_type=event_type, language=language, cached=was_race, **data)

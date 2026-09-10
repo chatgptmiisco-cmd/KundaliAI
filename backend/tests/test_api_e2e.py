@@ -364,6 +364,42 @@ async def test_marriage_timing_is_cached_on_repeat_call(client):
     assert second.json()["cached"] is True
 
 
+@pytest.mark.parametrize("event_type", ["career", "wealth", "children", "foreign_travel"])
+async def test_life_event_timing_returns_ranked_windows(client, event_type):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers, params={"event_type": event_type, "language": "en"}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["event_type"] == event_type
+    for window in data["windows"]:
+        assert window["score"] > 0
+        assert window["reason"]
+    scores = [w["score"] for w in data["windows"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+async def test_life_event_timing_is_cached_on_repeat_call(client):
+    headers = await _signup_and_set_birth_data(client)
+    first = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers, params={"event_type": "career", "language": "en"}
+    )
+    assert first.json()["cached"] is False
+    second = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers, params={"event_type": "career", "language": "en"}
+    )
+    assert second.json()["cached"] is True
+
+
+async def test_life_event_timing_rejects_an_invalid_event_type(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers, params={"event_type": "vehicle", "language": "en"}
+    )
+    assert resp.status_code == 422
+
+
 async def test_chat_astro_requires_strategy_tier(client):
     headers = await _signup_and_set_birth_data(client)
     resp = await client.post("/api/v1/chat/astro", headers=headers, json={"message": "Hi", "language": "en"})
