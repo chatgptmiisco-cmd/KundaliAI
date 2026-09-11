@@ -57,6 +57,14 @@ def test_detect_yogas_finds_gajakesari_and_all_relevant_mahapurusha_yogas():
     assert "mahapurusha_ve" in keys  # Malavya
     assert "mahapurusha_sa" in keys  # Sasa
 
+    # Regression guard: a Hindi-language finding's name used to splice in
+    # the Latin yoga name ("Malavya योग") instead of a real Devanagari
+    # spelling — every name_hi here must be fully Devanagari, no Latin
+    # leaking in from the (Latin-only) internal yoga-name map.
+    for f in findings:
+        if f["key"].startswith("mahapurusha_"):
+            assert all(ord(c) < 0x41 or ord(c) > 0x7A for c in f["name_hi"] if c.isalpha())
+
 
 def test_detect_yogas_finds_conservative_raj_yoga():
     findings = detect_yogas(_fixture_chart())

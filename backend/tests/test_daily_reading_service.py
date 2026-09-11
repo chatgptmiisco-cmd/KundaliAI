@@ -133,7 +133,7 @@ def test_today_guidance_reflects_the_real_tithi_energy_tag():
 def test_dosha_summary_reflects_real_placements():
     reading = _build_reading(**_base_kwargs(transit_snapshot=_fake_snapshot(4, saturn_sign_index=4)))
     doshas = {d["key"]: d for d in reading["doshas"]}
-    assert set(doshas) == {"manglik", "kaal_sarp", "sade_sati", "kemadruma"}
+    assert set(doshas) == {"manglik", "kaal_sarp", "sade_sati", "dhaiya", "kemadruma"}
     # Mars sits in house 8 from Lagna (a Manglik house) -> present.
     assert doshas["manglik"]["is_present"] is True
     # All 7 classical planets don't fall entirely on one side of Rahu/Ketu here.
@@ -141,6 +141,9 @@ def test_dosha_summary_reflects_real_placements():
     # Transiting Saturn (Leo, sign 4) is house 2 from natal Moon (Cancer) -> setting phase.
     assert doshas["sade_sati"]["is_present"] is True
     assert "setting" in doshas["sade_sati"]["label"]
+    # Sade Sati (12th/1st/2nd from Moon) and Dhaiya (4th/8th from Moon) are
+    # mutually exclusive house sets — Saturn can't be in both at once.
+    assert doshas["dhaiya"]["is_present"] is False
     assert doshas["kemadruma"]["is_present"] is False
 
 

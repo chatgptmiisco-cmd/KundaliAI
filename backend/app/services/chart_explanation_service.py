@@ -25,7 +25,12 @@ from app.astro.constants import PLANET_NAMES_EN, PLANET_NAMES_HI, SIGN_NAMES_EN,
 from app.astro.doshas import CLASSICAL_PLANETS, compute_kaal_sarp_dosha, compute_kemadruma_dosha
 from app.astro.manglik import compute_manglik_facts
 from app.astro.natal_insights import house_lord, planet_dignity
-from app.astro.yogas import compute_panch_mahapurusha_yogas, has_conservative_raj_yoga, has_gajakesari_yoga
+from app.astro.yogas import (
+    MAHAPURUSHA_PLANET_NAMES_HI,
+    compute_panch_mahapurusha_yogas,
+    has_conservative_raj_yoga,
+    has_gajakesari_yoga,
+)
 from app.services.interpretation.templates import (
     _DIGNITY_QUALIFIER_EN,
     _DIGNITY_QUALIFIER_HI,
@@ -233,7 +238,7 @@ def detect_yogas(chart: ChartResult) -> list[dict]:
             {
                 "key": f"mahapurusha_{m.planet.lower()}",
                 "name_en": f"{m.name} Yoga",
-                "name_hi": f"{m.name} योग",
+                "name_hi": f"{MAHAPURUSHA_PLANET_NAMES_HI[m.planet]} योग",
                 "description_en": _MAHAPURUSHA_DESCRIPTIONS_EN[m.planet],
                 "description_hi": _MAHAPURUSHA_DESCRIPTIONS_HI[m.planet],
             }

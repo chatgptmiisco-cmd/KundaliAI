@@ -81,6 +81,48 @@ async def test_chat_astro_specializes_by_rishi_id_and_scopes_history_per_rishi(c
     assert "Bhrigu" not in resp2.json()["reply"]
 
 
+async def test_chat_astro_vyasa_answers_every_topic_directly_without_redirecting(client, monkeypatch):
+    """Vyasa is the new default generalist persona (see
+    templates._RISHI_SPECIALTY, which deliberately excludes it) — it must
+    answer a question that WOULD redirect for a specialist, with no
+    redirect/pointer text of its own."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "Tell me about my marriage prospects", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "Gargi" not in reply and "Bhrigu" not in reply
+
+
+async def test_chat_astro_returns_answered_by_rishi_id_attribution(client, monkeypatch):
+    """Independent of who's chatting, the response names the real specialist
+    who classically owns this question's topic — the frontend uses this to
+    render a small "answered by X" corner label (see detect_answering_rishi)."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "Tell me about my marriage prospects", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["answered_by_rishi_id"] == "gargi"
+
+    resp2 = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "How is my career looking?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["answered_by_rishi_id"] == "bhrigu"
+
+
 async def test_chat_astro_answers_when_will_i_get_married_from_the_real_prediction_engine(client, monkeypatch):
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)

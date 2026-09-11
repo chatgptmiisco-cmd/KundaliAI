@@ -10,15 +10,21 @@ from app.astro.constants import VIMSHOTTARI_SEQUENCE
 from app.services.interpretation.templates import (
     TemplateInterpreter,
     _LIFE_FRAMING_EN,
+    _asked_about,
+    _fuzzy_contains_phrase,
     _fuzzy_max_distance,
-    _levenshtein,
+    _fuzzy_word_matches_keyword,
     _ordinal,
+    _PERIOD_CONTENT_EN,
     _strip_trailing_stop,
+    _TOPIC_KEYWORDS,
+    detect_answering_rishi,
     message_mentions_career_timing,
     message_mentions_children_timing,
     message_mentions_foreign_travel_timing,
     message_mentions_marriage_timing,
     message_mentions_past_tense,
+    message_mentions_wealth_timing,
     resolve_past_reference,
 )
 
@@ -35,12 +41,74 @@ def test_ordinal_suffixes(n, expected):
 
 # --- Typo/spelling-variant tolerance ----------------------------------------
 
-def test_levenshtein_basic_distances():
-    assert _levenshtein("kitten", "kitten") == 0
-    assert _levenshtein("kitten", "sitten") == 1  # substitution
-    assert _levenshtein("shadi", "shaadi") == 1  # insertion
-    assert _levenshtein("", "abc") == 3
-    assert _levenshtein("abc", "") == 3
+def test_fuzzy_word_matches_keyword_basic_cases():
+    assert _fuzzy_word_matches_keyword("shaadi", "shaadi")  # identical
+    assert _fuzzy_word_matches_keyword("shadi", "shaadi")  # missing letter
+    # "sitten" vs "kitten" is only a 1-letter substitution, but the first
+    # letters differ — the same-first-letter guard rejects it regardless of
+    # how close the edit distance is (see _fuzzy_word_matches_keyword).
+    assert not _fuzzy_word_matches_keyword("sitten", "kitten")
+
+
+def test_fuzzy_word_matches_keyword_tolerates_transpositions():
+    """rapidfuzz's Damerau-Levenshtein distance (unlike plain Levenshtein)
+    counts an adjacent-letter swap as ONE edit — so "marraige" (transposed
+    i/a) matches "marriage" even though a naive Levenshtein distance of 2
+    would have put it just outside the 6-8 letter keyword's tolerance of 2...
+    this specific case previously worked by coincidence (2 <= 2); the real
+    point of this test is documenting that the distance metric itself now
+    understands transpositions as cheap, not just wide buckets."""
+    assert _fuzzy_word_matches_keyword("marraige", "marriage")
+
+
+def test_fuzzy_contains_phrase_tolerates_a_typo_in_either_word():
+    words = "sarkari nokri kab lagegi".split()
+    assert _fuzzy_contains_phrase(words, ["sarkari", "naukri"])
+    assert not _fuzzy_contains_phrase(words, ["green", "card"])
+
+
+def test_h1b_routes_to_foreign_travel_timing():
+    assert message_mentions_foreign_travel_timing("when will I get my h1b?")
+
+
+@pytest.mark.parametrize("message", ["will I get a loan approved?", "when will my debt be cleared?", "kab hoga nivesh se fayda"])
+def test_new_money_keywords_route_to_wealth_timing(message):
+    assert message_mentions_wealth_timing(message)
+
+
+@pytest.mark.parametrize("message", ["will I need surgery this year", "when will my accident risk go away"])
+def test_new_health_keywords_are_recognized(message):
+    assert _asked_about(message, _TOPIC_KEYWORDS["health"])
+
+
+@pytest.mark.parametrize("message", ["will I ever buy property", "when will I get a car", "vehicle milega kya"])
+def test_new_family_keywords_are_recognized(message):
+    assert _asked_about(message, _TOPIC_KEYWORDS["family"])
+
+
+def test_car_keyword_does_not_collide_with_career():
+    """Regression guard: "car" is word-boundary matched, so it must not
+    fire on "career" (which contains "car" as a substring, not a standalone
+    word) — otherwise every career question would wrongly also read as a
+    vehicle/property question."""
+    assert not _asked_about("how is my career looking", _TOPIC_KEYWORDS["family"])
+
+
+def test_board_exam_and_college_admission_are_recognized():
+    assert _asked_about("when is my board exam going well", _TOPIC_KEYWORDS["education"])
+    assert _asked_about("will I get college admission this year", _TOPIC_KEYWORDS["education"])
+
+
+# --- Answering-rishi attribution (for the frontend's "answered by X" label) -
+
+def test_detect_answering_rishi_names_the_real_specialist():
+    assert detect_answering_rishi("Tell me about my marriage prospects") == "gargi"
+    assert detect_answering_rishi("How is my career looking?") == "bhrigu"
+    assert detect_answering_rishi("Am I manglik?") == "agastya"
+
+
+def test_detect_answering_rishi_returns_none_for_an_unmatched_message():
+    assert detect_answering_rishi("just saying hello") is None
 
 
 def test_fuzzy_max_distance_scales_with_keyword_length():
@@ -83,6 +151,18 @@ def test_fuzzy_matching_does_not_reintroduce_the_din_in_collision():
     almost every message containing "in" was wrongly classified as a
     "today" question."""
     assert not message_mentions_past_tense("please tell me about my career in general")
+
+
+def test_fuzzy_matching_does_not_confuse_dasha_with_dosha():
+    """Regression guard for a real collision caught live: "dasha" and
+    "dosha" (and their plurals "dashas"/"doshas") sit at edit-distance 1-2
+    of each other, so a plain "what dasha am I running" question was also
+    wrongly matching the "dosha" category and pulling in an unrelated
+    Manglik-dosha finding. All four are exact-only now (see
+    _NO_FUZZY_KEYWORDS)."""
+    from app.services.interpretation.templates import _DOSHA_KEYWORDS
+
+    assert not _asked_about("what dasha am i running right now", _DOSHA_KEYWORDS)
 
 
 def test_fuzzy_matching_does_not_confuse_did_with_din():
@@ -353,6 +433,33 @@ async def test_chat_reply_answers_dosha_question_with_none_found():
     assert "didn't find" in reply.lower()
 
 
+async def test_chat_reply_dosha_question_includes_an_active_sade_sati_or_dhaiya():
+    """Regression guard for a real bug caught live: "do I have any dosha"
+    only ever checked the natal-only yogas list (Manglik/Kaal Sarp/
+    Kemadruma) — a real, currently active Sade Sati or Dhaiya (both time-
+    aware, computed in daily_reading's doshas list) was silently omitted
+    even when genuinely active, so the exact same person could see "no
+    dosha" from a direct dosha question while a life-theme question
+    correctly surfaced their active Dhaiya."""
+    context = {
+        **_CHAT_CONTEXT,
+        "yogas": [],  # no natal Manglik/Kaal Sarp/Kemadruma this time
+        "daily_reading": {
+            **_CHAT_CONTEXT["daily_reading"],
+            "doshas": [
+                {"key": "manglik", "label": "Manglik (Mangal Dosha)", "is_present": False},
+                {"key": "kaal_sarp", "label": "Kaal Sarp Dosha", "is_present": False},
+                {"key": "sade_sati", "label": "Sade Sati (setting)", "is_present": False},
+                {"key": "dhaiya", "label": "Dhaiya", "is_present": True},
+                {"key": "kemadruma", "label": "Kemadruma Dosha", "is_present": False},
+            ],
+        },
+    }
+    reply = await interpreter.chat_reply(_history("Do I have any dosha?"), context, "en")
+    assert "Dhaiya" in reply
+    assert "currently active" in reply.lower()
+
+
 async def test_chat_reply_answers_yoga_question_with_real_findings():
     reply = await interpreter.chat_reply(_history("Do I have any yoga in my chart?"), _CHAT_CONTEXT, "en")
     assert "Gajakesari" in reply
@@ -406,6 +513,24 @@ def test_new_faq_keywords_do_not_false_fire_on_unrelated_words():
 async def test_chat_reply_answers_dasha_question_naming_real_lords():
     reply = await interpreter.chat_reply(_history("What dasha am I running right now?"), _CHAT_CONTEXT, "en")
     assert "Jupiter" in reply and "Saturn" in reply
+
+
+async def test_chat_reply_dasha_question_includes_the_real_effect_not_just_mechanism():
+    """Regression guard: a raw "what dasha am I running" question used to
+    only name WHICH planets are running (Mahadasha/Antardasha), with no
+    effect at all — caught live from a real chat screenshot. The real,
+    already-tested per-lord effect one-liner (_PERIOD_CONTENT, keyed by
+    planet CODE, not the display name in mahadasha_lord/antardasha_lord)
+    must now be appended."""
+    context = {**_CHAT_CONTEXT, "antardasha_lord_code": "Sa"}
+    reply = await interpreter.chat_reply(_history("What dasha am I running right now?"), context, "en")
+    assert _PERIOD_CONTENT_EN["Sa"]["one_liner"] in reply
+
+
+async def test_chat_reply_dasha_question_omits_effect_when_code_unavailable():
+    # _CHAT_CONTEXT has no antardasha_lord_code — must not crash or fabricate.
+    reply = await interpreter.chat_reply(_history("What dasha am I running right now?"), _CHAT_CONTEXT, "en")
+    assert reply.strip().endswith("shaping this stretch of your life.")
 
 
 async def test_chat_reply_answers_today_question_including_festival():

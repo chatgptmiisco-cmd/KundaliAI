@@ -1,6 +1,8 @@
 import React from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import DateTimeField from './DateTimeField';
+import PlaceAutocomplete from './PlaceAutocomplete';
 import { BirthData } from '../types/kundali';
 import { colors, radius, spacing, typography } from '../theme/theme';
 
@@ -8,6 +10,11 @@ interface Props {
   value: BirthData;
   onChange: (data: BirthData) => void;
 }
+
+// No birth is in the future, and nobody using this app was born before 1900
+// — a sane range beats letting the picker scroll through centuries.
+const MIN_BIRTH_DATE = new Date(1900, 0, 1);
+const MAX_BIRTH_DATE = new Date();
 
 export default function BirthDataFields({ value, onChange }: Props) {
   const { t } = useTranslation();
@@ -19,24 +26,52 @@ export default function BirthDataFields({ value, onChange }: Props) {
         value={value.name}
         onChangeText={(v) => onChange({ ...value, name: v })}
       />
-      <Field
-        label={t('profile.dateOfBirthLabel')}
-        value={value.dateOfBirth}
-        onChangeText={(v) => onChange({ ...value, dateOfBirth: v })}
-        placeholder="1990-01-25"
-      />
-      <Field
-        label={t('profile.timeOfBirthLabel')}
-        value={value.timeOfBirth}
-        onChangeText={(v) => onChange({ ...value, timeOfBirth: v })}
-        placeholder="06:42"
-      />
-      <Field
-        label={t('profile.placeOfBirthLabel')}
-        value={value.placeOfBirth}
-        onChangeText={(v) => onChange({ ...value, placeOfBirth: v })}
-        placeholder="Pune, Maharashtra, India"
-      />
+
+      <View style={styles.field}>
+        <DateTimeField
+          label={t('profile.dateOfBirthLabel')}
+          mode="date"
+          value={value.dateOfBirth}
+          onChange={(v) => onChange({ ...value, dateOfBirth: v })}
+          placeholder="1990-01-25"
+          minimumDate={MIN_BIRTH_DATE}
+          maximumDate={MAX_BIRTH_DATE}
+        />
+      </View>
+
+      <View style={styles.field}>
+        <DateTimeField
+          label={t('profile.timeOfBirthLabel')}
+          mode="time"
+          value={value.timeOfBirth}
+          onChange={(v) => onChange({ ...value, timeOfBirth: v })}
+          placeholder="06:42"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>{t('profile.placeOfBirthLabel')}</Text>
+        <PlaceAutocomplete
+          value={value.placeOfBirth}
+          placeholder="Pune, Maharashtra, India"
+          onChangeText={(text) =>
+            // Editing the text after a selection invalidates that
+            // selection's coordinates — better to fall back to the offline
+            // table (see api/client.ts) than ship a stale lat/long that no
+            // longer matches what's actually typed.
+            onChange({ ...value, placeOfBirth: text, latitude: undefined, longitude: undefined, timezoneOffsetHours: undefined })
+          }
+          onSelect={(result) =>
+            onChange({
+              ...value,
+              placeOfBirth: result.displayName,
+              latitude: result.latitude,
+              longitude: result.longitude,
+              timezoneOffsetHours: result.timezoneOffsetHours,
+            })
+          }
+        />
+      </View>
     </View>
   );
 }

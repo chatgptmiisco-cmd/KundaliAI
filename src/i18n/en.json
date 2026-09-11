@@ -69,12 +69,12 @@
         ]
       },
       {
-        "eyebrow": "Five guides, one chart",
+        "eyebrow": "One chart, six ways to ask",
         "title": "Ask a Rishi — pick the perspective you need.",
         "checks": [
           {
-            "title": "Vasishtha, Parashara, Gargi, Agastya & Bhrigu",
-            "desc": "Each Rishi keeps its own conversation and its own focus, drawing on your same real chart."
+            "title": "Vyasa answers anything; five specialists go deeper",
+            "desc": "Vyasa is the default and answers every topic directly; switch to Vasishtha, Parashara, Gargi, Agastya or Bhrigu any time for their specialty."
           },
           {
             "title": "A fresh reading every day",
@@ -376,7 +376,8 @@
     "testingSectionTitle": "Testing",
     "restartOnboarding": "Restart onboarding flow",
     "restartOnboardingConfirmTitle": "Restart onboarding?",
-    "restartOnboardingConfirmMessage": "This clears your birth details, preferences and reports so you can go through onboarding again."
+    "restartOnboardingConfirmMessage": "This clears your birth details, preferences and reports so you can go through onboarding again.",
+    "placeSearchError": "Couldn't search places right now — check your connection, or keep typing the full place name."
   },
   "rishi": {
     "unlimitedMessages": "Unlimited messages",
@@ -386,11 +387,13 @@
     "buyPass": "Buy a pass",
     "freeMessagesLeft_one": "{{count}} free message left today",
     "freeMessagesLeft_other": "{{count}} free messages left today",
-    "promptWeek": "This week's focus",
-    "promptDasha": "My current Dasha",
-    "promptCareer": "Career pattern",
-    "promptRemedy": "A practical remedy",
-    "listenToReply": "Listen"
+    "promptWeek": "How's my week looking?",
+    "promptDasha": "What dasha am I running right now?",
+    "promptCareer": "How's my career looking?",
+    "listenToReply": "Listen",
+    "answeredBy": "via {{name}}",
+    "scrollToLatest": "Scroll to latest message",
+    "promptPast": "What was going on with me 5 years ago?"
   },
   "voiceChat": {
     "promoTitle": "Ask your questions out loud",
@@ -404,8 +407,7 @@
   },
   "rishiPicker": {
     "screenTitle": "Ask a Rishi",
-    "subtitle": "One chart, five ways to see it — choose the guide that fits your question.",
-    "openButton": "Open conversation",
+    "subtitle": "One chart, six ways to see it — Vyasa answers anything, or pick a specialist.",
     "disclaimer": "Every Rishi draws on the same real chart calculations — the tone changes, the facts don't.",
     "vasishtha": {
       "focus": "Life direction",
@@ -436,7 +438,14 @@
       "tag": "Direct & strategic",
       "description": "For work, money, capability and the choices shaping your practical future.",
       "greeting": "Tell me which career or financial decision you're weighing, and we'll look at it through your chart."
-    }
+    },
+    "vyasa": {
+      "focus": "Ask me anything",
+      "tag": "Warm & all-round",
+      "description": "For any question at all — I answer directly from your real chart, whatever the topic.",
+      "greeting": "Namaste. Ask me anything about your chart — career, relationships, timing, health, all of it."
+    },
+    "switchTrigger": "Switch guide, currently {{name}}"
   },
   "passStore": {
     "screenTitle": "Pass Store",

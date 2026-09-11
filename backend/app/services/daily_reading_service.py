@@ -27,6 +27,7 @@ from app.astro.constants import (
 )
 from app.astro.doshas import (
     CLASSICAL_PLANETS,
+    compute_dhaiya,
     compute_kaal_sarp_dosha,
     compute_kemadruma_dosha,
     compute_sade_sati,
@@ -106,11 +107,11 @@ _MOOD_BY_GANA_HI = {
 
 _DOSHA_LABELS_EN = {
     "manglik": "Manglik (Mangal Dosha)", "kaal_sarp": "Kaal Sarp Dosha",
-    "sade_sati": "Sade Sati", "kemadruma": "Kemadruma Dosha",
+    "sade_sati": "Sade Sati", "kemadruma": "Kemadruma Dosha", "dhaiya": "Dhaiya",
 }
 _DOSHA_LABELS_HI = {
     "manglik": "मंगलिक (मंगल दोष)", "kaal_sarp": "कालसर्प दोष",
-    "sade_sati": "साढ़े साती", "kemadruma": "केमद्रुम दोष",
+    "sade_sati": "साढ़े साती", "kemadruma": "केमद्रुम दोष", "dhaiya": "ढैया",
 }
 
 
@@ -396,6 +397,10 @@ def _build_reading(
         natal_moon_sign_index=moon_sign_index,
         transiting_saturn_sign_index=transit_snapshot.planet_sign_index["Sa"],
     )
+    dhaiya = compute_dhaiya(
+        natal_moon_sign_index=moon_sign_index,
+        transiting_saturn_sign_index=transit_snapshot.planet_sign_index["Sa"],
+    )
     kemadruma = compute_kemadruma_dosha(
         planet_house_from_moon={
             p: house_number(natal_planet_sign_index[p], moon_sign_index)
@@ -411,6 +416,7 @@ def _build_reading(
         DoshaSummaryItem(key="manglik", label=dosha_labels["manglik"], is_present=manglik.is_manglik),
         DoshaSummaryItem(key="kaal_sarp", label=dosha_labels["kaal_sarp"], is_present=kaal_sarp.is_present),
         DoshaSummaryItem(key="sade_sati", label=sade_sati_label, is_present=sade_sati.is_active),
+        DoshaSummaryItem(key="dhaiya", label=dosha_labels["dhaiya"], is_present=dhaiya.is_active),
         DoshaSummaryItem(key="kemadruma", label=dosha_labels["kemadruma"], is_present=kemadruma.is_present),
     ]
 

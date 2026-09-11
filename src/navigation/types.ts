@@ -7,8 +7,9 @@ export type MainTabParamList = {
 };
 
 export type RishiStackParamList = {
-  RishiPicker: undefined;
-  RishiChat: { rishiId: string };
+  // rishiId is optional — RishiChatScreen defaults to the generalist Vyasa
+  // persona (see DEFAULT_RISHI_ID) when no specific Rishi is requested.
+  RishiChat: { rishiId?: string } | undefined;
 };
 
 export type RootStackParamList = {

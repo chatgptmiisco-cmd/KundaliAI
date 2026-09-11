@@ -1,11 +1,11 @@
 import { Baloo2_700Bold, Baloo2_800ExtraBold } from '@expo-google-fonts/baloo-2';
 import {
-  Hind_400Regular,
-  Hind_500Medium,
-  Hind_600SemiBold,
-  Hind_700Bold,
+  Mukta_400Regular,
+  Mukta_500Medium,
+  Mukta_600SemiBold,
+  Mukta_700Bold,
   useFonts,
-} from '@expo-google-fonts/hind';
+} from '@expo-google-fonts/mukta';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -20,10 +20,10 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function App() {
   const [fontsLoaded] = useFonts({
-    Hind_400Regular,
-    Hind_500Medium,
-    Hind_600SemiBold,
-    Hind_700Bold,
+    Mukta_400Regular,
+    Mukta_500Medium,
+    Mukta_600SemiBold,
+    Mukta_700Bold,
     Baloo2_700Bold,
     Baloo2_800ExtraBold,
   });

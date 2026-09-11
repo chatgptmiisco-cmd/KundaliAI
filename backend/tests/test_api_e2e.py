@@ -376,6 +376,13 @@ async def test_multi_year_outlook_caps_at_the_maximum_allowed_years(client):
 
 
 async def test_marriage_timing_returns_ranked_windows(client):
+    """Windows are ranked by dasha score PLUS the transit-corroboration
+    bonus (see prediction_service._rerank_with_transit_bonus) — a window
+    with a real transit confirmation can legitimately outrank one with a
+    higher raw dasha score but no transit signal, so the raw `score` field
+    alone isn't expected to be monotonically decreasing on its own."""
+    from app.services.prediction_service import _TRANSIT_CORROBORATION_BONUS
+
     headers = await _signup_and_set_birth_data(client)
     resp = await client.get("/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"})
     assert resp.status_code == 200, resp.text
@@ -383,8 +390,38 @@ async def test_marriage_timing_returns_ranked_windows(client):
     for window in data["windows"]:
         assert window["score"] > 0
         assert window["reason"]
-    scores = [w["score"] for w in data["windows"]]
-    assert scores == sorted(scores, reverse=True)
+    effective_scores = [
+        w["score"] + (_TRANSIT_CORROBORATION_BONUS if w["transit_corroborated"] else 0) for w in data["windows"]
+    ]
+    assert effective_scores == sorted(effective_scores, reverse=True)
+
+
+async def test_marriage_timing_transit_corroborated_window_can_outrank_a_higher_raw_score(client):
+    """Regression guard for a real case a user found live: this exact chart
+    has a Mercury Mahadasha+Antardasha window (score 4.0, own-lord-twice,
+    no transit) later than a Saturn Mahadasha / Mercury Antardasha window
+    that Jupiter or Saturn also transits during (score 3.0, but transit-
+    corroborated) — before folding the transit bonus into ranking, the
+    later, uncorroborated window wrongly won purely on raw dasha score."""
+    signup = await client.post(
+        "/api/v1/auth/signup",
+        json={"email": "transitcheck@example.com", "password": "supersecret1", "name": "Transit Check", "preferred_language": "en"},
+    )
+    headers = {"Authorization": f"Bearer {signup.json()['access_token']}"}
+    await client.put(
+        "/api/v1/user/profile/birth-data",
+        headers=headers,
+        json={
+            "name": "Transit Check", "date_of_birth": "2000-01-01", "time_of_birth": "06:34",
+            "time_uncertain": False, "place_of_birth": "Mathura, Uttar Pradesh, India",
+            "latitude": 27.4924, "longitude": 77.6737, "timezone_offset_hours": 5.5,
+        },
+    )
+    resp = await client.get("/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"})
+    assert resp.status_code == 200, resp.text
+    top = resp.json()["windows"][0]
+    assert top["start_date"] == "2027-02-20"
+    assert top["transit_corroborated"] is True
 
 
 async def test_marriage_timing_is_cached_on_repeat_call(client):
@@ -397,6 +434,10 @@ async def test_marriage_timing_is_cached_on_repeat_call(client):
 
 @pytest.mark.parametrize("event_type", ["career", "wealth", "children", "foreign_travel"])
 async def test_life_event_timing_returns_ranked_windows(client, event_type):
+    """Same ranking rule as marriage timing — see the comment on
+    test_marriage_timing_returns_ranked_windows above."""
+    from app.services.prediction_service import _TRANSIT_CORROBORATION_BONUS
+
     headers = await _signup_and_set_birth_data(client)
     resp = await client.get(
         "/api/v1/prediction/life-event-timing", headers=headers, params={"event_type": event_type, "language": "en"}
@@ -407,8 +448,10 @@ async def test_life_event_timing_returns_ranked_windows(client, event_type):
     for window in data["windows"]:
         assert window["score"] > 0
         assert window["reason"]
-    scores = [w["score"] for w in data["windows"]]
-    assert scores == sorted(scores, reverse=True)
+    effective_scores = [
+        w["score"] + (_TRANSIT_CORROBORATION_BONUS if w["transit_corroborated"] else 0) for w in data["windows"]
+    ]
+    assert effective_scores == sorted(effective_scores, reverse=True)
 
 
 async def test_life_event_timing_is_cached_on_repeat_call(client):
@@ -742,8 +785,8 @@ async def test_daily_reading_returns_every_field_and_varies_by_chart(client):
 
     assert 1 <= body_a["rating"] <= 10
     assert 1 <= body_a["period_rating"] <= 10
-    assert len(body_a["doshas"]) == 4
-    assert {d["key"] for d in body_a["doshas"]} == {"manglik", "kaal_sarp", "sade_sati", "kemadruma"}
+    assert len(body_a["doshas"]) == 5
+    assert {d["key"] for d in body_a["doshas"]} == {"manglik", "kaal_sarp", "sade_sati", "dhaiya", "kemadruma"}
     assert len(body_a["before_you_leave_home"]) == 5
     # "festival" is nullable (None on an ordinary day) so it's checked for
     # presence/type here rather than in the strict non-empty loop above.

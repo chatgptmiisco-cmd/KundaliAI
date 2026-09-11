@@ -1,6 +1,11 @@
 import { RishiTone } from '../types/kundali';
 
-export type RishiId = 'vasishtha' | 'parashara' | 'gargi' | 'agastya' | 'bhrigu';
+export type RishiId = 'vyasa' | 'vasishtha' | 'parashara' | 'gargi' | 'agastya' | 'bhrigu';
+
+// The generalist default persona — answers every topic directly (see the
+// backend's _RISHI_SPECIALTY, which deliberately excludes this id) rather
+// than specializing and redirecting like the other five.
+export const DEFAULT_RISHI_ID: RishiId = 'vyasa';
 
 export interface RishiDef {
   id: RishiId;
@@ -8,7 +13,7 @@ export interface RishiDef {
   initial: string;
   /** Which canned fallback-reply pool this persona draws from when the real
    * backend chat is unavailable (see data/chatReplies.ts) — the persona
-   * layer itself is UI-only for now; all five currently route to the same
+   * layer itself is UI-only for now; all six currently route to the same
    * backend /chat/astro call. */
   tone: RishiTone;
   gradient: [string, string];
@@ -16,8 +21,11 @@ export interface RishiDef {
 }
 
 // A distinct, muted colour per Rishi — same "no alarm colour" palette
-// philosophy as the rest of the app, just five different accents.
+// philosophy as the rest of the app. Vyasa gets a neutral stone tone
+// (deliberately not one of the five saturated specialist accents) since
+// it's the default, not "a flavor."
 export const RISHIS: RishiDef[] = [
+  { id: 'vyasa', name: 'Vyasa', initial: 'Vy', tone: 'general', gradient: ['#b9ac8f', '#6f6248'], shade: 'rgba(111,98,72,0.28)' },
   { id: 'vasishtha', name: 'Vasishtha', initial: 'V', tone: 'traditional', gradient: ['#7a9a92', '#3f6058'], shade: 'rgba(63,96,88,0.28)' },
   { id: 'parashara', name: 'Parashara', initial: 'P', tone: 'analytical', gradient: ['#d5a456', '#9b5f20'], shade: 'rgba(155,95,32,0.28)' },
   { id: 'gargi', name: 'Gargi', initial: 'G', tone: 'direct', gradient: ['#c7838c', '#8f4d62'], shade: 'rgba(143,77,98,0.28)' },

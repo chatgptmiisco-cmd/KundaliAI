@@ -64,6 +64,13 @@ const CITY_COORDINATES: Record<string, CityCoordinates> = {
 
 const DEFAULT_COORDINATES: CityCoordinates = CITY_COORDINATES['new delhi'];
 
+/** Last-resort fallback only — used when the user never picked a live
+ * geocoded suggestion (see searchPlaces below) and typed a place this
+ * offline table doesn't recognize. Silently defaulting to New Delhi is a
+ * real accuracy risk (a mistyped or unlisted town gets someone else's
+ * chart's coordinates with no error shown), which is exactly what live
+ * geocoding below exists to avoid — this stays only as a no-network
+ * fallback. */
 export function resolveBirthPlace(placeText: string): CityCoordinates {
   const firstToken = placeText.split(',')[0]?.trim().toLowerCase() ?? '';
   if (CITY_COORDINATES[firstToken]) {
@@ -72,4 +79,83 @@ export function resolveBirthPlace(placeText: string): CityCoordinates {
   const lowerFull = placeText.toLowerCase();
   const match = Object.keys(CITY_COORDINATES).find((city) => lowerFull.includes(city));
   return match ? CITY_COORDINATES[match] : DEFAULT_COORDINATES;
+}
+
+// --- Live place search (OpenStreetMap Nominatim) ---------------------------
+// Real geocoding, not just the ~45-city offline table above — a typo or an
+// unlisted town used to silently resolve to New Delhi's coordinates with no
+// indication anything was wrong. Nominatim is free and needs no API key,
+// which matters here since no geocoding provider was configured anywhere in
+// this app before; its usage policy just asks for an identifying User-Agent
+// and reasonable request volume, both satisfied by debouncing input in the
+// UI (see PlaceAutocomplete) rather than firing a request per keystroke.
+
+export interface GeocodeResult {
+  displayName: string;
+  latitude: number;
+  longitude: number;
+  timezoneOffsetHours: number;
+}
+
+interface NominatimResult {
+  display_name: string;
+  lat: string;
+  lon: string;
+  address?: { country_code?: string };
+}
+
+// Countries that sit on a single standard UTC offset year-round — safe to
+// use directly. Large multi-timezone countries (US, Canada, Australia,
+// Russia, Brazil, ...) deliberately aren't listed here since one flat
+// offset would be wrong for much of them; those fall through to the
+// longitude-based estimate below instead. Real historical DST rules aren't
+// modeled either way — this is a best-effort estimate, not an authority.
+const COUNTRY_OFFSET_HOURS: Record<string, number> = {
+  in: 5.5, pk: 5, bd: 6, np: 5.75, lk: 5.5, mm: 6.5,
+  gb: 0, ie: 0, pt: 0,
+  fr: 1, de: 1, es: 1, it: 1, nl: 1, be: 1, ch: 1, se: 1, no: 1, dk: 1, pl: 1, at: 1,
+  ae: 4, sa: 3, qa: 3, kw: 3, om: 4, il: 2,
+  sg: 8, my: 8, hk: 8, tw: 8, ph: 8,
+  jp: 9, kr: 9,
+  th: 7, vn: 7, id: 7,
+  nz: 12,
+  za: 2, eg: 2, ke: 3, ng: 1,
+};
+
+function estimateTimezoneOffsetHours(countryCode: string | undefined, longitude: number): number {
+  const known = countryCode ? COUNTRY_OFFSET_HOURS[countryCode.toLowerCase()] : undefined;
+  if (known !== undefined) return known;
+  // Rough fallback for anywhere without a known single-zone offset — real
+  // timezone boundaries don't track longitude exactly, but this is still
+  // far closer than silently defaulting to New Delhi's +5:30.
+  return Math.round(longitude / 15);
+}
+
+/** Live place search-as-you-type. Returns [] for a too-short query rather
+ * than firing a request, and throws on a network/HTTP failure so the caller
+ * can fall back to resolveBirthPlace rather than silently showing nothing. */
+export async function searchPlaces(query: string): Promise<GeocodeResult[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 3) return [];
+
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&q=${encodeURIComponent(trimmed)}`;
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'KundaliAI/1.0 (astrology app birth-place lookup)',
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Place search failed (${res.status})`);
+  }
+  const results: NominatimResult[] = await res.json();
+  return results.map((r) => {
+    const longitude = parseFloat(r.lon);
+    return {
+      displayName: r.display_name,
+      latitude: parseFloat(r.lat),
+      longitude,
+      timezoneOffsetHours: estimateTimezoneOffsetHours(r.address?.country_code, longitude),
+    };
+  });
 }

@@ -69,12 +69,12 @@
         ]
       },
       {
-        "eyebrow": "Paanch guide, ek kundali",
+        "eyebrow": "Ek kundali, poochne ke chhe tareeke",
         "title": "Kisi Rishi se poochein — jo perspective chahiye wo chunein.",
         "checks": [
           {
-            "title": "Vasishtha, Parashara, Gargi, Agastya aur Bhrigu",
-            "desc": "Har Rishi apni alag baatcheet aur apna focus rakhta hai, par aapki ek hi real kundali ke aadhar par."
+            "title": "Vyasa har sawaal ka jawab dete hain; paanch specialists depth mein jaate hain",
+            "desc": "Vyasa default hain aur har topic par seedhe jawab dete hain; kabhi bhi Vasishtha, Parashara, Gargi, Agastya ya Bhrigu par switch karein unki specialty ke liye."
           },
           {
             "title": "Har din ek fresh reading",
@@ -376,7 +376,8 @@
     "testingSectionTitle": "Testing",
     "restartOnboarding": "Onboarding phir se shuru karein",
     "restartOnboardingConfirmTitle": "Onboarding restart karein?",
-    "restartOnboardingConfirmMessage": "Isse aapki birth details, preferences aur reports clear ho jayengi taaki aap dobara onboarding se guzar sakein."
+    "restartOnboardingConfirmMessage": "Isse aapki birth details, preferences aur reports clear ho jayengi taaki aap dobara onboarding se guzar sakein.",
+    "placeSearchError": "Abhi places search nahi ho paaye — apna connection check karein, ya poora place name type karte rahein."
   },
   "rishi": {
     "unlimitedMessages": "Unlimited messages",
@@ -386,11 +387,13 @@
     "buyPass": "Pass khareedein",
     "freeMessagesLeft_one": "Aaj {{count}} free message bacha hai",
     "freeMessagesLeft_other": "Aaj {{count}} free messages bache hain",
-    "promptWeek": "Is hafte ka focus",
-    "promptDasha": "Meri current Dasha",
-    "promptCareer": "Career pattern",
-    "promptRemedy": "Ek practical upaay",
-    "listenToReply": "Suniye"
+    "promptWeek": "Mera hafta kaisa rahega?",
+    "promptDasha": "Abhi meri kaunsi dasha chal rahi hai?",
+    "promptCareer": "Mera career kaisa rahega?",
+    "listenToReply": "Suniye",
+    "answeredBy": "{{name}} ki taraf se",
+    "scrollToLatest": "Latest message par jaayein",
+    "promptPast": "5 saal pehle mere saath kya chal raha tha?"
   },
   "voiceChat": {
     "promoTitle": "Bolkar apne sawaal poochein",
@@ -404,8 +407,7 @@
   },
   "rishiPicker": {
     "screenTitle": "Kisi Rishi se Poochein",
-    "subtitle": "Ek kundali, dekhne ke paanch tareeke — jo aapke sawaal ke anukool ho, wo guide chunein.",
-    "openButton": "Baatcheet shuru karein",
+    "subtitle": "Ek kundali, dekhne ke chhe tareeke — Vyasa har sawaal ka jawab dete hain, ya koi specialist chunein.",
     "disclaimer": "Har Rishi ek hi asli kundali calculation par based hai — lehja badalta hai, facts nahi.",
     "vasishtha": {
       "focus": "Life direction",
@@ -436,7 +438,14 @@
       "tag": "Direct aur strategic",
       "description": "Kaam, paisa, capability aur aapke practical future ko shape karne wale decisions ke liye.",
       "greeting": "Batayein aap kaunsa career ya financial decision soch rahe hain, hum ise aapki kundali se dekhenge."
-    }
+    },
+    "vyasa": {
+      "focus": "Mujhse kuch bhi poochein",
+      "tag": "Warm aur all-round",
+      "description": "Kisi bhi sawaal ke liye — main aapki asli kundali se seedhe jawab deta hoon, chahe topic kuch bhi ho.",
+      "greeting": "Namaste. Apni kundali ke baare mein kuch bhi poochein — career, rishte, timing, health, sab kuch."
+    },
+    "switchTrigger": "Guide badlein, abhi {{name}}"
   },
   "passStore": {
     "screenTitle": "Pass Store",

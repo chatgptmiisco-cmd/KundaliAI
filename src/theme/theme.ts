@@ -69,12 +69,15 @@ export const elevation = {
 // Two bilingual type families (both Latin + Devanagari, so headings render
 // correctly in Hindi too — a Latin-only display font would silently drop
 // Hindi glyphs). Baloo 2 is a rounded, distinctive display face used for the
-// biggest headings; Hind is a calmer workhorse for everything read at length.
+// biggest headings; Mukta is a smoother, warmer workhorse for everything
+// read at length — same Indian Type Foundry lineage as Baloo 2, so the two
+// pair cleanly instead of looking like two unrelated typefaces bolted
+// together.
 export const fontFamily = {
-  regular: 'Hind_400Regular',
-  medium: 'Hind_500Medium',
-  semiBold: 'Hind_600SemiBold',
-  bold: 'Hind_700Bold',
+  regular: 'Mukta_400Regular',
+  medium: 'Mukta_500Medium',
+  semiBold: 'Mukta_600SemiBold',
+  bold: 'Mukta_700Bold',
   displayBold: 'Baloo2_700Bold',
   displayExtraBold: 'Baloo2_800ExtraBold',
 };

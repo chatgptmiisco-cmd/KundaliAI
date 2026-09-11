@@ -11,6 +11,15 @@ export interface BirthData {
   dateOfBirth: string; // ISO date
   timeOfBirth: string; // HH:mm
   placeOfBirth: string;
+  // Populated when the user picks a real geocoded suggestion for
+  // placeOfBirth (see components/PlaceAutocomplete + data/geocoding) —
+  // preferred over the offline city-table fallback (resolveBirthPlace)
+  // whenever present. Cleared if the user edits the place text afterward,
+  // since a stale coordinate no longer matching the typed text is worse
+  // than falling back to the table.
+  latitude?: number;
+  longitude?: number;
+  timezoneOffsetHours?: number;
 }
 
 export interface KundaliSummary {
@@ -305,13 +314,18 @@ export interface Identity {
   elementModality: ElementModalityPoint[];
 }
 
-export type RishiTone = 'direct' | 'traditional' | 'practical' | 'spiritual' | 'analytical';
+export type RishiTone = 'direct' | 'traditional' | 'practical' | 'spiritual' | 'analytical' | 'general';
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   createdAt: number;
+  // Which real specialist Rishi this reply's topic belongs to (see
+  // api/client.ts ChatReply) — only ever set on assistant messages, shown
+  // as a small corner label so a generalist persona's replies still credit
+  // the real specialty behind the answer.
+  answeredByRishiId?: string;
 }
 
 export interface PassOption {

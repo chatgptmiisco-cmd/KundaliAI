@@ -50,6 +50,54 @@ from app.services.interpretation.prediction_templates import (
 Direction = Literal["past", "future"]
 _FUTURE_HORIZON_YEARS = 20.0
 
+# Transit corroboration (Jupiter/Saturn transiting the event's own house
+# during the window — the classical gochar confirmation) used to be purely
+# cosmetic: computed, shown in the reason text, but never folded into the
+# score used to RANK windows. That let a window scoring higher on dasha
+# lordship alone (e.g. a lord's own Mahadasha AND Antardasha coinciding)
+# outrank an earlier, transit-CONFIRMED window that only had a single
+# antardasha-level signal — even though a real, independent transit
+# confirmation is exactly the kind of corroborating signal a real
+# astrologer weighs heavily. Caught by comparing a real chart's output
+# against its own dasha timeline: the transit-corroborated window was
+# sitting in 2nd place purely because corroboration wasn't scored.
+#
+# Scanning a wider candidate pool before corroborating (instead of only
+# corroborating whatever already made the dasha-only top 3) means a
+# transit-confirmed window further down the dasha-only ranking still gets a
+# fair chance to surface once its corroboration bonus is applied.
+_CANDIDATE_POOL_SIZE = 8
+_FINAL_WINDOW_COUNT = 3
+# Sized between the antardasha-level rule weights (2.0-3.0) and the
+# mahadasha-level ones (0.5-1.0) — real, but not so large that
+# corroboration alone can promote a window with a much weaker dasha signal
+# above one with a strong one.
+_TRANSIT_CORROBORATION_BONUS = 1.5
+
+# Bump this whenever the window-scoring/ranking logic changes (like the
+# transit-bonus fix above did) — the cache is keyed by (user, direction,
+# language, birth_profile_version), none of which change when the CODE
+# changes, so a previously-cached prediction would otherwise keep being
+# served forever with the OLD ranking even after a real scoring fix ships.
+# Caught live: a user re-tested right after the transit-bonus fix and still
+# saw the old, wrong top window because their cache row predated it.
+_TIMING_ALGO_VERSION = 2
+
+
+def _rerank_with_transit_bonus(
+    scored_pairs: list[tuple[ScoredWindow, bool]],
+) -> list[tuple[ScoredWindow, bool]]:
+    """Re-sorts a (window, transit_corroborated) pool by dasha score PLUS
+    the transit bonus when present, then trims to the final count — same
+    tie-break (earliest start) as the underlying dasha-only sort."""
+    scored_pairs.sort(
+        key=lambda pair: (
+            -(pair[0].score + (_TRANSIT_CORROBORATION_BONUS if pair[1] else 0.0)),
+            pair[0].start,
+        )
+    )
+    return scored_pairs[:_FINAL_WINDOW_COUNT]
+
 
 def _search_bounds(direction: Direction, birth_dt: datetime, now: datetime) -> tuple[datetime, float]:
     """Where to point the window scanner — the entire past (birth to now)
@@ -231,7 +279,11 @@ async def get_marriage_timing(
     select_stmt = _marriage_select_stmt(profile, direction, language)
     result = await db.execute(select_stmt)
     cached_row = result.scalar_one_or_none()
-    if cached_row is not None and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS):
+    if (
+        cached_row is not None
+        and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS)
+        and cached_row.data.get("algo_version") == _TIMING_ALGO_VERSION
+    ):
         return MarriageTimingResponse(language=language, direction=direction, cached=True, **cached_row.data)
 
     d1 = await get_chart(db, profile, birth, "D1")
@@ -244,8 +296,9 @@ async def get_marriage_timing(
     from_dt, horizon_years = _search_bounds(direction, birth_dt, now)
 
     def _compute_windows():
-        windows = find_marriage_windows(mahadashas, seventh_lord, from_dt, horizon_years)
-        return [(w, corroborate_with_transits(w, d1.lagna_sign_index, moon.sign_index)) for w in windows]
+        windows = find_marriage_windows(mahadashas, seventh_lord, from_dt, horizon_years, top_n=_CANDIDATE_POOL_SIZE)
+        pairs = [(w, corroborate_with_transits(w, d1.lagna_sign_index, moon.sign_index)) for w in windows]
+        return _rerank_with_transit_bonus(pairs)
 
     scored_windows = await anyio.to_thread.run_sync(_compute_windows)
 
@@ -284,7 +337,7 @@ async def get_marriage_timing(
             "partner's chart before marriage."
         )
 
-    data = {"windows": windows_out, "manglik_note": manglik_note}
+    data = {"windows": windows_out, "manglik_note": manglik_note, "algo_version": _TIMING_ALGO_VERSION}
 
     if cached_row is not None:
         cached_row.data = data
@@ -324,7 +377,11 @@ async def get_life_event_timing(
     select_stmt = _life_event_select_stmt(profile, event_type, direction, language)
     result = await db.execute(select_stmt)
     cached_row = result.scalar_one_or_none()
-    if cached_row is not None and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS):
+    if (
+        cached_row is not None
+        and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS)
+        and cached_row.data.get("algo_version") == _TIMING_ALGO_VERSION
+    ):
         return LifeEventTimingResponse(
             event_type=event_type, language=language, direction=direction, cached=True, **cached_row.data
         )
@@ -338,11 +395,14 @@ async def get_life_event_timing(
     from_dt, horizon_years = _search_bounds(direction, birth_dt, now)
 
     def _compute_windows() -> list[tuple[ScoredWindow, bool]]:
-        windows = find_event_windows(mahadashas, event_type, house_lord_planet, from_dt, horizon_years)
-        return [
+        windows = find_event_windows(
+            mahadashas, event_type, house_lord_planet, from_dt, horizon_years, top_n=_CANDIDATE_POOL_SIZE
+        )
+        pairs = [
             (w, corroborate_life_event_with_transits(event_type, w, d1.lagna_sign_index, moon.sign_index))
             for w in windows
         ]
+        return _rerank_with_transit_bonus(pairs)
 
     scored_windows = await anyio.to_thread.run_sync(_compute_windows)
 
@@ -367,7 +427,7 @@ async def get_life_event_timing(
             }
         )
 
-    data = {"windows": windows_out}
+    data = {"windows": windows_out, "algo_version": _TIMING_ALGO_VERSION}
 
     if cached_row is not None:
         cached_row.data = data

@@ -17,6 +17,7 @@ from app.services.daily_reading_service import get_daily_reading
 from app.services.dasha_service import get_current_dasha
 from app.services.interpretation.factory import get_interpreter
 from app.services.interpretation.templates import (
+    detect_answering_rishi,
     message_mentions_career_timing,
     message_mentions_children_timing,
     message_mentions_foreign_travel_timing,
@@ -74,6 +75,10 @@ async def chat_astro(
         ],
         "mahadasha_lord": mahadasha_lord,
         "antardasha_lord": antardasha_lord,
+        # The raw planet code (e.g. "Sa"), not the display name above — used
+        # to look up the real _PERIOD_CONTENT effect one-liner for the
+        # "dasha" chat category.
+        "antardasha_lord_code": current_dasha.antardasha.lord if current_dasha else None,
         "daily_reading": {
             "rating": daily.rating,
             "rating_reason": daily.rating_reason,
@@ -108,7 +113,13 @@ async def chat_astro(
         marriage_timing = await prediction_service.get_marriage_timing(db, profile, birth, body.language, direction)
         context["marriage_timing_direction"] = direction
         context["marriage_timing_windows"] = [
-            {"start_date": w.start_date.isoformat(), "end_date": w.end_date.isoformat(), "reason": w.reason}
+            {
+                "start_date": w.start_date.isoformat(),
+                "end_date": w.end_date.isoformat(),
+                "reason": w.reason,
+                "antardasha_lord_name": w.antardasha_lord_name,
+                "transit_corroborated": w.transit_corroborated,
+            }
             for w in marriage_timing.windows
         ]
 
@@ -128,7 +139,13 @@ async def chat_astro(
             )
             context[f"{category}_direction"] = direction
             context[f"{category}_windows"] = [
-                {"start_date": w.start_date.isoformat(), "end_date": w.end_date.isoformat(), "reason": w.reason}
+                {
+                    "start_date": w.start_date.isoformat(),
+                    "end_date": w.end_date.isoformat(),
+                    "reason": w.reason,
+                    "antardasha_lord_name": w.antardasha_lord_name,
+                    "transit_corroborated": w.transit_corroborated,
+                }
                 for w in life_event.windows
             ]
 
@@ -176,9 +193,14 @@ async def chat_astro(
 
     interpreter = get_interpreter()
     reply = await interpreter.chat_reply(history, context, body.language)
+    # Which real specialist "owns" this question's topic — computed
+    # independently of which persona actually answered (see
+    # detect_answering_rishi), so it's a stable attribution label even when
+    # the generalist "vyasa" persona is the one chatting.
+    answered_by_rishi_id = detect_answering_rishi(body.message, birth.date_of_birth.year)
 
     db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
     db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id))
     await db.commit()
 
-    return ChatMessageOut(reply=reply, language=body.language)
+    return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=answered_by_rishi_id)

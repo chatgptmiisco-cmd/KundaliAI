@@ -44,6 +44,7 @@ python-dotenv==1.2.3
 python-jose==3.5.0
 python-multipart==0.0.32
 PyYAML==6.0.3
+rapidfuzz==3.14.6
 rsa==4.9.1
 six==1.17.0
 slowapi==0.1.10

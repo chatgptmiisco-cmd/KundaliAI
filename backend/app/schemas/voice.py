@@ -41,3 +41,9 @@ class ChatMessageIn(BaseModel):
 class ChatMessageOut(BaseModel):
     reply: str
     language: str
+    # Which of the 5 specialist Rishis classically owns this message's real
+    # topic (see templates.detect_answering_rishi) — independent of which
+    # persona the user is actually chatting with, so the generalist "vyasa"
+    # persona's replies can still be attributed to a real specialist (e.g.
+    # "via Bhrigu"). None when the message didn't match a known category.
+    answered_by_rishi_id: str | None = None

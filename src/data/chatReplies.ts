@@ -70,6 +70,18 @@ const REPLIES: Record<RishiTone, Record<Language, string[]>> = {
       'अभी आपकी असली कुंडली सामने न होने पर किसी भी जवाब का कोई ठोस आधार नहीं है। कृपया थोड़ी देर बाद फिर कोशिश करें।',
     ],
   },
+  general: {
+    en: [
+      "I can't reach your real chart data right now, so I won't guess at an answer — that would just be making things up. Try again in a moment.",
+      "Whatever you're asking about, I only answer from your actual computed chart, and I can't reach it just now. Please retry.",
+      "Rather than give you a generic answer dressed up as a reading, I'll wait until I can see your chart again. Try once more shortly.",
+    ],
+    hi: [
+      'अभी आपकी असली कुंडली का डेटा नहीं मिल पा रहा, इसलिए मैं अंदाज़ा नहीं लगाऊंगा — वह सिर्फ़ मनगढ़ंत होगा। कृपया थोड़ी देर बाद फिर कोशिश करें।',
+      'आप जो भी पूछ रहे हैं, मैं सिर्फ़ आपकी असली गणना से जवाब देता हूं, और अभी वह नहीं मिल पा रही। कृपया दोबारा कोशिश करें।',
+      'एक सामान्य जवाब को असली रीडिंग की तरह दिखाने के बजाय, मैं तब तक रुकूंगा जब तक आपकी असली कुंडली फिर से दिख न जाए। कृपया थोड़ी देर बाद फिर कोशिश करें।',
+    ],
+  },
 };
 
 export function getRishiReply(tone: RishiTone, messageIndex: number, language: Language): string {

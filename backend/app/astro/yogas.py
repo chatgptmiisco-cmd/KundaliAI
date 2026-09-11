@@ -13,6 +13,15 @@ _TRIKONA_HOUSES = {1, 5, 9}
 _MAHAPURUSHA_PLANET_NAMES: dict[PlanetKey, str] = {
     "Ma": "Ruchaka", "Me": "Bhadra", "Ju": "Hamsa", "Ve": "Malavya", "Sa": "Sasa",
 }
+# Devanagari spelling of each yoga name — kept separate from the Latin map
+# above rather than derived from it, since a real transliteration doesn't
+# collapse to one shared string across scripts (e.g. "Sasa" above is
+# spelled "शश" here, not a literal letter-for-letter transliteration).
+# Consumed by chart_explanation_service so a Hindi-language finding reads
+# fully in Devanagari instead of mixing in the Latin yoga name.
+MAHAPURUSHA_PLANET_NAMES_HI: dict[PlanetKey, str] = {
+    "Ma": "रुचक", "Me": "भद्र", "Ju": "हंस", "Ve": "मालव्य", "Sa": "शश",
+}
 
 
 def has_gajakesari_yoga(house_number_moon_to_jupiter: int) -> bool:

@@ -157,7 +157,14 @@ export async function putPreferences(preferences: PreferenceKey[]): Promise<void
 // ---------------------------------------------------------------------------
 
 export async function putBirthData(data: BirthData): Promise<void> {
-  const coords = resolveBirthPlace(data.placeOfBirth);
+  // A live-geocoded selection (see PlaceAutocomplete) is the real, exact
+  // coordinate for the place the user actually picked — prefer it over the
+  // offline ~45-city table, which only exists as a fallback for when no
+  // live selection was made.
+  const coords =
+    data.latitude !== undefined && data.longitude !== undefined && data.timezoneOffsetHours !== undefined
+      ? { latitude: data.latitude, longitude: data.longitude, timezoneOffsetHours: data.timezoneOffsetHours }
+      : resolveBirthPlace(data.placeOfBirth);
   await apiRequest('/user/profile/birth-data', {
     method: 'PUT',
     body: {
@@ -321,7 +328,10 @@ interface GunaMilanApi {
 }
 
 export async function getGunaMilan(partner: BirthData, lang: Language): Promise<GunaMilanResult> {
-  const coords = resolveBirthPlace(partner.placeOfBirth);
+  const coords =
+    partner.latitude !== undefined && partner.longitude !== undefined && partner.timezoneOffsetHours !== undefined
+      ? { latitude: partner.latitude, longitude: partner.longitude, timezoneOffsetHours: partner.timezoneOffsetHours }
+      : resolveBirthPlace(partner.placeOfBirth);
   const data = await apiRequest<GunaMilanApi>('/kundali/guna-milan', {
     method: 'POST',
     body: {
@@ -799,11 +809,21 @@ export async function checkoutSubscription(
 // credit-based fallback used below Strategy)
 // ---------------------------------------------------------------------------
 
-export async function postChatMessage(message: string, lang: Language, rishiId: string): Promise<string> {
-  const res = await apiRequest<{ reply: string }>('/chat/astro', {
+export interface ChatReply {
+  reply: string;
+  // Which real specialist Rishi classically owns this message's topic —
+  // independent of which persona is actually chatting (see the backend's
+  // detect_answering_rishi) — used to render a small "answered by X" label,
+  // most useful when talking to the generalist "vyasa" persona. Undefined
+  // when the message didn't match a known category.
+  answeredByRishiId?: string;
+}
+
+export async function postChatMessage(message: string, lang: Language, rishiId: string): Promise<ChatReply> {
+  const res = await apiRequest<{ reply: string; answered_by_rishi_id: string | null }>('/chat/astro', {
     method: 'POST',
     body: { message, language: lang, rishi_id: rishiId },
   });
-  return res.reply;
+  return { reply: res.reply, answeredByRishiId: res.answered_by_rishi_id ?? undefined };
 }
 
