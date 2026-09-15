@@ -76,7 +76,22 @@ from app.services.interpretation.prediction_templates import (
 )
 
 Direction = Literal["past", "future"]
-_FUTURE_HORIZON_YEARS = 20.0
+# How far ahead of "now" a future-direction search looks. Needs to be long
+# enough to reach a target planet's own Antardasha even in the unlucky case
+# where it just passed in the CURRENT Mahadasha and doesn't recur until deep
+# into the NEXT one — worst case is close to (current Mahadasha's remaining
+# length) + (most of the next Mahadasha's length), and the two longest
+# Mahadashas (Venus 20y, Saturn 19y) can combine to nearly 35-40 years.
+# Widened from 20.0 — found by comparing this engine's own output against
+# independent chart reads: a chart's ONLY house-lord-level Antardasha for
+# "children" (Jupiter, both the 5th lord and the classical karaka here) had
+# already passed in early childhood (age ~9, hard-implausible) and didn't
+# recur until age ~41.65 (a Jupiter Antardasha inside a later Saturn
+# Mahadasha) — about 21.75 years after "now" (age ~19.9), just outside the
+# old 20-year horizon. The engine fell back to a much weaker backdrop-only
+# window instead, purely because the real answer was never in the search
+# window at all, not because it was outranked. See _TIMING_ALGO_VERSION v16.
+_FUTURE_HORIZON_YEARS = 30.0
 
 # Transit corroboration (Jupiter/Saturn transiting the event's own house
 # during the window — the classical gochar confirmation) used to be purely
@@ -249,7 +264,58 @@ _TRANSIT_OBSTRUCTION_PENALTY = 1.0
 # evidence) went unchosen in the same pool. Age-plausibility now decides
 # first; evidence level only breaks ties within the same age-plausibility
 # bucket (see _pool_priority's docstring).
-_TIMING_ALGO_VERSION = 14
+# v15: two presentation fixes requested after reviewing v14's output on a
+# 20-chart QA set —
+#   - a new `confidence` field ("strong"/"moderate"/"low", derived 1:1 from
+#     evidence_level) so a "backdrop_only" window structurally reads as
+#     low-confidence instead of like a normal prediction with a footnote.
+#     The reason text for such a window now LEADS with that caveat (see
+#     prediction_templates._weak_evidence_sentence) instead of only
+#     appending it at the end, after an otherwise-confident-sounding
+#     paragraph.
+#   - marriage/children windows at a soft age boundary (age_implausibility
+#     is "early"/"late" but still literal_event_plausible=True — a real,
+#     if young/old, window) now also get an explicit "read this as
+#     relationship/commitment (or family-planning) activation rather than
+#     the literal date" note (see prediction_templates.
+#     _soft_age_interpretation_sentence) — milder than the hard
+#     reinterpretation sentence (literal_event_plausible=False), which
+#     already covers the case where NO plausible-age window exists at all.
+# v16: _FUTURE_HORIZON_YEARS widened from 20.0 to 30.0 — the fixed 20-year
+# future search window could miss a genuinely well-evidenced Antardasha
+# entirely (not just get outranked by one), if the target planet's own
+# Antardasha didn't recur until slightly past that cutoff. Found by
+# comparing this engine's own output against independent chart reads: one
+# chart's children_timing "future" answer was a weak backdrop-only window
+# (Jupiter Mahadasha, Sun Antardasha — Sun is neither the 5th lord nor a
+# children karaka here) even though Jupiter IS both the 5th lord and the
+# classical children karaka for that chart — its own Antardasha had already
+# passed at age ~9 (hard-implausible) and didn't recur until age ~41.65
+# (inside a later Saturn Mahadasha), about 21.75 years past "now" and just
+# outside the old 20-year horizon. _select_candidate_pool's age-before-
+# evidence priority (see v14) was working correctly on the candidates it
+# was given — the real fix here is upstream, in what candidates the search
+# horizon lets it see at all. See _FUTURE_HORIZON_YEARS's own comment for
+# the worst-case Mahadasha-length reasoning behind picking 30.0.
+# v17: companion fix to v16 — widening the horizon let several OTHER
+# "future" answers jump from an already-strong near-term window to a
+# merely-higher-scoring far-future one with the SAME evidence tier, since
+# _rerank_with_transit_bonus/_select_candidate_pool only ever tie-broke by
+# score, never recency. Found immediately after shipping v16, by diffing
+# its output against the pre-v16 run: e.g. one chart's "when will my career
+# improve" moved from age 45 to age 60, another's foreign-travel answer
+# from age 52 to age 77, purely because the far window scored marginally
+# higher (often just from its own transit corroboration) — a worse answer
+# to "when," even though not a worse answer to "what's your single
+# highest-scoring window ever." For direction="future" only, both functions
+# now put the EARLIEST window ahead of raw/effective score WITHIN the same
+# (is_hard_implausible, evidence_rank) bucket (see each function's
+# docstring) — this only changes which window wins a tie inside a bucket
+# v14 already established; it cannot make a lower-evidence or
+# hard-implausible-age window win against a better one. direction="past"
+# is unchanged (score-first) since "which past period was strongest" is a
+# different question than "when will X next happen."
+_TIMING_ALGO_VERSION = 17
 
 # The 7 classical planets Shadbala scores (Rahu/Ketu excluded — see
 # app.astro.shadbala's module docstring). MINIMUM_RUPAS.keys() is the public
@@ -433,6 +499,19 @@ _EVIDENCE_RANK: dict[EvidenceLevel, int] = {
     "house_lord_antardasha": 0, "karaka_antardasha": 1, "backdrop_only": 2,
 }
 
+Confidence = Literal["strong", "moderate", "low"]
+
+# A plain-language confidence label derived 1:1 from evidence_level, so a
+# consumer (chat, frontend) can decide how to present a window without
+# re-deriving the evidence/reason-key logic itself — found by comparing
+# this engine's own output against independent chart reads: a
+# "backdrop_only" window (only tied to the event via its broader Mahadasha)
+# was reading as a normal, confident prediction with nothing structurally
+# marking it as weaker than a house-lord-level one.
+_CONFIDENCE_FOR_EVIDENCE: dict[EvidenceLevel, Confidence] = {
+    "house_lord_antardasha": "strong", "karaka_antardasha": "moderate", "backdrop_only": "low",
+}
+
 
 def _evidence_level(window: ScoredWindow) -> EvidenceLevel:
     """Classifies how directly THIS SPECIFIC window's own Antardasha (not
@@ -515,7 +594,7 @@ def _pool_priority(
 
 
 def _select_candidate_pool(
-    windows: list[ScoredWindow], birth_dt: datetime, event_category: EventCategory
+    windows: list[ScoredWindow], birth_dt: datetime, event_category: EventCategory, direction: Direction = "past"
 ) -> list[ScoredWindow]:
     """Picks the _CANDIDATE_POOL_SIZE windows to run the (comparatively
     expensive) transit-corroboration check on, preferring every window with
@@ -537,22 +616,51 @@ def _select_candidate_pool(
     Mahadasha-only-evidence windows, with nothing better left to even
     compare against.
 
-    `windows` is assumed already sorted by raw score — Python's sort is
-    stable, so windows keep their relative raw-score order within each
-    `_pool_priority` bucket; this re-orders buckets, it doesn't re-rank
-    within one."""
-    ordered = sorted(windows, key=lambda w: _pool_priority(w, birth_dt, event_category))
+    For `direction="future"`, the EARLIEST window within a `_pool_priority`
+    bucket is kept ahead of a later one, even if the later one has a higher
+    raw dasha score — see _rerank_with_transit_bonus's docstring for why
+    (same reasoning, applied at this earlier candidate-pool stage so a
+    near-term window with the right evidence tier can't be squeezed out of
+    the pool entirely by several higher-scoring far-future ones before
+    transit corroboration ever runs). `direction="past"` (the default) keeps
+    the original score-ordered behavior — `windows` is assumed already
+    sorted by raw score, and Python's sort is stable, so windows keep their
+    relative raw-score order within each `_pool_priority` bucket; this
+    re-orders buckets, it doesn't re-rank within one."""
+    if direction == "future":
+        ordered = sorted(windows, key=lambda w: (*_pool_priority(w, birth_dt, event_category), w.start))
+    else:
+        ordered = sorted(windows, key=lambda w: _pool_priority(w, birth_dt, event_category))
     return ordered[:_CANDIDATE_POOL_SIZE]
 
 
 def _rerank_with_transit_bonus(
-    scored_pairs: list[tuple[ScoredWindow, TransitCheck]], birth_dt: datetime, event_category: EventCategory
+    scored_pairs: list[tuple[ScoredWindow, TransitCheck]],
+    birth_dt: datetime,
+    event_category: EventCategory,
+    direction: Direction = "past",
 ) -> list[tuple[ScoredWindow, TransitCheck]]:
     """Re-sorts a (window, transit_check) pool by dasha score PLUS the
     Ashtakavarga-scaled corroboration bonus MINUS the obstruction-fraction
     penalty, scaled by real-world age plausibility (see _effective_score),
-    then trims to the final count — same tie-break (earliest start) as the
-    underlying dasha-only sort.
+    then trims to the final count.
+
+    For `direction="future"`, the EARLIEST window within a `_pool_priority`
+    bucket wins outright — effective score only breaks a tie between two
+    windows starting at literally the same moment — instead of `past`'s
+    score-first order (score, then earliest start). Found by comparing this
+    engine's own output against independent chart reads, right after
+    widening _FUTURE_HORIZON_YEARS (see v16): several "future" answers
+    jumped from an already-strong NEAR window to a merely-higher-scoring
+    FAR one with the exact same evidence tier — e.g. one chart's "when will
+    my career improve" moved from age 45 to age 60, another's foreign-travel
+    answer from age 52 to age 77 — purely because the far window scored
+    marginally higher (often just from its own transit corroboration),
+    not because it was a meaningfully better answer to "when." A user
+    asking "when will X happen" wants the next qualifying window, not the
+    single highest-scoring one across their entire remaining life. `past`
+    keeps score-first ordering since "which past period was strongest"
+    really is asking for the best one, not the most recent.
 
     A window at a hard-implausible age (see _is_hard_implausible) always
     sorts AFTER every plausible-age window, regardless of effective score
@@ -573,13 +681,22 @@ def _rerank_with_transit_bonus(
     `evidence_level`/`literal_event_plausible` and
     prediction_templates.py) when _select_candidate_pool couldn't find
     enough better candidates to fill the pool."""
-    scored_pairs.sort(
-        key=lambda pair: (
-            *_pool_priority(pair[0], birth_dt, event_category),
-            -_effective_score(pair[0], pair[1], birth_dt, event_category),
-            pair[0].start,
+    if direction == "future":
+        scored_pairs.sort(
+            key=lambda pair: (
+                *_pool_priority(pair[0], birth_dt, event_category),
+                pair[0].start,
+                -_effective_score(pair[0], pair[1], birth_dt, event_category),
+            )
         )
-    )
+    else:
+        scored_pairs.sort(
+            key=lambda pair: (
+                *_pool_priority(pair[0], birth_dt, event_category),
+                -_effective_score(pair[0], pair[1], birth_dt, event_category),
+                pair[0].start,
+            )
+        )
     return scored_pairs[:_FINAL_WINDOW_COUNT]
 
 
@@ -587,7 +704,7 @@ def _search_bounds(
     direction: Direction, birth_dt: datetime, now: datetime, mahadashas: list[Mahadasha] | None = None
 ) -> tuple[datetime, float]:
     """Where to point the window scanner — the entire past (birth to now),
-    or a forward-looking horizon out to +20 years from now. Same scanner
+    or a forward-looking horizon out to +_FUTURE_HORIZON_YEARS from now. Same scanner
     (app.astro.event_window_scanner.scan_dasha_windows) either way; this is
     purely a different choice of bounds, not new astro logic.
 
@@ -602,8 +719,8 @@ def _search_bounds(
     starting the future search from the Antardasha's true start reports it
     whole, with its true dates and true score, in the direction most users
     check by default. The horizon is extended by the same amount pulled
-    backward, so the search still reaches +20 years from `now`, not from
-    this earlier start."""
+    backward, so the search still reaches +_FUTURE_HORIZON_YEARS from `now`,
+    not from this earlier start."""
     if direction == "past":
         age_years = (now - birth_dt).days / DAYS_PER_YEAR
         return birth_dt, max(age_years, 0.0)
@@ -810,12 +927,12 @@ async def get_marriage_timing(
         raw_windows = find_marriage_windows(
             mahadashas, seventh_lord, from_dt, horizon_years, top_n=_RAW_SCAN_POOL_SIZE, strength=strength
         )
-        windows = _select_candidate_pool(raw_windows, birth_dt, "marriage")
+        windows = _select_candidate_pool(raw_windows, birth_dt, "marriage", direction)
         pairs = [
             (w, corroborate_with_transits(w, d1.lagna_sign_index, moon.sign_index, natal_planet_sign))
             for w in windows
         ]
-        return _rerank_with_transit_bonus(pairs, birth_dt, "marriage")
+        return _rerank_with_transit_bonus(pairs, birth_dt, "marriage", direction)
 
     scored_windows = await anyio.to_thread.run_sync(_compute_windows)
 
@@ -855,6 +972,7 @@ async def get_marriage_timing(
                 "age_plausibility_multiplier": age_multiplier,
                 "literal_event_plausible": literal_event_plausible,
                 "evidence_level": evidence_level,
+                "confidence": _CONFIDENCE_FOR_EVIDENCE[evidence_level],
             }
         )
 
@@ -935,7 +1053,7 @@ async def get_life_event_timing(
             mahadashas, event_type, house_lord_planet, from_dt, horizon_years,
             top_n=_RAW_SCAN_POOL_SIZE, strength=strength,
         )
-        windows = _select_candidate_pool(raw_windows, birth_dt, event_type)
+        windows = _select_candidate_pool(raw_windows, birth_dt, event_type, direction)
         pairs = [
             (
                 w,
@@ -945,7 +1063,7 @@ async def get_life_event_timing(
             )
             for w in windows
         ]
-        return _rerank_with_transit_bonus(pairs, birth_dt, event_type)
+        return _rerank_with_transit_bonus(pairs, birth_dt, event_type, direction)
 
     scored_windows = await anyio.to_thread.run_sync(_compute_windows)
 
@@ -984,6 +1102,7 @@ async def get_life_event_timing(
                 "age_plausibility_multiplier": age_multiplier,
                 "literal_event_plausible": literal_event_plausible,
                 "evidence_level": evidence_level,
+                "confidence": _CONFIDENCE_FOR_EVIDENCE[evidence_level],
             }
         )
 

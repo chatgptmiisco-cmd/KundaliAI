@@ -387,17 +387,20 @@ def _effective_score(w: dict, bonus: float, penalty: float) -> float:
 _EVIDENCE_RANK = {"house_lord_antardasha": 0, "karaka_antardasha": 1, "backdrop_only": 2}
 
 
-def _ranking_key(w: dict, bonus: float, penalty: float) -> tuple:
+def _ranking_key(w: dict, bonus: float, penalty: float, direction: str = "future") -> tuple:
     # Mirrors prediction_service._rerank_with_transit_bonus's actual sort
     # key: evidence level and age-plausibility both outrank effective score
     # (see _pool_priority) — a window can have a lower effective score and
     # still legitimately sort first if it has stronger evidence or a more
-    # plausible age.
-    return (
-        _EVIDENCE_RANK[w["evidence_level"]],
-        not w["literal_event_plausible"],
-        -_effective_score(w, bonus, penalty),
-    )
+    # plausible age. For direction="future" (v17), the window's own start
+    # date outranks effective score too — the earliest window within the
+    # same evidence/plausibility bucket wins, not the highest-scoring one
+    # (see _rerank_with_transit_bonus's docstring); direction="past" keeps
+    # score ahead of start, unchanged.
+    bucket = (_EVIDENCE_RANK[w["evidence_level"]], not w["literal_event_plausible"])
+    if direction == "future":
+        return (*bucket, w["start_date"], -_effective_score(w, bonus, penalty))
+    return (*bucket, -_effective_score(w, bonus, penalty), w["start_date"])
 
 
 async def test_marriage_timing_returns_ranked_windows(client):
@@ -426,24 +429,31 @@ async def test_marriage_timing_returns_ranked_windows(client):
     assert ranking_keys == sorted(ranking_keys)
 
 
-async def test_marriage_timing_transit_corroborated_window_can_outrank_a_higher_raw_score(client):
-    """Regression guard for a real case a user found live: this exact chart
-    originally had a Saturn Mahadasha / Mercury Antardasha window (2027,
-    lower raw dasha score) beat a later, higher-raw-score Mercury/Mercury
-    window purely because Saturn was ALSO transiting the relevant house —
-    before folding transit corroboration into ranking at all, the later,
-    uncorroborated window wrongly won on raw dasha score alone.
+async def test_marriage_timing_earliest_window_wins_within_the_same_evidence_tier(client):
+    """Regression guard for a real case a user found live, revised twice as
+    the ranking rules genuinely changed underneath it:
 
-    Once Ashtakavarga was added (see app.astro.ashtakavarga), the SAME
-    Saturn transit that used to unconditionally win the 2027 window turned
-    out to have only 2-out-of-8 Ashtakavarga bindus at the sign Saturn was
-    actually transiting — a real classical "this specific transit is weak"
-    fact this test's original, cruder assertion couldn't see. That
-    genuinely revised which window should rank first for this exact chart:
-    the general principle (a real transit signal CAN outrank raw dasha
-    score) is still protected by test_marriage_timing_returns_ranked_windows
-    above; this test now locks in the CURRENT correct, more nuanced answer
-    for this specific chart instead."""
+    - Originally, a Saturn Mahadasha / Mercury Antardasha window (2027,
+      lower raw dasha score) beat a later, higher-raw-score Mercury/Mercury
+      window purely because Saturn was ALSO transiting the relevant house —
+      before folding transit corroboration into ranking at all, the later,
+      uncorroborated window wrongly won on raw dasha score alone.
+    - Once Ashtakavarga was added (see app.astro.ashtakavarga), that same
+      Saturn transit turned out to have only 2-out-of-8 Ashtakavarga bindus
+      at the sign it was actually transiting — a real "this specific
+      transit is weak" fact — which flipped the winner to the later,
+      higher-scoring 2043 window for a while.
+    - v17 (see prediction_service._TIMING_ALGO_VERSION) changed this again:
+      for direction="future", the EARLIEST window within the same
+      (is_hard_implausible, evidence_rank) bucket now wins outright instead
+      of score (see _rerank_with_transit_bonus) — found right after v16
+      widened the search horizon and several "future" answers started
+      jumping to a merely-higher-scoring far-future window instead of an
+      already-strong near one. Both 2027 and 2043 here are
+      house_lord_antardasha and literal_event_plausible, i.e. the same
+      bucket, so 2027 (earlier) now correctly wins regardless of either
+      window's transit strength — locking in the CURRENT correct answer
+      for this exact chart, same as the two revisions before it."""
     signup = await client.post(
         "/api/v1/auth/signup",
         json={"email": "transitcheck@example.com", "password": "supersecret1", "name": "Transit Check", "preferred_language": "en"},
@@ -462,16 +472,16 @@ async def test_marriage_timing_transit_corroborated_window_can_outrank_a_higher_
     assert resp.status_code == 200, resp.text
     windows = resp.json()["windows"]
     top = windows[0]
-    assert top["start_date"] == "2043-02-16"
-    assert top["transit_corroborated"] is False  # no longer the winner, but for a real, verifiable reason
+    assert top["start_date"] == "2027-02-20"
+    assert top["evidence_level"] == "house_lord_antardasha"
+    assert top["literal_event_plausible"] is True
 
-    # The 2027 window is still corroborated, but its bonus is now correctly
-    # scaled down (weak Ashtakavarga) rather than a flat, unconditional
-    # bonus — this is WHY it no longer wins, not an unexplained flip.
+    # 2043 has a higher raw score but starts later, in the SAME evidence/
+    # plausibility bucket as 2027 — it no longer wins for direction="future".
     second = windows[1]
-    assert second["start_date"] == "2027-02-20"
-    assert second["transit_corroborated"] is True
-    assert second["transit_corroboration_strength"] < 1.0
+    assert second["start_date"] == "2043-02-16"
+    assert second["score"] > top["score"]
+    assert second["evidence_level"] == "house_lord_antardasha"
 
 
 async def test_marriage_timing_is_cached_on_repeat_call(client):
@@ -615,6 +625,29 @@ async def test_marriage_timing_evidence_level_field_matches_reason_text(client):
             has_note = "broader multi-year period" in window["reason"]
             assert window["evidence_level"] in ("house_lord_antardasha", "karaka_antardasha", "backdrop_only")
             assert (window["evidence_level"] == "backdrop_only") == has_note
+
+
+_CONFIDENCE_FOR_EVIDENCE = {"house_lord_antardasha": "strong", "karaka_antardasha": "moderate", "backdrop_only": "low"}
+
+
+async def test_life_event_timing_confidence_field_matches_evidence_level(client):
+    """Regression guard for the new `confidence` field (algo v15): it must
+    always be the exact 1:1 mapping from `evidence_level`, and a
+    backdrop_only window's reason text must LEAD with its low-confidence
+    caveat rather than only appending it after a confident-sounding
+    paragraph."""
+    headers = await _signup_and_set_birth_data(client)
+    for event_type in ("career", "wealth", "children", "foreign_travel"):
+        for direction in ("future", "past"):
+            resp = await client.get(
+                "/api/v1/prediction/life-event-timing", headers=headers,
+                params={"event_type": event_type, "language": "en", "direction": direction},
+            )
+            assert resp.status_code == 200, resp.text
+            for window in resp.json()["windows"]:
+                assert window["confidence"] == _CONFIDENCE_FOR_EVIDENCE[window["evidence_level"]]
+                if window["evidence_level"] == "backdrop_only":
+                    assert window["reason"].startswith("No strong, directly-tied window was found")
 
 
 async def test_life_event_timing_reinterprets_a_window_with_no_plausible_age_alternative(client):

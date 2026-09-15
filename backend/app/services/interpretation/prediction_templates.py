@@ -342,34 +342,75 @@ def _reinterpretation_sentence(event_key: str, literal_event_plausible: bool, hi
     return (_REINTERPRETATION_HI if hi else _REINTERPRETATION_EN)[event_key]
 
 
+# Surfaced for marriage/children specifically when the window is at a SOFT
+# age boundary (age_implausibility is "early"/"late" — see
+# app.astro.life_stage_plausibility.is_implausible_age) but still
+# literal_event_plausible=True (not hard-implausible — see
+# is_hard_implausible_age). These two categories are the ones where a
+# literal reading (an actual first marriage, an actual childbirth) is
+# meaningfully different from a broader "activation" reading even at a
+# merely-early/late (not impossible) age — unlike career/wealth/foreign
+# travel, where "a shift" vs "a literal new job" isn't as sharp a
+# distinction. Deliberately softer than `_reinterpretation_sentence` above
+# (which fires only when NO plausible-age window exists at all): this
+# doesn't claim the literal reading is implausible, only suggests reading
+# it as an activation rather than treating an early/late date as the
+# specific event itself.
+_SOFT_AGE_INTERPRETATION_EN: dict[str, str] = {
+    "marriage": "read this more as relationship or commitment activation than as the specific marriage date",
+    "children": "read this more as family-planning or child-related activation than as the specific childbirth date",
+}
+_SOFT_AGE_INTERPRETATION_HI: dict[str, str] = {
+    "marriage": "इसे विशेष विवाह तिथि के बजाय रिश्ते या प्रतिबद्धता से जुड़ी सक्रियता के रूप में अधिक देखें",
+    "children": "इसे विशेष संतान-जन्म तिथि के बजाय पारिवारिक योजना या संतान से जुड़ी सक्रियता के रूप में अधिक देखें",
+}
+
+
+def _soft_age_interpretation_sentence(
+    event_key: str, age_implausibility: Literal["early", "late"] | None, literal_event_plausible: bool, hi: bool
+) -> str | None:
+    if age_implausibility is None or not literal_event_plausible:
+        return None
+    pool = _SOFT_AGE_INTERPRETATION_HI if hi else _SOFT_AGE_INTERPRETATION_EN
+    if event_key not in pool:
+        return None
+    return (f"इसलिए {pool[event_key]}।" if hi else f"So {pool[event_key]}.")
+
+
 # Surfaced when prediction_service._select_candidate_pool couldn't find any
 # window whose OWN Antardasha is the house lord or a karaka anywhere in the
 # search horizon, so it fell back to one that only qualifies through its
 # broader Mahadasha (evidence_level == "backdrop_only" — see
 # prediction_service._evidence_level) — a real but comparatively weak
 # signal, since nothing about this specific narrower phase itself ties it
-# to the event. Deliberately generic (not per-category) since the
-# distinction it's naming — "the broader period, not this specific phase,
-# is what connects here" — reads the same regardless of which event it is.
-# Not shown for "karaka_antardasha": a karaka's OWN Antardasha is real
-# classical evidence (that's why marriage_rules/event_rules score it in the
-# first place), just a more generic signal than the house lord's — a
-# distinction _evidence_level exposes for callers/analysis, but not one
-# this app currently treats as worth a caveat sentence.
+# to the event. Deliberately LEADS the reason text (see
+# marriage_window_reason_text/life_event_reason_text below) rather than
+# only appending as a trailing caveat — found by comparing this engine's
+# own output against independent chart reads: burying "this is a weak,
+# indirect signal" at the end of an otherwise confident-sounding paragraph
+# ("This period is a grind...") read as a normal prediction with a
+# footnote, not as the low-confidence result it actually is. Not shown for
+# "karaka_antardasha": a karaka's OWN Antardasha is real classical evidence
+# (that's why marriage_rules/event_rules score it in the first place), just
+# a more generic signal than the house lord's — a distinction
+# _evidence_level exposes for callers/analysis, but not one this app
+# currently treats as worth a caveat sentence.
 _WEAK_EVIDENCE_EN = (
-    "No period whose own narrower phase is directly tied to this was found nearby — this window only "
-    "qualifies through the broader multi-year period it falls in, a real but comparatively weaker signal."
+    "No strong, directly-tied window was found for {event} nearby — this window only qualifies through the "
+    "broader multi-year period it falls in. Treat what follows as background context, not a specific prediction:"
 )
 _WEAK_EVIDENCE_HI = (
-    "आस-पास ऐसी कोई अवधि नहीं मिली जिसका अपना छोटा दौर सीधे इससे जुड़ा हो — यह अवधि केवल उस बड़ी बहु-वर्षीय "
-    "अवधि के कारण योग्य मानी गई है जिसके अंतर्गत यह आती है, जो एक वास्तविक पर तुलनात्मक रूप से कमज़ोर संकेत है।"
+    "आस-पास {event} से सीधे जुड़ी कोई मज़बूत अवधि नहीं मिली — यह अवधि केवल उस बड़ी बहु-वर्षीय अवधि के कारण योग्य "
+    "मानी गई है जिसके अंतर्गत यह आती है। आगे दी गई बात को एक विशेष भविष्यवाणी नहीं, बल्कि पृष्ठभूमि जानकारी मानें:"
 )
 
 
-def _weak_evidence_sentence(evidence_level: str, hi: bool) -> str | None:
+def _weak_evidence_sentence(event_key: str, evidence_level: str, hi: bool) -> str | None:
     if evidence_level != "backdrop_only":
         return None
-    return _WEAK_EVIDENCE_HI if hi else _WEAK_EVIDENCE_EN
+    pool = _WEAK_EVIDENCE_HI if hi else _WEAK_EVIDENCE_EN
+    labels = _EVENT_LABEL_HI if hi else _EVENT_LABEL_EN
+    return pool.format(event=labels[event_key])
 
 # Surfaces app.astro.event_window_scanner's Mahadasha/Antardasha relationship
 # weighting (see its _DASHA_RELATIONSHIP_MULTIPLIER) as plain language.
@@ -514,10 +555,11 @@ def marriage_window_reason_text(
     directly THIS window's own Antardasha ties to the event: the house
     lord's own Antardasha, a karaka's own Antardasha (real evidence, but a
     more generic signal), or only its broader Mahadasha (a real but
-    comparatively weak signal). Only "backdrop_only" appends an honest
-    note — a karaka's own Antardasha is real classical evidence, not one
-    this app currently treats as worth a caveat, just a coarser one than
-    the house lord's."""
+    comparatively weak signal). Only "backdrop_only" prepends an honest
+    low-confidence note AHEAD OF the rest of the reason (see
+    _weak_evidence_sentence) — a karaka's own Antardasha is real classical
+    evidence, not one this app currently treats as worth a caveat, just a
+    coarser one than the house lord's."""
     hi = language == "hi"
     pool = _MARRIAGE_REASON_HI if hi else _MARRIAGE_REASON_EN
     content_pool = _PERIOD_CONTENT_HI if hi else _PERIOD_CONTENT_EN
@@ -540,14 +582,20 @@ def marriage_window_reason_text(
     age_sentence = _age_implausibility_sentence("marriage", age_implausibility, hi)
     if age_sentence is not None:
         mechanism += " " + age_sentence
+    soft_age_note = _soft_age_interpretation_sentence("marriage", age_implausibility, literal_event_plausible, hi)
+    if soft_age_note is not None:
+        mechanism += " " + soft_age_note
     reinterpretation = _reinterpretation_sentence("marriage", literal_event_plausible, hi)
     if reinterpretation is not None:
         mechanism += " " + reinterpretation
-    weak_evidence = _weak_evidence_sentence(evidence_level, hi)
-    if weak_evidence is not None:
-        mechanism += " " + weak_evidence
     if tense == "past":
         mechanism = _apply_past_tense(mechanism, hi)
+    weak_evidence = _weak_evidence_sentence("marriage", evidence_level, hi)
+    if weak_evidence is not None:
+        # Leads the whole reason, ahead of `effect` — see _weak_evidence_sentence's
+        # docstring for why a backdrop-only window's low-confidence framing
+        # must not be buried after an otherwise-confident-sounding paragraph.
+        return f"{weak_evidence} {effect} {mechanism}"
     return f"{effect} {mechanism}"
 
 
@@ -683,14 +731,20 @@ def life_event_reason_text(
     age_sentence = _age_implausibility_sentence(event_type, age_implausibility, hi)
     if age_sentence is not None:
         mechanism += " " + age_sentence
+    soft_age_note = _soft_age_interpretation_sentence(event_type, age_implausibility, literal_event_plausible, hi)
+    if soft_age_note is not None:
+        mechanism += " " + soft_age_note
     reinterpretation = _reinterpretation_sentence(event_type, literal_event_plausible, hi)
     if reinterpretation is not None:
         mechanism += " " + reinterpretation
-    weak_evidence = _weak_evidence_sentence(evidence_level, hi)
-    if weak_evidence is not None:
-        mechanism += " " + weak_evidence
     if tense == "past":
         mechanism = _apply_past_tense(mechanism, hi)
+    weak_evidence = _weak_evidence_sentence(event_type, evidence_level, hi)
+    if weak_evidence is not None:
+        # Leads the whole reason, ahead of `effect` — see marriage_window_
+        # reason_text's matching branch and _weak_evidence_sentence's
+        # docstring for why.
+        return f"{weak_evidence} {effect} {mechanism}"
     return f"{effect} {mechanism}"
 
 

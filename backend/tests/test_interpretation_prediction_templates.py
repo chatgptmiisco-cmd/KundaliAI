@@ -371,6 +371,66 @@ def test_life_event_reason_text_omits_weak_evidence_note_by_default():
     assert "broader multi-year period" not in text
 
 
+def test_weak_evidence_note_leads_the_reason_text_rather_than_trailing():
+    # Regression guard: burying the low-confidence caveat at the end of an
+    # otherwise-confident-sounding paragraph read as a normal prediction
+    # with a footnote, not as the weak result it actually is — the note
+    # must come before the classical effect/mechanism text, not after.
+    text = life_event_reason_text(
+        "wealth", ["wealth_karaka_mahadasha_Ju"], "Mercury", antardasha_lord="Ju",
+        transit_corroborated=False, language="en", evidence_level="backdrop_only",
+    )
+    assert text.startswith("No strong, directly-tied window was found for wealth growth")
+
+
+@pytest.mark.parametrize("language", ["en", "hi"])
+def test_marriage_window_reason_text_surfaces_soft_age_interpretation_when_early_but_literal(language):
+    # A soft-band violation (still literal_event_plausible=True) should
+    # suggest reading the window as relationship/commitment activation
+    # rather than the literal marriage date, distinct from (and milder
+    # than) the hard reinterpretation sentence.
+    text = marriage_window_reason_text(
+        reason_keys=["seventh_lord_antardasha"], seventh_lord_name="Saturn" if language == "en" else "शनि",
+        antardasha_lord="Sa", transit_corroborated=False, language=language,
+        age_implausibility="early", literal_event_plausible=True,
+    )
+    if language == "en":
+        assert "relationship or commitment activation" in text
+    else:
+        assert "रिश्ते या प्रतिबद्धता" in text
+
+
+def test_marriage_window_reason_text_omits_soft_age_interpretation_when_hard_implausible():
+    # When literal_event_plausible is False, the stronger reinterpretation
+    # sentence already covers this — the softer sentence should not also
+    # fire and duplicate/contradict it.
+    text = marriage_window_reason_text(
+        reason_keys=["seventh_lord_antardasha"], seventh_lord_name="Saturn",
+        antardasha_lord="Sa", transit_corroborated=False, language="en",
+        age_implausibility="early", literal_event_plausible=False,
+    )
+    assert "relationship or commitment activation" not in text
+
+
+def test_life_event_reason_text_surfaces_soft_age_interpretation_for_children():
+    text = life_event_reason_text(
+        "children", ["children_house_lord_antardasha"], "Jupiter", antardasha_lord="Ju",
+        transit_corroborated=False, language="en", age_implausibility="late", literal_event_plausible=True,
+    )
+    assert "family-planning or child-related activation" in text
+
+
+def test_life_event_reason_text_omits_soft_age_interpretation_for_career():
+    # career/wealth/foreign_travel don't have a per-category soft
+    # interpretation phrase — a literal reading doesn't diverge as sharply
+    # from an "activation" reading there.
+    text = life_event_reason_text(
+        "career", ["career_house_lord_antardasha"], "Saturn", antardasha_lord="Sa",
+        transit_corroborated=False, language="en", age_implausibility="late", literal_event_plausible=True,
+    )
+    assert "activation" not in text
+
+
 @pytest.mark.parametrize("event_type,house_lord_name,house_lord_key", [
     ("career", "Saturn", "Sa"), ("wealth", "Jupiter", "Ju"), ("children", "Jupiter", "Ju"), ("foreign_travel", "Rahu", "Ra"),
 ])

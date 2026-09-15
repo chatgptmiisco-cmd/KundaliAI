@@ -69,6 +69,11 @@ class MarriageWindow(BaseModel):
     # the broader Mahadasha ties to the event — a much weaker signal). See
     # app.services.prediction_service._evidence_level.
     evidence_level: Literal["house_lord_antardasha", "karaka_antardasha", "backdrop_only"]
+    # Plain-language confidence derived 1:1 from evidence_level ("strong" /
+    # "moderate" / "low") — lets a consumer (chat, frontend) decide how to
+    # present a window without re-deriving the evidence/reason-key logic
+    # itself. See app.services.prediction_service._CONFIDENCE_FOR_EVIDENCE.
+    confidence: Literal["strong", "moderate", "low"]
 
 
 class MarriageTimingResponse(BaseModel):
@@ -93,9 +98,11 @@ class LifeEventWindow(BaseModel):
     transit_obstructed: bool
     transit_obstruction_fraction: float
     age_plausibility_multiplier: float
-    # See MarriageWindow.literal_event_plausible and .evidence_level above.
+    # See MarriageWindow.literal_event_plausible, .evidence_level, and
+    # .confidence above.
     literal_event_plausible: bool
     evidence_level: Literal["house_lord_antardasha", "karaka_antardasha", "backdrop_only"]
+    confidence: Literal["strong", "moderate", "low"]
 
 
 class LifeEventTimingResponse(BaseModel):

@@ -73,10 +73,10 @@ def test_search_bounds_future_starts_from_the_currently_running_antardashas_true
     assert from_dt == currently_running.start
 
 
-def test_search_bounds_future_horizon_still_reaches_twenty_years_past_now():
+def test_search_bounds_future_horizon_still_reaches_full_horizon_past_now():
     # Pulling from_dt backward to the current Antardasha's start must not
-    # shrink the effective search horizon — it should still reach +20 years
-    # from "now", just starting from an earlier point.
+    # shrink the effective search horizon — it should still reach
+    # +_FUTURE_HORIZON_YEARS from "now", just starting from an earlier point.
     birth_dt = datetime(2000, 1, 1, tzinfo=timezone.utc)
     maha = _mahadasha("Ju", birth_dt, 16, ["Ju", "Sa", "Me"])
     currently_running = maha.antardashas[1]
