@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.astro.dasha import Antardasha, Mahadasha
 from app.astro.marriage_timing import corroborate_with_transits, find_marriage_windows, marriage_rules
 from app.astro.event_window_scanner import ScoredWindow
+from app.astro.transit_corroboration import TransitCheck
 
 FROM = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
@@ -72,7 +75,46 @@ def test_find_marriage_windows_searches_the_past_when_given_earlier_bounds():
     assert all(w.end <= now + timedelta(days=1) for w in windows)  # nothing beyond "now" returned
 
 
-def test_corroborate_with_transits_returns_a_bool():
+def test_marriage_rules_scales_weight_by_natal_strength():
+    seventh_lord = "Sa"
+    baseline = marriage_rules(seventh_lord)
+    baseline_antar = next(r for r in baseline if r.applies_to == "antardasha_lord" and r.target == seventh_lord)
+    baseline_venus = next(r for r in baseline if r.reason_key == "venus_antardasha")
+
+    # A strong (exalted) 7th lord scores higher than the classical base weight;
+    # Venus, untouched by `strength`, keeps its base weight unchanged.
+    weighted = marriage_rules(seventh_lord, strength={"Sa": 1.5})
+    weighted_antar = next(r for r in weighted if r.applies_to == "antardasha_lord" and r.target == seventh_lord)
+    weighted_venus = next(r for r in weighted if r.reason_key == "venus_antardasha")
+    assert weighted_antar.weight == pytest.approx(baseline_antar.weight * 1.5)
+    assert weighted_venus.weight == baseline_venus.weight
+
+
+def test_marriage_rules_missing_strength_entries_default_to_unchanged_weight():
+    with_empty_strength = marriage_rules("Sa", strength={})
+    without_strength = marriage_rules("Sa")
+    assert [r.weight for r in with_empty_strength] == [r.weight for r in without_strength]
+
+
+def test_find_marriage_windows_lets_a_weak_significator_be_outranked():
+    # Venus and Jupiter Antardasha both carry the SAME classical base weight
+    # (2.0, karaka-level) — with equal natal strength they'd tie. Scaling
+    # Venus up (strong/unafflicted in this chart) and Jupiter down (weak)
+    # should let Venus's window outrank Jupiter's despite the identical
+    # classical rule.
+    maha_ve = _mahadasha("Ve", FROM, 5, ["Ve"])
+    maha_ju = _mahadasha("Ju", maha_ve.end, 5, ["Ju"])
+    timeline = [maha_ve, maha_ju]
+
+    windows = find_marriage_windows(
+        timeline, seventh_lord="Su", from_dt=FROM, horizon_years=15, top_n=10,
+        strength={"Ve": 1.5, "Ju": 0.5},
+    )
+    by_lord = {w.antardasha_lord: w for w in windows}
+    assert by_lord["Ve"].score > by_lord["Ju"].score
+
+
+def test_corroborate_with_transits_returns_a_transit_check():
     window = ScoredWindow(
         start=datetime(2026, 1, 1, tzinfo=timezone.utc),
         end=datetime(2027, 1, 1, tzinfo=timezone.utc),
@@ -82,4 +124,6 @@ def test_corroborate_with_transits_returns_a_bool():
         reason_keys=["venus_antardasha"],
     )
     result = corroborate_with_transits(window, lagna_sign_index=0, moon_sign_index=3)
-    assert isinstance(result, bool)
+    assert isinstance(result, TransitCheck)
+    assert isinstance(result.corroborated, bool)
+    assert isinstance(result.obstructed, bool)

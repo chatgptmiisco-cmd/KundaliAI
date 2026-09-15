@@ -61,9 +61,59 @@ def julian_day_ut(dt_utc: datetime) -> float:
     return swe.julday(dt_utc.year, dt_utc.month, dt_utc.day, hour)
 
 
+def calendar_date_utc(jd_ut: float) -> datetime:
+    """Inverse of julian_day_ut, truncated to whole seconds — Shadbala's
+    Hora/Vara Bala (app.astro.shadbala) need the plain UTC calendar date of
+    a computed sunrise moment (to read off its weekday), not another
+    ephemeris quantity."""
+    year, month, day, hour = swe.revjul(jd_ut)
+    whole_hour = int(hour)
+    minute_float = (hour - whole_hour) * 60
+    minute = int(minute_float)
+    second = round((minute_float - minute) * 60)
+    return datetime(year, month, day, whole_hour, minute, second, tzinfo=timezone.utc)
+
+
 def get_ayanamsa(jd_ut: float) -> float:
     _ensure_lahiri_sidereal_mode()
     return swe.get_ayanamsa_ut(jd_ut)
+
+
+def declination(jd_ut: float, planet: PlanetKey) -> float:
+    """Equatorial declination (degrees, positive = north of the celestial
+    equator) — Shadbala's Ayana Bala (app.astro.shadbala) needs this, not
+    ecliptic longitude, since "how far a planet has strayed toward/away from
+    the celestial equator" is a genuinely different axis than sign position.
+    Uses Swiss Ephemeris's own equatorial-coordinate transform rather than
+    hand-deriving declination from ecliptic longitude/latitude — same
+    "thin wrapper, not a reimplementation" convention as the rest of this
+    module. Tropical, not sidereal (declination is measured from the real
+    celestial equator regardless of which ayanamsa is in use, so sidereal
+    mode is irrelevant here — this is the one calculation in this module
+    that does NOT call _ensure_lahiri_sidereal_mode)."""
+    if planet == "Ke":
+        return -declination(jd_ut, "Ra")  # exactly opposite the Moon's node
+    body = swe.MEAN_NODE if planet == "Ra" else _BODY_CODES[planet]
+    pos, _ = swe.calc_ut(jd_ut, body, swe.FLG_MOSEPH | swe.FLG_EQUATORIAL)
+    return pos[1]
+
+
+def sunrise_utc(jd_ut_approx: float, latitude: float, longitude: float) -> float:
+    """Julian Day (UT) of the sunrise nearest at-or-after `jd_ut_approx`, at
+    the given geographic position — Shadbala's day/night-dependent limbs
+    (app.astro.shadbala's Kaala Bala) need this for Nathonnata/Tribhaga/Hora
+    Bala. Uses Swiss Ephemeris's own rise/transit solver (accounts for
+    atmospheric refraction and the Sun's apparent radius by default) rather
+    than a hand-rolled solar-altitude formula."""
+    _res, times = swe.rise_trans(jd_ut_approx, swe.SUN, swe.CALC_RISE, (longitude, latitude, 0), flags=swe.FLG_MOSEPH)
+    return times[0]
+
+
+def sunset_utc(jd_ut_approx: float, latitude: float, longitude: float) -> float:
+    """Julian Day (UT) of the sunset nearest at-or-after `jd_ut_approx` — see
+    sunrise_utc."""
+    _res, times = swe.rise_trans(jd_ut_approx, swe.SUN, swe.CALC_SET, (longitude, latitude, 0), flags=swe.FLG_MOSEPH)
+    return times[0]
 
 
 def planet_position(jd_ut: float, planet: PlanetKey) -> PlanetPosition:

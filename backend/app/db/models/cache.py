@@ -205,6 +205,29 @@ class LifeThemeCache(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SignificatorStrengthCache(Base):
+    """Per-planet natal-strength multipliers (dignity/dusthana/combustion,
+    Parashari aspects/conjunctions, Vargottama, and full Shadbala — see
+    app.services.prediction_service._significator_strength), cached per
+    (user, birth profile version) only — unlike MarriageTimingCache/
+    LifeEventTimingCache, this doesn't vary by event_type, direction, or
+    language, since it's purely a fact about the natal D1 chart. Building it
+    requires running the full six-limb Shadbala, the most expensive single
+    computation in the Prediction Engine; without this cache it was being
+    redundantly rebuilt from scratch by EVERY one of the 5 timing endpoints
+    (marriage + 4 life-event types) x 2 directions for the same birth
+    profile, even though all 10 calls compute the identical result."""
+
+    __tablename__ = "significator_strength_cache"
+    __table_args__ = (UniqueConstraint("user_id", "birth_profile_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    birth_profile_version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class UsageCounter(Base):
     """Tracks free-tier monthly quota usage (e.g. deep period analyses)."""
 

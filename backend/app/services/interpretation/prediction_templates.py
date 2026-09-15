@@ -208,6 +208,194 @@ _MARRIAGE_REASON_HI: dict[str, str] = {
 _TRANSIT_CORROBORATION_EN = "Jupiter or Saturn are also passing through the part of your chart tied to relationships during this window — a second real signal pointing the same way."
 _TRANSIT_CORROBORATION_HI = "इस अवधि के दौरान गुरु या शनि भी आपकी कुंडली के रिश्तों वाले हिस्से से गुज़र रहे हैं — यह उसी दिशा में एक और वास्तविक संकेत है।"
 
+# Surfaces the SAME natal-strength signal that already scales the window's
+# rank (see app.astro.natal_insights.significator_strength and
+# prediction_service._significator_strength) as plain language, instead of
+# only ever affecting ranking invisibly. Deliberately silent for the
+# "neither clearly strong nor clearly weak" middle ground — a note on every
+# single window would read as noise, not signal.
+NatalStrength = Literal["strong", "weak"]
+_NATAL_STRENGTH_EN: dict[NatalStrength, str] = {
+    "strong": "{name} is also well-placed in your birth chart itself (dignified, unafflicted) — a genuinely stronger version of this signal, not just a favorable dasha label.",
+    "weak": "{name} is weakly placed in your birth chart itself (afflicted or debilitated) — so treat this window as a real but comparatively softer signal.",
+}
+_NATAL_STRENGTH_HI: dict[NatalStrength, str] = {
+    "strong": "{name} आपकी जन्म कुंडली में भी मज़बूत स्थिति में है (सशक्त, बिना किसी दोष के) — यह सिर्फ़ दशा का नाम नहीं बल्कि वाकई एक मज़बूत संकेत है।",
+    "weak": "{name} आपकी जन्म कुंडली में कमज़ोर स्थिति में है (पीड़ित या नीच) — इसलिए इसे एक वास्तविक लेकिन अपेक्षाकृत हल्का संकेत मानें।",
+}
+
+# Surfaces a real, already-computed fact (see app.astro.charts's
+# planet_retrograde, threaded through prediction_service._significator_
+# retrograde) that the Prediction Engine never mentioned anywhere before —
+# purely informational, NEVER folded into score/ranking, because classical
+# sources genuinely disagree on whether retrograde strengthens a planet
+# (Shadbala's Cheshta Bala) or weakens/delays it (the far more common
+# everyday reading). Taking a side here would be a guess dressed up as a
+# computed fact, so this only ever states the fact and lets the reader
+# weigh it — same honesty rule as every documented simplification in
+# app.astro (see e.g. app.astro.guna_milan's module docstring).
+_RETROGRADE_NOTE_EN = "{name} is also retrograde right now — classical opinions differ on what that means here (some read it as extra intensity, others as delay or revisiting old ground), so take it as one more real data point, not a verdict."
+_RETROGRADE_NOTE_HI = "{name} फ़िलहाल वक्री (retrograde) भी है — इसका ठीक-ठीक क्या मतलब है, इस पर शास्त्रीय राय बंटी हुई है (कुछ इसे अतिरिक्त तीव्रता मानते हैं, कुछ देरी या पुरानी बातों की वापसी) — इसलिए इसे एक निर्णय नहीं, बल्कि एक और असली तथ्य समझें।"
+
+# Surfaces app.astro.transit_corroboration's OBSTRUCTION signal: a different
+# malefic actually transiting THROUGH the same house during this window —
+# independent of (and can coexist with) a positive Jupiter/Saturn or karaka
+# corroboration above. A real, separate classical caution, not a
+# contradiction of the corroboration note.
+_TRANSIT_OBSTRUCTION_EN = "At the same time, {planet} is also transiting through that same part of your chart — a real caution flag alongside the corroboration above, not a contradiction of it."
+_TRANSIT_OBSTRUCTION_HI = "इसी दौरान {planet} भी आपकी कुंडली के उसी हिस्से से गुज़र रहा है — यह ऊपर के संकेत के साथ-साथ एक वास्तविक सतर्कता का संकेत है, उसका खंडन नहीं।"
+
+# Surfaces app.astro.life_stage_plausibility's real-world (NOT classical)
+# age-sanity factor, which already scales this window's score down — see
+# that module's docstring for why it exists: a chart's own infancy or deep
+# old age could otherwise mathematically outrank a sensible-age window
+# purely on dasha math, with nothing to say "a newborn can't have a career."
+# Deliberately honest about being a non-classical caveat, not a Sanskrit-
+# sourced rule like every other note in this file.
+_AGE_IMPLAUSIBILITY_EN: dict[str, str] = {
+    "early": "This window falls earlier in life than {event} typically happens — a real classical signal, but treat it as a lower-confidence one rather than a literal prediction at that age.",
+    "late": "This window falls later in life than {event} typically happens — a real classical signal, but treat it as a lower-confidence one rather than a literal prediction at that age.",
+}
+_AGE_IMPLAUSIBILITY_HI: dict[str, str] = {
+    "early": "यह अवधि उस सामान्य उम्र से पहले की है जब आमतौर पर {event} होता है — यह एक वास्तविक शास्त्रीय संकेत है, पर इसे उस उम्र में शाब्दिक भविष्यवाणी नहीं, बल्कि एक कम-भरोसेमंद संकेत मानें।",
+    "late": "यह अवधि उस सामान्य उम्र के बाद की है जब आमतौर पर {event} होता है — यह एक वास्तविक शास्त्रीय संकेत है, पर इसे उस उम्र में शाब्दिक भविष्यवाणी नहीं, बल्कि एक कम-भरोसेमंद संकेत मानें।",
+}
+
+_EVENT_LABEL_EN: dict[str, str] = {
+    "marriage": "marriage", "career": "a career shift", "wealth": "wealth growth",
+    "children": "having children", "foreign_travel": "foreign travel or relocation",
+}
+_EVENT_LABEL_HI: dict[str, str] = {
+    "marriage": "विवाह", "career": "करियर में बदलाव", "wealth": "धन वृद्धि",
+    "children": "संतान होना", "foreign_travel": "विदेश यात्रा या स्थानांतरण",
+}
+
+
+def _age_implausibility_sentence(event_key: str, implausibility: Literal["early", "late"] | None, hi: bool) -> str | None:
+    if implausibility is None:
+        return None
+    pool = _AGE_IMPLAUSIBILITY_HI if hi else _AGE_IMPLAUSIBILITY_EN
+    labels = _EVENT_LABEL_HI if hi else _EVENT_LABEL_EN
+    return pool[implausibility].format(event=labels[event_key])
+
+
+# A literal reading of the event (an actual first marriage, an actual
+# childbirth, independently-earned personal wealth) stops making real-world
+# sense at a hard-implausible age (see
+# app.astro.life_stage_plausibility.is_hard_implausible_age) regardless of
+# how strong the classical dasha signal is — this is stronger than
+# `_age_implausibility_sentence` above (which still presents the window as a
+# literal, just lower-confidence, prediction). Reached only when
+# prediction_service couldn't find any plausible-age alternative anywhere in
+# the search horizon, so the honest move is to reinterpret what kind of
+# activation this window plausibly represents instead of stating the
+# literal event as the answer.
+_REINTERPRETATION_EN: dict[str, str] = {
+    "marriage": (
+        "No astrologically plausible window for a literal first marriage was found nearby, so read this less as "
+        "a marriage date and more as a relationship or partnership-related development."
+    ),
+    "career": (
+        "No astrologically plausible window for a typical career shift was found nearby, so read this less as a "
+        "literal new career and more as a change in responsibility or role."
+    ),
+    "wealth": (
+        "Independently-earned personal wealth isn't a realistic reading at this age, so read this more as family "
+        "finances or shared household resources than your own personal wealth."
+    ),
+    "children": (
+        "A literal childbirth isn't a realistic reading at this age, so read this more as a family or "
+        "children's-welfare responsibility than a new child."
+    ),
+    "foreign_travel": (
+        "Independent travel isn't a realistic reading at this age, so read this more as a family-driven "
+        "relocation or travel decision than your own trip."
+    ),
+}
+_REINTERPRETATION_HI: dict[str, str] = {
+    "marriage": (
+        "आस-पास पहली शादी के लिए कोई ज्योतिषीय रूप से उपयुक्त अवधि नहीं मिली, इसलिए इसे शादी की तारीख के बजाय "
+        "रिश्ते या साझेदारी से जुड़े किसी विकास के रूप में देखें।"
+    ),
+    "career": (
+        "आस-पास सामान्य करियर बदलाव के लिए कोई ज्योतिषीय रूप से उपयुक्त अवधि नहीं मिली, इसलिए इसे नए करियर के "
+        "बजाय ज़िम्मेदारी या भूमिका में बदलाव के रूप में देखें।"
+    ),
+    "wealth": (
+        "इस उम्र में स्वयं अर्जित निजी धन एक व्यावहारिक व्याख्या नहीं है, इसलिए इसे अपने निजी धन के बजाय पारिवारिक "
+        "वित्त या साझा घरेलू संसाधनों के रूप में देखें।"
+    ),
+    "children": (
+        "इस उम्र में साक्षात संतान होना एक व्यावहारिक व्याख्या नहीं है, इसलिए इसे नई संतान के बजाय पारिवारिक या "
+        "बच्चों की भलाई से जुड़ी ज़िम्मेदारी के रूप में देखें।"
+    ),
+    "foreign_travel": (
+        "इस उम्र में स्वतंत्र यात्रा एक व्यावहारिक व्याख्या नहीं है, इसलिए इसे अपनी यात्रा के बजाय परिवार-प्रेरित "
+        "स्थानांतरण या यात्रा-निर्णय के रूप में देखें।"
+    ),
+}
+
+
+def _reinterpretation_sentence(event_key: str, literal_event_plausible: bool, hi: bool) -> str | None:
+    if literal_event_plausible:
+        return None
+    return (_REINTERPRETATION_HI if hi else _REINTERPRETATION_EN)[event_key]
+
+
+# Surfaced when prediction_service._select_candidate_pool couldn't find any
+# window whose OWN Antardasha is the house lord or a karaka anywhere in the
+# search horizon, so it fell back to one that only qualifies through its
+# broader Mahadasha (evidence_level == "backdrop_only" — see
+# prediction_service._evidence_level) — a real but comparatively weak
+# signal, since nothing about this specific narrower phase itself ties it
+# to the event. Deliberately generic (not per-category) since the
+# distinction it's naming — "the broader period, not this specific phase,
+# is what connects here" — reads the same regardless of which event it is.
+# Not shown for "karaka_antardasha": a karaka's OWN Antardasha is real
+# classical evidence (that's why marriage_rules/event_rules score it in the
+# first place), just a more generic signal than the house lord's — a
+# distinction _evidence_level exposes for callers/analysis, but not one
+# this app currently treats as worth a caveat sentence.
+_WEAK_EVIDENCE_EN = (
+    "No period whose own narrower phase is directly tied to this was found nearby — this window only "
+    "qualifies through the broader multi-year period it falls in, a real but comparatively weaker signal."
+)
+_WEAK_EVIDENCE_HI = (
+    "आस-पास ऐसी कोई अवधि नहीं मिली जिसका अपना छोटा दौर सीधे इससे जुड़ा हो — यह अवधि केवल उस बड़ी बहु-वर्षीय "
+    "अवधि के कारण योग्य मानी गई है जिसके अंतर्गत यह आती है, जो एक वास्तविक पर तुलनात्मक रूप से कमज़ोर संकेत है।"
+)
+
+
+def _weak_evidence_sentence(evidence_level: str, hi: bool) -> str | None:
+    if evidence_level != "backdrop_only":
+        return None
+    return _WEAK_EVIDENCE_HI if hi else _WEAK_EVIDENCE_EN
+
+# Surfaces app.astro.event_window_scanner's Mahadasha/Antardasha relationship
+# weighting (see its _DASHA_RELATIONSHIP_MULTIPLIER) as plain language.
+# Shared between marriage and life-event reason text — the relationship
+# between the two dasha levels means the same thing regardless of which
+# event is being timed. Keyed by the exact
+# "dasha_relationship_{same,friend,enemy}" reason keys scan_dasha_windows
+# emits; "neutral" never appears as a reason key (silent by design there),
+# so there is deliberately no entry for it here.
+_DASHA_RELATIONSHIP_REASON_EN: dict[str, str] = {
+    "dasha_relationship_same": "The same planet is running both the broader period and this specific phase, which classically gives an unusually focused, unmixed dose of its results.",
+    "dasha_relationship_friend": "The two planets running this phase and the broader period are natural friends, so their effects tend to reinforce each other rather than pull in different directions.",
+    "dasha_relationship_enemy": "The two planets running this phase and the broader period are natural enemies, so results here can come with more friction or mixed signals than the classical rule alone suggests.",
+}
+_DASHA_RELATIONSHIP_REASON_HI: dict[str, str] = {
+    "dasha_relationship_same": "इस विशेष दौर और उसकी बड़ी अवधि, दोनों की बागडोर एक ही ग्रह के हाथ में है — इससे शास्त्रीय रूप से उस ग्रह के परिणाम असामान्य रूप से केंद्रित और स्पष्ट मिलते हैं।",
+    "dasha_relationship_friend": "इस दौर और इसकी बड़ी अवधि को चलाने वाले दोनों ग्रह स्वाभाविक मित्र हैं, इसलिए उनके प्रभाव एक-दूसरे के विपरीत जाने की बजाय एक-दूसरे को मज़बूत करते हैं।",
+    "dasha_relationship_enemy": "इस दौर और इसकी बड़ी अवधि को चलाने वाले दोनों ग्रह स्वाभाविक शत्रु हैं, इसलिए यहां के परिणामों में सामान्य से ज़्यादा उलझन या मिश्रित संकेत आ सकते हैं।",
+}
+
+
+def _dasha_relationship_sentences(reason_keys: list[str], hi: bool) -> list[str]:
+    pool = _DASHA_RELATIONSHIP_REASON_HI if hi else _DASHA_RELATIONSHIP_REASON_EN
+    return [pool[k] for k in reason_keys if k in pool]
+
+
 # Converts the present-tense reason sentences above into past tense for a
 # window that's already elapsed ("had extra pull", not "has extra pull") —
 # a fixed, known substitution list (not a heuristic guess) since every
@@ -221,6 +409,28 @@ _TENSE_REPLACEMENTS_EN: list[tuple[str, str]] = [
     ("are also passing through", "also passed through"),
     ("is also passing through", "also passed through"),
     ("during this window", "during that window"),
+    ("is also well-placed in your birth chart itself", "was also well-placed in your birth chart itself"),
+    ("is weakly placed in your birth chart itself", "was weakly placed in your birth chart itself"),
+    (
+        "is running both the broader period and this specific phase, which classically gives",
+        "ran both the broader period and that specific phase, which classically gave",
+    ),
+    (
+        "their effects tend to reinforce each other rather than pull in different directions",
+        "their effects tended to reinforce each other rather than pull in different directions",
+    ),
+    (
+        "results here can come with more friction or mixed signals than the classical rule alone suggests",
+        "results there came with more friction or mixed signals than the classical rule alone suggested",
+    ),
+    ("is also retrograde right now", "was also retrograde during that period"),
+    ("what that means here", "what that meant there"),
+    (
+        "is also transiting through that same part of your chart",
+        "was also transiting through that same part of your chart",
+    ),
+    ("This window falls earlier in life than", "That window fell earlier in life than"),
+    ("This window falls later in life than", "That window fell later in life than"),
 ]
 _TENSE_REPLACEMENTS_HI: list[tuple[str, str]] = [
     ("सक्रिय है", "सक्रिय था"),
@@ -229,6 +439,15 @@ _TENSE_REPLACEMENTS_HI: list[tuple[str, str]] = [
     ("गुज़र रहा है", "गुज़रा था"),
     ("इस अवधि के दौरान", "उस अवधि के दौरान"),
     ("इस दौर में", "उस दौर में"),
+    ("इसी दौरान", "उसी दौरान"),
+    ("मज़बूत स्थिति में है", "मज़बूत स्थिति में था"),
+    ("कमज़ोर स्थिति में है", "कमज़ोर स्थिति में था"),
+    ("असामान्य रूप से केंद्रित और स्पष्ट मिलते हैं", "असामान्य रूप से केंद्रित और स्पष्ट मिले"),
+    ("एक-दूसरे को मज़बूत करते हैं", "एक-दूसरे को मज़बूत करते थे"),
+    ("मिश्रित संकेत आ सकते हैं", "मिश्रित संकेत आए"),
+    ("फ़िलहाल वक्री (retrograde) भी है", "उस दौरान भी वक्री (retrograde) था"),
+    ("यह अवधि उस सामान्य उम्र से पहले की है", "वह अवधि उस सामान्य उम्र से पहले की थी"),
+    ("यह अवधि उस सामान्य उम्र के बाद की है", "वह अवधि उस सामान्य उम्र के बाद की थी"),
 ]
 
 
@@ -245,20 +464,88 @@ def marriage_window_reason_text(
     transit_corroborated: bool,
     language: Language,
     tense: Literal["past", "future"] = "future",
+    natal_strength: NatalStrength | None = None,
+    antardasha_lord_retrograde: bool = False,
+    transit_obstructing_planet: str | None = None,
+    age_implausibility: Literal["early", "late"] | None = None,
+    literal_event_plausible: bool = True,
+    evidence_level: str = "house_lord_antardasha",
 ) -> str:
     """Leads with a real, plain-language EFFECT (the running planet's own
     classical one-liner, already written for period_analysis — honest,
     tested, jargon-free) before the "why" mechanism explanation, instead of
-    opening with Sanskrit period-names a reader has to already know."""
+    opening with Sanskrit period-names a reader has to already know.
+
+    `natal_strength` ("strong"/"weak"/None) surfaces whether the Antardasha
+    lord itself is dignified or afflicted in the natal chart — the same
+    signal that already scales this window's score
+    (app.astro.natal_insights.significator_strength) — as an explicit
+    sentence instead of only ever affecting ranking silently.
+
+    `antardasha_lord_retrograde` surfaces the SAME retrograde fact every
+    chart already computes (app.astro.charts) but never mentions elsewhere
+    in the Prediction Engine — purely informational, never scored (see
+    prediction_service._significator_retrograde for why).
+
+    `transit_obstructing_planet` (a pre-localized display name, or None) is
+    the SAME obstruction signal that already scales this window's score
+    downward (app.astro.transit_corroboration) — surfaced explicitly rather
+    than only ever affecting ranking silently, same convention as
+    `natal_strength`. Can appear alongside `transit_corroborated=True`: the
+    two are independent, not contradictory (see the module comment on
+    _TRANSIT_OBSTRUCTION_EN).
+
+    `age_implausibility` ("early"/"late"/None) surfaces the SAME real-world
+    (not classical) age-sanity factor that already scales this window's
+    score down (app.astro.life_stage_plausibility) — explicit rather than
+    silent, same convention as every factor above.
+
+    `literal_event_plausible=False` means prediction_service could not find
+    ANY plausible-age window in the search horizon (see
+    app.astro.life_stage_plausibility.is_hard_implausible_age and
+    prediction_service._select_candidate_pool) and is returning this one
+    anyway as the best available signal — stronger than `age_implausibility`
+    above, which still presents the window as a literal (if lower-
+    confidence) prediction. Appends an honest reinterpretation sentence
+    instead of letting the reader take the literal event at face value.
+
+    `evidence_level` ("house_lord_antardasha" > "karaka_antardasha" >
+    "backdrop_only" — see prediction_service._evidence_level) says how
+    directly THIS window's own Antardasha ties to the event: the house
+    lord's own Antardasha, a karaka's own Antardasha (real evidence, but a
+    more generic signal), or only its broader Mahadasha (a real but
+    comparatively weak signal). Only "backdrop_only" appends an honest
+    note — a karaka's own Antardasha is real classical evidence, not one
+    this app currently treats as worth a caveat, just a coarser one than
+    the house lord's."""
     hi = language == "hi"
     pool = _MARRIAGE_REASON_HI if hi else _MARRIAGE_REASON_EN
     content_pool = _PERIOD_CONTENT_HI if hi else _PERIOD_CONTENT_EN
+    names = PLANET_NAMES_HI if hi else PLANET_NAMES_EN
     effect = content_pool.get(antardasha_lord, content_pool["Mo"])["one_liner"]
 
-    sentences = [pool[k].format(lord=seventh_lord_name) for k in reason_keys]
+    sentences = [pool[k].format(lord=seventh_lord_name) for k in reason_keys if k in pool]
+    sentences.extend(_dasha_relationship_sentences(reason_keys, hi))
     mechanism = " ".join(sentences)
+    if natal_strength is not None:
+        strength_pool = _NATAL_STRENGTH_HI if hi else _NATAL_STRENGTH_EN
+        mechanism += " " + strength_pool[natal_strength].format(name=names[antardasha_lord])
+    if antardasha_lord_retrograde:
+        mechanism += " " + (_RETROGRADE_NOTE_HI if hi else _RETROGRADE_NOTE_EN).format(name=names[antardasha_lord])
     if transit_corroborated:
         mechanism += " " + (_TRANSIT_CORROBORATION_HI if hi else _TRANSIT_CORROBORATION_EN)
+    if transit_obstructing_planet is not None:
+        template = _TRANSIT_OBSTRUCTION_HI if hi else _TRANSIT_OBSTRUCTION_EN
+        mechanism += " " + template.format(planet=transit_obstructing_planet)
+    age_sentence = _age_implausibility_sentence("marriage", age_implausibility, hi)
+    if age_sentence is not None:
+        mechanism += " " + age_sentence
+    reinterpretation = _reinterpretation_sentence("marriage", literal_event_plausible, hi)
+    if reinterpretation is not None:
+        mechanism += " " + reinterpretation
+    weak_evidence = _weak_evidence_sentence(evidence_level, hi)
+    if weak_evidence is not None:
+        mechanism += " " + weak_evidence
     if tense == "past":
         mechanism = _apply_past_tense(mechanism, hi)
     return f"{effect} {mechanism}"
@@ -327,15 +614,27 @@ def life_event_reason_text(
     transit_corroborated: bool,
     language: Language,
     tense: Literal["past", "future"] = "future",
+    natal_strength: NatalStrength | None = None,
+    antardasha_lord_retrograde: bool = False,
+    transit_obstructing_planet: str | None = None,
+    age_implausibility: Literal["early", "late"] | None = None,
+    literal_event_plausible: bool = True,
+    evidence_level: str = "house_lord_antardasha",
 ) -> str:
     """Leads with a real, plain-language EFFECT (the running planet's own
     classical one-liner) before the "why" mechanism sentences, mirroring
-    marriage_window_reason_text above — no Sanskrit period-names up front."""
+    marriage_window_reason_text above — no Sanskrit period-names up front.
+
+    `natal_strength`, `antardasha_lord_retrograde`, `transit_obstructing_
+    planet`, `age_implausibility`, `literal_event_plausible`, and
+    `evidence_level` mirror marriage_window_reason_text's parameters of
+    the same name — see its docstring."""
     hi = language == "hi"
     house_phrase = (_EVENT_HOUSE_PHRASE_HI if hi else _EVENT_HOUSE_PHRASE_EN)[event_type]
     karaka_names = _EVENT_KARAKA_NAME_HI if hi else _EVENT_KARAKA_NAME_EN
     karaka_descs = _EVENT_KARAKA_DESC_HI if hi else _EVENT_KARAKA_DESC_EN
     content_pool = _PERIOD_CONTENT_HI if hi else _PERIOD_CONTENT_EN
+    names = PLANET_NAMES_HI if hi else PLANET_NAMES_EN
     effect = content_pool.get(antardasha_lord, content_pool["Mo"])["one_liner"]
 
     sentences: list[str] = []
@@ -368,10 +667,28 @@ def life_event_reason_text(
                 f"This stretch runs under a longer period led by {name} ({desc})."
             )
 
+    sentences.extend(_dasha_relationship_sentences(reason_keys, hi))
     mechanism = " ".join(sentences)
+    if natal_strength is not None:
+        strength_pool = _NATAL_STRENGTH_HI if hi else _NATAL_STRENGTH_EN
+        mechanism += " " + strength_pool[natal_strength].format(name=names[antardasha_lord])
+    if antardasha_lord_retrograde:
+        mechanism += " " + (_RETROGRADE_NOTE_HI if hi else _RETROGRADE_NOTE_EN).format(name=names[antardasha_lord])
     if transit_corroborated:
         template = _EVENT_TRANSIT_CORROBORATION_HI if hi else _EVENT_TRANSIT_CORROBORATION_EN
         mechanism += " " + template.format(house=house_phrase)
+    if transit_obstructing_planet is not None:
+        template = _TRANSIT_OBSTRUCTION_HI if hi else _TRANSIT_OBSTRUCTION_EN
+        mechanism += " " + template.format(planet=transit_obstructing_planet)
+    age_sentence = _age_implausibility_sentence(event_type, age_implausibility, hi)
+    if age_sentence is not None:
+        mechanism += " " + age_sentence
+    reinterpretation = _reinterpretation_sentence(event_type, literal_event_plausible, hi)
+    if reinterpretation is not None:
+        mechanism += " " + reinterpretation
+    weak_evidence = _weak_evidence_sentence(evidence_level, hi)
+    if weak_evidence is not None:
+        mechanism += " " + weak_evidence
     if tense == "past":
         mechanism = _apply_past_tense(mechanism, hi)
     return f"{effect} {mechanism}"

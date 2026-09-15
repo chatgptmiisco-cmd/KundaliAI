@@ -19,6 +19,9 @@ for either partner.
 """
 from dataclasses import dataclass
 
+from app.astro.constants import SIGN_LORDS
+from app.astro.constants import planet_relation as _relation
+
 PARTNER_A = "partner_a"
 PARTNER_B = "partner_b"
 
@@ -105,27 +108,13 @@ def _yoni_score(nak_a: int, nak_b: int) -> float:
 
 
 # --- Graha Maitri (5 points): natural friendship between Moon-sign lords --
-_SIGN_LORD = ["Ma", "Ve", "Me", "Mo", "Su", "Me", "Ve", "Ma", "Ju", "Sa", "Sa", "Ju"]
-_FRIENDS = {
-    "Su": {"Mo", "Ma", "Ju"}, "Mo": {"Su", "Me"}, "Ma": {"Su", "Mo", "Ju"},
-    "Me": {"Su", "Ve"}, "Ju": {"Su", "Mo", "Ma"}, "Ve": {"Me", "Sa"}, "Sa": {"Me", "Ve"},
-}
-_ENEMIES = {
-    "Su": {"Ve", "Sa"}, "Mo": set(), "Ma": {"Me"}, "Me": {"Mo"},
-    "Ju": {"Me", "Ve"}, "Ve": {"Su", "Mo"}, "Sa": {"Su", "Mo", "Ma"},
-}
-
-
-def _relation(a: str, b: str) -> str:
-    if b in _FRIENDS[a]:
-        return "friend"
-    if b in _ENEMIES[a]:
-        return "enemy"
-    return "neutral"
+# See app.astro.constants.PLANET_FRIENDS/PLANET_ENEMIES/planet_relation for
+# the underlying table — shared with app.astro.event_window_scanner's
+# Mahadasha/Antardasha relationship weighting, not duplicated here anymore.
 
 
 def _graha_maitri_score(sign_a: int, sign_b: int) -> float:
-    lord_a, lord_b = _SIGN_LORD[sign_a], _SIGN_LORD[sign_b]
+    lord_a, lord_b = SIGN_LORDS[sign_a], SIGN_LORDS[sign_b]
     if lord_a == lord_b:
         return 5.0
     rel_ab, rel_ba = _relation(lord_a, lord_b), _relation(lord_b, lord_a)

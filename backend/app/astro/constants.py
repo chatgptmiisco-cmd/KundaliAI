@@ -50,6 +50,69 @@ OWN_SIGNS: dict[PlanetKey, list[int]] = {
     "Su": [4], "Mo": [3], "Ma": [0, 7], "Me": [2, 5], "Ju": [8, 11], "Ve": [1, 6], "Sa": [9, 10],
 }
 
+# Natural planetary friendship (Naisargika Maitri) — same convention as
+# EXALTATION_SIGN etc. above: Rahu/Ketu excluded because their friendships
+# aren't settled the way the seven classical planets' are. Originally lived
+# only in app.astro.guna_milan (Graha Maitri koota); moved here once
+# app.astro.event_window_scanner needed the SAME relationship for a second,
+# unrelated purpose (Mahadasha/Antardasha lord compatibility) — one
+# classical fact, not two copies of it.
+PLANET_FRIENDS: dict[PlanetKey, set[PlanetKey]] = {
+    "Su": {"Mo", "Ma", "Ju"}, "Mo": {"Su", "Me"}, "Ma": {"Su", "Mo", "Ju"},
+    "Me": {"Su", "Ve"}, "Ju": {"Su", "Mo", "Ma"}, "Ve": {"Me", "Sa"}, "Sa": {"Me", "Ve"},
+}
+PLANET_ENEMIES: dict[PlanetKey, set[PlanetKey]] = {
+    "Su": {"Ve", "Sa"}, "Mo": set(), "Ma": {"Me"}, "Me": {"Mo"},
+    "Ju": {"Me", "Ve"}, "Ve": {"Su", "Mo"}, "Sa": {"Su", "Mo", "Ma"},
+}
+
+
+def planet_relation(a: PlanetKey, b: PlanetKey) -> Literal["friend", "enemy", "neutral"]:
+    """One-directional natural relationship of `a` toward `b` (classically
+    asymmetric — e.g. the Moon has no enemies, but plenty of planets are
+    neutral or friendly toward IT without it reciprocating "friend" back).
+    Rahu/Ketu (absent from both tables) always come back "neutral"."""
+    if b in PLANET_FRIENDS.get(a, set()):
+        return "friend"
+    if b in PLANET_ENEMIES.get(a, set()):
+        return "enemy"
+    return "neutral"
+
+
+# Naisargika (natural) benefic/malefic classification — a documented
+# simplification: classical texts actually make the Moon and Mercury
+# CONDITIONAL (a waxing Moon and a Mercury unafflicted by malefics count as
+# benefic; a waning Moon or malefic-associated Mercury count as malefic).
+# Tracking lunar phase and Mercury's own associations just to classify Mercury
+# itself would be circular for aspect-affliction purposes, so both are fixed
+# as benefic here, matching how most everyday Parashari readings default them
+# absent a specific reason to flip. Rahu/Ketu are fixed malefic (shadow
+# planets, universally treated as malefic — unlike their exaltation/
+# friendship, this classification IS settled across classical texts).
+NATURAL_BENEFICS: frozenset[PlanetKey] = frozenset({"Ju", "Ve", "Mo", "Me"})
+NATURAL_MALEFICS: frozenset[PlanetKey] = frozenset({"Su", "Ma", "Sa", "Ra", "Ke"})
+
+# Classical Parashari drishti (aspect): every planet casts a full aspect on
+# the 7th house from itself (Saptama drishti, universal); Mars, Jupiter and
+# Saturn additionally cast the special aspects below. Rahu/Ketu get no
+# special aspects here — same "not settled across classical texts" call as
+# EXALTATION_SIGN excluding them from dignity (a Rahu/Ketu special aspect,
+# when claimed at all, is usually borrowed from Saturn by later/Jaimini
+# sources, not the core Parashari system this app otherwise follows).
+SPECIAL_ASPECT_HOUSES: dict[PlanetKey, tuple[int, ...]] = {
+    "Ma": (4, 8), "Ju": (5, 9), "Sa": (3, 10),
+}
+
+
+def aspected_houses_from(planet: PlanetKey, house: int) -> set[int]:
+    """Whole-sign houses (1-12) `planet` casts its drishti on, given the
+    house it occupies — always includes the 7th-from-itself, plus Mars/
+    Jupiter/Saturn's special aspects. A planet never aspects its own house
+    this way (every offset here is non-zero mod 12)."""
+    house_numbers = {7, *SPECIAL_ASPECT_HOUSES.get(planet, ())}
+    return {((house - 1 + (n - 1)) % 12) + 1 for n in house_numbers}
+
+
 NAKSHATRA_NAMES_EN = [
     "Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira", "Ardra",
     "Punarvasu", "Pushya", "Ashlesha", "Magha", "Purva Phalguni", "Uttara Phalguni",

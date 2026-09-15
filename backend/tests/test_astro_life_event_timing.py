@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.astro.dasha import Antardasha, Mahadasha
 from app.astro.life_event_timing import (
     EVENT_HOUSE,
@@ -8,6 +10,7 @@ from app.astro.life_event_timing import (
     event_rules,
     find_event_windows,
 )
+from app.astro.transit_corroboration import TransitCheck
 from app.astro.event_window_scanner import ScoredWindow
 
 FROM = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -38,6 +41,39 @@ def test_event_rules_include_every_karaka_for_each_event_type():
         rules = event_rules(event_type, house_lord="Me")
         antardasha_targets = {r.target for r in rules if r.applies_to == "antardasha_lord"}
         assert set(karakas).issubset(antardasha_targets)
+
+
+def test_event_rules_scales_weight_by_natal_strength():
+    house_lord = "Sa"
+    baseline = event_rules("career", house_lord)
+    baseline_antar = next(r for r in baseline if r.applies_to == "antardasha_lord" and r.target == house_lord)
+
+    weighted = event_rules("career", house_lord, strength={house_lord: 1.5})
+    weighted_antar = next(r for r in weighted if r.applies_to == "antardasha_lord" and r.target == house_lord)
+    assert weighted_antar.weight == pytest.approx(baseline_antar.weight * 1.5)
+
+
+def test_event_rules_missing_strength_entries_default_to_unchanged_weight():
+    with_empty_strength = event_rules("wealth", "Sa", strength={})
+    without_strength = event_rules("wealth", "Sa")
+    assert [r.weight for r in with_empty_strength] == [r.weight for r in without_strength]
+
+
+def test_find_event_windows_lets_a_weak_significator_be_outranked():
+    # Wealth's two karakas (Jupiter, Venus) carry the SAME classical base
+    # weight (2.0) — with equal natal strength they'd tie. Scaling Jupiter
+    # up and Venus down should let Jupiter's window outrank Venus's despite
+    # the identical classical rule.
+    maha_ju = _mahadasha("Ju", FROM, 5, ["Ju"])
+    maha_ve = _mahadasha("Ve", maha_ju.end, 5, ["Ve"])
+    timeline = [maha_ju, maha_ve]
+
+    windows = find_event_windows(
+        timeline, "wealth", house_lord="Sa", from_dt=FROM, horizon_years=15, top_n=10,
+        strength={"Ju": 1.5, "Ve": 0.5},
+    )
+    by_lord = {w.antardasha_lord: w for w in windows}
+    assert by_lord["Ju"].score > by_lord["Ve"].score
 
 
 def test_find_event_windows_ranks_house_lord_window_above_unrelated_one():
@@ -84,7 +120,9 @@ def test_corroborate_with_transits_checks_the_right_house_per_event_type():
     )
     for event_type in EVENT_HOUSE:
         result = corroborate_with_transits(event_type, window, lagna_sign_index=0, moon_sign_index=3)
-        assert isinstance(result, bool)
+        assert isinstance(result, TransitCheck)
+        assert isinstance(result.corroborated, bool)
+        assert isinstance(result.obstructed, bool)
 
 
 def test_different_event_types_use_different_houses():

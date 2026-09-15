@@ -375,13 +375,40 @@ async def test_multi_year_outlook_caps_at_the_maximum_allowed_years(client):
     assert len(resp.json()["years"]) == 3
 
 
+def _effective_score(w: dict, bonus: float, penalty: float) -> float:
+    score = w["score"]
+    if w["transit_corroborated"]:
+        score += bonus * w["transit_corroboration_strength"]
+    if w["transit_obstructed"]:
+        score -= penalty * w["transit_obstruction_fraction"]
+    return score * w["age_plausibility_multiplier"]
+
+
+_EVIDENCE_RANK = {"house_lord_antardasha": 0, "karaka_antardasha": 1, "backdrop_only": 2}
+
+
+def _ranking_key(w: dict, bonus: float, penalty: float) -> tuple:
+    # Mirrors prediction_service._rerank_with_transit_bonus's actual sort
+    # key: evidence level and age-plausibility both outrank effective score
+    # (see _pool_priority) — a window can have a lower effective score and
+    # still legitimately sort first if it has stronger evidence or a more
+    # plausible age.
+    return (
+        _EVIDENCE_RANK[w["evidence_level"]],
+        not w["literal_event_plausible"],
+        -_effective_score(w, bonus, penalty),
+    )
+
+
 async def test_marriage_timing_returns_ranked_windows(client):
-    """Windows are ranked by dasha score PLUS the transit-corroboration
-    bonus (see prediction_service._rerank_with_transit_bonus) — a window
-    with a real transit confirmation can legitimately outrank one with a
-    higher raw dasha score but no transit signal, so the raw `score` field
-    alone isn't expected to be monotonically decreasing on its own."""
-    from app.services.prediction_service import _TRANSIT_CORROBORATION_BONUS
+    """Windows are ranked by evidence level, then real-world age
+    plausibility, then dasha score PLUS the Ashtakavarga-scaled transit-
+    corroboration bonus MINUS the transit-obstruction penalty (see
+    prediction_service._rerank_with_transit_bonus) — a window with a real,
+    strong transit confirmation can legitimately outrank one with a higher
+    raw dasha score but no transit signal, so the raw `score` field alone
+    isn't expected to be monotonically decreasing on its own."""
+    from app.services.prediction_service import _TRANSIT_CORROBORATION_BONUS, _TRANSIT_OBSTRUCTION_PENALTY
 
     headers = await _signup_and_set_birth_data(client)
     resp = await client.get("/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"})
@@ -390,19 +417,33 @@ async def test_marriage_timing_returns_ranked_windows(client):
     for window in data["windows"]:
         assert window["score"] > 0
         assert window["reason"]
-    effective_scores = [
-        w["score"] + (_TRANSIT_CORROBORATION_BONUS if w["transit_corroborated"] else 0) for w in data["windows"]
+        assert 0.0 < window["transit_corroboration_strength"] <= 1.5
+        assert 0.0 <= window["transit_obstruction_fraction"] <= 1.0
+        assert 0.15 <= window["age_plausibility_multiplier"] <= 1.0
+    ranking_keys = [
+        _ranking_key(w, _TRANSIT_CORROBORATION_BONUS, _TRANSIT_OBSTRUCTION_PENALTY) for w in data["windows"]
     ]
-    assert effective_scores == sorted(effective_scores, reverse=True)
+    assert ranking_keys == sorted(ranking_keys)
 
 
 async def test_marriage_timing_transit_corroborated_window_can_outrank_a_higher_raw_score(client):
     """Regression guard for a real case a user found live: this exact chart
-    has a Mercury Mahadasha+Antardasha window (score 4.0, own-lord-twice,
-    no transit) later than a Saturn Mahadasha / Mercury Antardasha window
-    that Jupiter or Saturn also transits during (score 3.0, but transit-
-    corroborated) — before folding the transit bonus into ranking, the
-    later, uncorroborated window wrongly won purely on raw dasha score."""
+    originally had a Saturn Mahadasha / Mercury Antardasha window (2027,
+    lower raw dasha score) beat a later, higher-raw-score Mercury/Mercury
+    window purely because Saturn was ALSO transiting the relevant house —
+    before folding transit corroboration into ranking at all, the later,
+    uncorroborated window wrongly won on raw dasha score alone.
+
+    Once Ashtakavarga was added (see app.astro.ashtakavarga), the SAME
+    Saturn transit that used to unconditionally win the 2027 window turned
+    out to have only 2-out-of-8 Ashtakavarga bindus at the sign Saturn was
+    actually transiting — a real classical "this specific transit is weak"
+    fact this test's original, cruder assertion couldn't see. That
+    genuinely revised which window should rank first for this exact chart:
+    the general principle (a real transit signal CAN outrank raw dasha
+    score) is still protected by test_marriage_timing_returns_ranked_windows
+    above; this test now locks in the CURRENT correct, more nuanced answer
+    for this specific chart instead."""
     signup = await client.post(
         "/api/v1/auth/signup",
         json={"email": "transitcheck@example.com", "password": "supersecret1", "name": "Transit Check", "preferred_language": "en"},
@@ -419,9 +460,18 @@ async def test_marriage_timing_transit_corroborated_window_can_outrank_a_higher_
     )
     resp = await client.get("/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"})
     assert resp.status_code == 200, resp.text
-    top = resp.json()["windows"][0]
-    assert top["start_date"] == "2027-02-20"
-    assert top["transit_corroborated"] is True
+    windows = resp.json()["windows"]
+    top = windows[0]
+    assert top["start_date"] == "2043-02-16"
+    assert top["transit_corroborated"] is False  # no longer the winner, but for a real, verifiable reason
+
+    # The 2027 window is still corroborated, but its bonus is now correctly
+    # scaled down (weak Ashtakavarga) rather than a flat, unconditional
+    # bonus — this is WHY it no longer wins, not an unexplained flip.
+    second = windows[1]
+    assert second["start_date"] == "2027-02-20"
+    assert second["transit_corroborated"] is True
+    assert second["transit_corroboration_strength"] < 1.0
 
 
 async def test_marriage_timing_is_cached_on_repeat_call(client):
@@ -432,11 +482,50 @@ async def test_marriage_timing_is_cached_on_repeat_call(client):
     assert second.json()["cached"] is True
 
 
+async def test_significator_strength_is_reused_across_timing_endpoints(client, monkeypatch):
+    """_significator_strength (builds the full Shadbala natal chart — the
+    single most expensive computation in the Prediction Engine) is identical
+    for every one of marriage-timing + 4 life-event types x 2 directions for
+    the same birth profile. Regression guard for the SignificatorStrengthCache
+    layer: without it, each of those independently-cached endpoints was
+    rebuilding the same Shadbala chart from scratch on its own first call."""
+    from app.services import prediction_service
+
+    calls = []
+    real = prediction_service._significator_strength
+
+    def _counting_wrapper(d1, birth):
+        calls.append(1)
+        return real(d1, birth)
+
+    monkeypatch.setattr(prediction_service, "_significator_strength", _counting_wrapper)
+
+    headers = await _signup_and_set_birth_data(client)
+    marriage = await client.get("/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"})
+    assert marriage.status_code == 200, marriage.text
+    assert len(calls) == 1
+
+    career = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers, params={"event_type": "career", "language": "en"}
+    )
+    assert career.status_code == 200, career.text
+    # Same birth profile, same algo version — the cache row from the
+    # marriage-timing call above is reused, not recomputed.
+    assert len(calls) == 1
+
+    wealth_past = await client.get(
+        "/api/v1/prediction/life-event-timing",
+        headers=headers, params={"event_type": "wealth", "language": "en", "direction": "past"},
+    )
+    assert wealth_past.status_code == 200, wealth_past.text
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("event_type", ["career", "wealth", "children", "foreign_travel"])
 async def test_life_event_timing_returns_ranked_windows(client, event_type):
     """Same ranking rule as marriage timing — see the comment on
     test_marriage_timing_returns_ranked_windows above."""
-    from app.services.prediction_service import _TRANSIT_CORROBORATION_BONUS
+    from app.services.prediction_service import _TRANSIT_CORROBORATION_BONUS, _TRANSIT_OBSTRUCTION_PENALTY
 
     headers = await _signup_and_set_birth_data(client)
     resp = await client.get(
@@ -448,10 +537,118 @@ async def test_life_event_timing_returns_ranked_windows(client, event_type):
     for window in data["windows"]:
         assert window["score"] > 0
         assert window["reason"]
-    effective_scores = [
-        w["score"] + (_TRANSIT_CORROBORATION_BONUS if w["transit_corroborated"] else 0) for w in data["windows"]
+        assert 0.0 < window["transit_corroboration_strength"] <= 1.5
+        assert 0.0 <= window["transit_obstruction_fraction"] <= 1.0
+        assert 0.15 <= window["age_plausibility_multiplier"] <= 1.0
+    ranking_keys = [
+        _ranking_key(w, _TRANSIT_CORROBORATION_BONUS, _TRANSIT_OBSTRUCTION_PENALTY) for w in data["windows"]
     ]
-    assert effective_scores == sorted(effective_scores, reverse=True)
+    assert ranking_keys == sorted(ranking_keys)
+
+
+@pytest.mark.parametrize("event_type", ["career", "wealth", "children", "foreign_travel"])
+async def test_life_event_timing_age_plausibility_multiplier_matches_the_windows_actual_age(client, event_type):
+    """Regression guard for a real gap found by comparing this engine's
+    output against an independent chart read across several real charts:
+    the classical dasha math alone can rank a chart's own infancy as its
+    #1 "career"/"children" window, since the very first Antardasha of any
+    life is structurally the strongest possible dasha-relationship
+    combination. This checks the fix is actually wired end-to-end: every
+    returned window's age_plausibility_multiplier must match what
+    app.astro.life_stage_plausibility computes for that window's real age
+    at the fixture's birth date (1990-01-25), not just exist as a field."""
+    from app.astro.life_stage_plausibility import age_plausibility_multiplier
+
+    headers = await _signup_and_set_birth_data(client)
+    for direction in ("future", "past"):
+        resp = await client.get(
+            "/api/v1/prediction/life-event-timing", headers=headers,
+            params={"event_type": event_type, "language": "en", "direction": direction},
+        )
+        assert resp.status_code == 200, resp.text
+        birth_date = date(1990, 1, 25)
+        for window in resp.json()["windows"]:
+            start = date.fromisoformat(window["start_date"])
+            age_years = (start - birth_date).days / 365.2425
+            expected = age_plausibility_multiplier(event_type, age_years)
+            assert window["age_plausibility_multiplier"] == pytest.approx(expected, abs=0.02)
+
+
+async def test_life_event_timing_literal_event_plausible_matches_the_windows_actual_age(client):
+    """Regression guard for the age/event-plausibility HARD constraint (see
+    prediction_service._select_candidate_pool/_rerank_with_transit_bonus and
+    app.astro.life_stage_plausibility.is_hard_implausible_age): every
+    returned window's `literal_event_plausible` field must match the real
+    hard-implausibility check for that window's actual age, and the reason
+    text must carry an honest reinterpretation note whenever it's False —
+    not just silently return the field."""
+    from app.astro.life_stage_plausibility import is_hard_implausible_age
+
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers,
+        params={"event_type": "wealth", "language": "en", "direction": "future"},
+    )
+    assert resp.status_code == 200, resp.text
+    birth_date = date(1990, 1, 25)
+    for window in resp.json()["windows"]:
+        start = date.fromisoformat(window["start_date"])
+        age_years = (start - birth_date).days / 365.2425
+        expected = not is_hard_implausible_age("wealth", age_years)
+        assert window["literal_event_plausible"] == expected
+        if not expected:
+            assert "family finances or shared household resources" in window["reason"]
+
+
+async def test_marriage_timing_evidence_level_field_matches_reason_text(client):
+    """Regression guard for the minimum-evidence gate: every returned
+    window's `evidence_level` field must be consistent with whether its
+    reason text carries the honest "backdrop-only" note — not a field that
+    exists but never actually reflects real window content."""
+    headers = await _signup_and_set_birth_data(client)
+    for direction in ("future", "past"):
+        resp = await client.get(
+            "/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en", "direction": direction}
+        )
+        assert resp.status_code == 200, resp.text
+        for window in resp.json()["windows"]:
+            has_note = "broader multi-year period" in window["reason"]
+            assert window["evidence_level"] in ("house_lord_antardasha", "karaka_antardasha", "backdrop_only")
+            assert (window["evidence_level"] == "backdrop_only") == has_note
+
+
+async def test_life_event_timing_reinterprets_a_window_with_no_plausible_age_alternative(client):
+    """A child (age 10 today) searching PAST "wealth" timing (birth-to-now,
+    so every candidate window is younger than wealth's hard_floor of 13) has
+    no plausible-age alternative anywhere in the search horizon — the engine
+    must still return its best available window, but flagged as a
+    reinterpreted signal rather than a literal personal-wealth prediction."""
+    today = date.today()
+    ten_years_ago = today.replace(year=today.year - 10)
+    signup = await client.post(
+        "/api/v1/auth/signup",
+        json={"email": "child@example.com", "password": "supersecret1", "name": "Child User", "preferred_language": "en"},
+    )
+    headers = {"Authorization": f"Bearer {signup.json()['access_token']}"}
+    await client.put(
+        "/api/v1/user/profile/birth-data",
+        headers=headers,
+        json={
+            "name": "Child User", "date_of_birth": ten_years_ago.isoformat(), "time_of_birth": "06:30",
+            "time_uncertain": False, "place_of_birth": "New Delhi, India",
+            "latitude": 28.6, "longitude": 77.2, "timezone_offset_hours": 5.5,
+        },
+    )
+    resp = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers,
+        params={"event_type": "wealth", "language": "en", "direction": "past"},
+    )
+    assert resp.status_code == 200, resp.text
+    windows = resp.json()["windows"]
+    assert windows  # a 10-year dasha timeline still has SOME scoring window
+    for window in windows:
+        assert window["literal_event_plausible"] is False
+        assert "family finances or shared household resources" in window["reason"]
 
 
 async def test_life_event_timing_is_cached_on_repeat_call(client):

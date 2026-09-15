@@ -10,7 +10,7 @@ set passed to `scan_dasha_windows`, not new scanning architecture.
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from app.astro.constants import DAYS_PER_YEAR, PlanetKey
+from app.astro.constants import DAYS_PER_YEAR, PlanetKey, planet_relation
 from app.astro.dasha import Mahadasha
 
 
@@ -35,11 +35,32 @@ class ScoredWindow:
     reason_keys: list[str]
 
 
+# How well the Antardasha lord classically "cooperates" with the Mahadasha
+# it runs inside — real astrologers read a period's likely smoothness partly
+# from this relationship (Dasha-Antardasha sambandha), not from the
+# Antardasha lord's significations alone. The same planet ruling both levels
+# ("same") is the strongest, most unmixed expression of that planet's
+# results; a natural enemy pair classically produces a more mixed or
+# obstructed period even when the classical rule set above scores it highly.
+# See app.astro.constants.planet_relation for the underlying friendship
+# table (also used by app.astro.guna_milan's Graha Maitri koota).
+_DASHA_RELATIONSHIP_MULTIPLIER: dict[str, float] = {
+    "same": 1.2, "friend": 1.1, "neutral": 1.0, "enemy": 0.85,
+}
+
+
+def _dasha_relationship(mahadasha_lord: PlanetKey, antardasha_lord: PlanetKey) -> str:
+    if mahadasha_lord == antardasha_lord:
+        return "same"
+    return planet_relation(mahadasha_lord, antardasha_lord)
+
+
 def scan_dasha_windows(
     mahadashas: list[Mahadasha],
     rules: list[WindowRule],
     from_dt: datetime,
     horizon_years: float,
+    weigh_dasha_relationship: bool = False,
 ) -> list[ScoredWindow]:
     """Walks every Antardasha window overlapping [from_dt, from_dt +
     horizon_years), scores each against `rules`, and returns only windows
@@ -49,7 +70,15 @@ def scan_dasha_windows(
     window's [start, end) is fully contained in [from_dt, horizon_end),
     which matters for a past-direction search: an Antardasha that's still
     ongoing (started in the past, hasn't ended "today") must not be reported
-    with an end date out in the future."""
+    with an end date out in the future.
+
+    `weigh_dasha_relationship=True` scales each window's classical rule score
+    by the Mahadasha/Antardasha lords' natural relationship (see
+    _DASHA_RELATIONSHIP_MULTIPLIER) and adds a "dasha_relationship_{same,
+    friend,enemy}" reason key whenever that relationship isn't the neutral
+    default — silent for "neutral" so most windows don't carry a note that
+    says nothing. Defaults to False so existing callers/tests that expect
+    scores to equal a plain sum of rule weights are unaffected."""
     horizon_end = from_dt + timedelta(days=horizon_years * DAYS_PER_YEAR)
 
     scored: list[ScoredWindow] = []
@@ -65,6 +94,11 @@ def scan_dasha_windows(
                     score += rule.weight
                     reasons.append(rule.reason_key)
             if score > 0:
+                if weigh_dasha_relationship:
+                    relationship = _dasha_relationship(maha.lord, antar.lord)
+                    score *= _DASHA_RELATIONSHIP_MULTIPLIER[relationship]
+                    if relationship != "neutral":
+                        reasons.append(f"dasha_relationship_{relationship}")
                 scored.append(
                     ScoredWindow(
                         start=max(antar.start, from_dt),
