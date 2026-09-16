@@ -6,6 +6,7 @@ from app.db.base import get_db
 from app.schemas.auth import (
     LoginEmailRequest,
     OAuthLoginRequest,
+    PasswordResetRequest,
     RequestOtpRequest,
     RequestOtpResponse,
     SignupEmailRequest,
@@ -32,6 +33,17 @@ async def login(body: LoginEmailRequest, db: AsyncSession = Depends(get_db)):
         user = await auth_service.login_with_email(db, body.email, body.password)
     except auth_service.AuthError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+    return TokenResponse(access_token=auth_service.issue_token(user), user_id=user.id)
+
+
+@router.post("/reset-password", response_model=TokenResponse)
+async def reset_password(body: PasswordResetRequest, db: AsyncSession = Depends(get_db)):
+    """Resets the password for the given email with no verification step
+    (no OTP, no reset link/token) — anyone who knows the email can reset it."""
+    try:
+        user = await auth_service.reset_password(db, body.email, body.new_password)
+    except auth_service.AuthError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     return TokenResponse(access_token=auth_service.issue_token(user), user_id=user.id)
 
 

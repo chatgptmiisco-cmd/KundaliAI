@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { deleteAccount, invalidateKundaliMemo, putBirthData, putPreferences, restoreAuthToken } from '../api/client';
+import { setSessionExpiredHandler } from '../api/httpClient';
 import { ALL_FEATURES_FREE } from '../config/env';
 import { useChatStore } from './useChatStore';
 import { useInsightsStore } from './useInsightsStore';
@@ -109,9 +110,25 @@ export const useUserStore = create<UserState>()(
       hydratePreferences: (preferences) => set({ preferences }),
       setAccuracyScore: (accuracyScore) => set({ accuracyScore }),
 
+      // Always starts from a clean onboarding state — without this, a stale
+      // `hasOnboarded: true` left over from a PREVIOUS account on this same
+      // device/browser (e.g. after the backend database was reset, orphaning
+      // the old account) would make a brand-new signup jump straight to
+      // Home instead of through BirthData/Validation. The real "returning
+      // user with existing data" fast-path still works correctly — it's
+      // decided right after this by resumeExistingAccountOrGoToBirthData,
+      // based on what the SERVER actually has for this account, not by
+      // trusting whatever was cached locally before.
       setAuthSession: (authToken, email) => {
         restoreAuthToken(authToken);
-        set({ authToken, email });
+        set({
+          authToken,
+          email,
+          hasOnboarded: false,
+          birthData: defaultBirthData,
+          preferences: [],
+          accuracyScore: null,
+        });
       },
 
       finishOnboarding: () => set({ hasOnboarded: true }),
@@ -191,3 +208,9 @@ export const useUserStore = create<UserState>()(
     },
   ),
 );
+
+// A token can go dead without the app ever calling logOut() itself — e.g. the
+// backend database was reset (as happens routinely in dev) and now points at
+// no account at all. Without this, the device stays stuck believing it's
+// logged in and onboarded while every real request 401s silently.
+setSessionExpiredHandler(() => useUserStore.getState().logOut());

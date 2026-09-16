@@ -13,6 +13,11 @@ class LoginEmailRequest(BaseModel):
     password: str
 
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+    new_password: str = Field(min_length=8)
+
+
 class RequestOtpRequest(BaseModel):
     phone: str = Field(min_length=8, max_length=20)
 

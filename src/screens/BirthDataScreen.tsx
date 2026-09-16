@@ -1,12 +1,13 @@
 import { useNavigation } from '@react-navigation/native';
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import BirthDataFields from '../components/BirthDataFields';
 import PrimaryButton from '../components/PrimaryButton';
 import { useUserStore } from '../store/useUserStore';
 import { BirthData } from '../types/kundali';
 import { colors, spacing, typography } from '../theme/theme';
+import { showAlert } from '../utils/crossPlatformAlert';
 
 export default function BirthDataScreen() {
   const { t } = useTranslation();
@@ -29,7 +30,7 @@ export default function BirthDataScreen() {
       await setBirthData(data);
       navigation.navigate('AiProcessing');
     } catch (err: any) {
-      Alert.alert(t('common.tryAgain'), err?.message ?? String(err));
+      showAlert(t('common.tryAgain'), err?.message ?? String(err));
     } finally {
       setSubmitting(false);
     }

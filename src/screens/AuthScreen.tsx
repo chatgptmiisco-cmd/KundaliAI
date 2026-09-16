@@ -1,11 +1,12 @@
 import { useNavigation } from '@react-navigation/native';
 import React, { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { getUserProfile, login, requestOtp, signup, verifyOtp } from '../api/client';
+import { getUserProfile, login, requestOtp, resetPassword, signup, verifyOtp } from '../api/client';
 import PrimaryButton from '../components/PrimaryButton';
 import { useUserStore } from '../store/useUserStore';
 import { colors, radius, spacing, typography } from '../theme/theme';
+import { showAlert } from '../utils/crossPlatformAlert';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^\+?[1-9]\d{7,14}$/;
@@ -39,6 +40,9 @@ export default function AuthScreen() {
   const [devOtpCode, setDevOtpCode] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [resetMode, setResetMode] = useState(false);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
 
   const clearError = (key: keyof FieldErrors) => {
     setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
@@ -95,7 +99,7 @@ export default function AuthScreen() {
       await resumeExistingAccountOrGoToBirthData();
     } catch (err: any) {
       if (mode === 'signup' && err?.status === 409) {
-        Alert.alert(t('onboarding.accountExistsTitle'), t('onboarding.accountExistsMessage'), [
+        showAlert(t('onboarding.accountExistsTitle'), t('onboarding.accountExistsMessage'), [
           { text: t('common.cancel'), style: 'cancel' },
           {
             text: t('onboarding.loginTab'),
@@ -107,9 +111,40 @@ export default function AuthScreen() {
           },
         ]);
       } else if (mode === 'login' && err?.status === 401) {
-        Alert.alert(t('common.tryAgain'), t('onboarding.errorInvalidCredentials'));
+        showAlert(t('common.tryAgain'), t('onboarding.errorInvalidCredentials'));
       } else {
-        Alert.alert(t('common.tryAgain'), err?.message ?? String(err));
+        showAlert(t('common.tryAgain'), err?.message ?? String(err));
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    const nextErrors: FieldErrors = {};
+    if (!EMAIL_RE.test(email.trim())) {
+      nextErrors.email = t('onboarding.errorEmailInvalid');
+    }
+    if (resetNewPassword.length < 8) {
+      nextErrors.password = t('onboarding.errorPasswordLength');
+    }
+    if (resetConfirmPassword !== resetNewPassword) {
+      nextErrors.confirmPassword = t('onboarding.errorPasswordMismatch');
+    }
+    setErrors(nextErrors);
+    if (Object.values(nextErrors).some(Boolean)) return;
+
+    setSubmitting(true);
+    try {
+      const result = await resetPassword(email.trim(), resetNewPassword);
+      setAuthSession(result.accessToken, email.trim());
+      showAlert(t('onboarding.passwordResetDoneTitle'), t('onboarding.passwordResetDoneMessage'));
+      await resumeExistingAccountOrGoToBirthData();
+    } catch (err: any) {
+      if (err?.status === 404) {
+        showAlert(t('common.tryAgain'), t('onboarding.errorNoAccountForEmail'));
+      } else {
+        showAlert(t('common.tryAgain'), err?.message ?? String(err));
       }
     } finally {
       setSubmitting(false);
@@ -128,7 +163,7 @@ export default function AuthScreen() {
       setOtpSent(true);
       setDevOtpCode(result.devCode);
     } catch (err: any) {
-      Alert.alert(t('common.tryAgain'), err?.message ?? String(err));
+      showAlert(t('common.tryAgain'), err?.message ?? String(err));
     } finally {
       setSubmitting(false);
     }
@@ -146,7 +181,7 @@ export default function AuthScreen() {
       setAuthSession(result.accessToken, phone.trim());
       await resumeExistingAccountOrGoToBirthData();
     } catch (err: any) {
-      Alert.alert(t('common.tryAgain'), err?.message ?? String(err));
+      showAlert(t('common.tryAgain'), err?.message ?? String(err));
     } finally {
       setSubmitting(false);
     }
@@ -163,6 +198,7 @@ export default function AuthScreen() {
         <Pressable
           onPress={() => {
             setMode('signup');
+            setResetMode(false);
             setErrors({});
           }}
           style={[styles.tab, mode === 'signup' && styles.tabActive]}
@@ -174,6 +210,7 @@ export default function AuthScreen() {
         <Pressable
           onPress={() => {
             setMode('login');
+            setResetMode(false);
             setErrors({});
           }}
           style={[styles.tab, mode === 'login' && styles.tabActive]}
@@ -210,59 +247,123 @@ export default function AuthScreen() {
       </View>
 
       {method === 'email' ? (
-        <>
-          {mode === 'signup' && (
+        resetMode ? (
+          <>
             <Field
-              label={t('profile.nameLabel')}
-              value={name}
+              label={t('onboarding.emailLabel')}
+              value={email}
               onChangeText={(v) => {
-                setName(v);
-                clearError('name');
+                setEmail(v);
+                clearError('email');
               }}
-              error={errors.name}
+              keyboardType="email-address"
+              error={errors.email}
             />
-          )}
-          <Field
-            label={t('onboarding.emailLabel')}
-            value={email}
-            onChangeText={(v) => {
-              setEmail(v);
-              clearError('email');
-            }}
-            keyboardType="email-address"
-            error={errors.email}
-          />
-          <Field
-            label={t('onboarding.passwordLabel')}
-            value={password}
-            onChangeText={(v) => {
-              setPassword(v);
-              clearError('password');
-            }}
-            secureTextEntry
-            error={errors.password}
-          />
-          {mode === 'signup' && (
+            <Field
+              label={t('onboarding.newPasswordLabel')}
+              value={resetNewPassword}
+              onChangeText={(v) => {
+                setResetNewPassword(v);
+                clearError('password');
+              }}
+              secureTextEntry
+              error={errors.password}
+            />
             <Field
               label={t('onboarding.confirmPasswordLabel')}
-              value={confirmPassword}
+              value={resetConfirmPassword}
               onChangeText={(v) => {
-                setConfirmPassword(v);
+                setResetConfirmPassword(v);
                 clearError('confirmPassword');
               }}
               secureTextEntry
               error={errors.confirmPassword}
             />
-          )}
 
-          <View style={styles.spacer} />
-          <PrimaryButton
-            label={t('onboarding.continueButton')}
-            onPress={handleContinue}
-            loading={submitting}
-            disabled={submitting}
-          />
-        </>
+            <View style={styles.spacer} />
+            <PrimaryButton
+              label={t('onboarding.resetPasswordButton')}
+              onPress={handleResetPassword}
+              loading={submitting}
+              disabled={submitting}
+            />
+            <Pressable
+              onPress={() => {
+                setResetMode(false);
+                setResetNewPassword('');
+                setResetConfirmPassword('');
+                setErrors({});
+              }}
+            >
+              <Text style={styles.forgotPasswordText}>{t('onboarding.backToLogin')}</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            {mode === 'signup' && (
+              <Field
+                label={t('profile.nameLabel')}
+                value={name}
+                onChangeText={(v) => {
+                  setName(v);
+                  clearError('name');
+                }}
+                error={errors.name}
+              />
+            )}
+            <Field
+              label={t('onboarding.emailLabel')}
+              value={email}
+              onChangeText={(v) => {
+                setEmail(v);
+                clearError('email');
+              }}
+              keyboardType="email-address"
+              error={errors.email}
+            />
+            <Field
+              label={t('onboarding.passwordLabel')}
+              value={password}
+              onChangeText={(v) => {
+                setPassword(v);
+                clearError('password');
+              }}
+              secureTextEntry
+              error={errors.password}
+            />
+            {mode === 'signup' && (
+              <Field
+                label={t('onboarding.confirmPasswordLabel')}
+                value={confirmPassword}
+                onChangeText={(v) => {
+                  setConfirmPassword(v);
+                  clearError('confirmPassword');
+                }}
+                secureTextEntry
+                error={errors.confirmPassword}
+              />
+            )}
+
+            {mode === 'login' && (
+              <Pressable
+                onPress={() => {
+                  setResetMode(true);
+                  setErrors({});
+                }}
+              >
+                <Text style={styles.forgotPasswordText}>{t('onboarding.forgotPassword')}</Text>
+              </Pressable>
+            )}
+
+            <View style={styles.spacer} />
+            <PrimaryButton
+              label={t('onboarding.continueButton')}
+              onPress={handleContinue}
+              loading={submitting}
+              disabled={submitting}
+            />
+          </>
+        )
       ) : (
         <>
           <Field
@@ -473,5 +574,11 @@ const styles = StyleSheet.create({
   },
   spacer: {
     height: spacing.lg,
+  },
+  forgotPasswordText: {
+    ...typography.caption,
+    color: colors.primary,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
   },
 });

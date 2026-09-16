@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import BulletList from '../components/BulletList';
 import Card from '../components/Card';
@@ -21,6 +21,7 @@ import { toContentLanguage } from '../i18n/contentLanguage';
 import { useKundaliStore } from '../store/useKundaliStore';
 import { useUserStore } from '../store/useUserStore';
 import { colors, fontFamily, radius, spacing, typography } from '../theme/theme';
+import { showAlert } from '../utils/crossPlatformAlert';
 
 export default function CompleteKundaliScreen() {
   const { t } = useTranslation();
@@ -78,7 +79,7 @@ export default function CompleteKundaliScreen() {
 
   const handleSave = () => {
     setSaved(true);
-    Alert.alert(t('common.readLater'), t('kundali.savedConfirmation'));
+    showAlert(t('common.readLater'), t('kundali.savedConfirmation'));
   };
 
   const handleDownloadPdf = () => {
@@ -86,7 +87,7 @@ export default function CompleteKundaliScreen() {
       setPdfModalVisible(true);
       return;
     }
-    Alert.alert(t('common.downloadPdf'), t('kundali.pdfPreparingMessage'));
+    showAlert(t('common.downloadPdf'), t('kundali.pdfPreparingMessage'));
   };
 
   return (

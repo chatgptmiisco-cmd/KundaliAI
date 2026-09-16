@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { checkoutSubscription } from '../api/client';
 import BulletList from '../components/BulletList';
@@ -9,6 +9,7 @@ import PrimaryButton from '../components/PrimaryButton';
 import { useUserStore } from '../store/useUserStore';
 import { PlanTier } from '../types/kundali';
 import { colors, fontFamily, radius, spacing, typography } from '../theme/theme';
+import { showAlert } from '../utils/crossPlatformAlert';
 
 const PLAN_ORDER: PlanTier[] = ['free', 'insight', 'strategy'];
 
@@ -24,9 +25,9 @@ export default function UpgradePlansScreen() {
     try {
       const result = await checkoutSubscription(tier, 'monthly');
       setPlan(tier);
-      Alert.alert(t('plans.choosePlan'), result.note);
+      showAlert(t('plans.choosePlan'), result.note);
     } catch (err: any) {
-      Alert.alert(t('common.tryAgain'), err?.message ?? String(err));
+      showAlert(t('common.tryAgain'), err?.message ?? String(err));
     } finally {
       setLoadingTier(null);
     }

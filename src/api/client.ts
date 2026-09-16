@@ -61,6 +61,21 @@ export async function login(
   return { accessToken: res.access_token, userId: res.user_id };
 }
 
+/** No verification step (no OTP/reset link) — anyone who knows the email can
+ * reset it. Logs the user in immediately on success, same as signup/login. */
+export async function resetPassword(
+  email: string,
+  newPassword: string,
+): Promise<{ accessToken: string; userId: string }> {
+  const res = await apiRequest<TokenResponse>('/auth/reset-password', {
+    method: 'POST',
+    auth: false,
+    body: { email, new_password: newPassword },
+  });
+  setAuthToken(res.access_token);
+  return { accessToken: res.access_token, userId: res.user_id };
+}
+
 interface RequestOtpResponse {
   phone: string;
   expires_in_seconds: number;

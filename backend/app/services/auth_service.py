@@ -57,6 +57,20 @@ async def login_with_email(db: AsyncSession, email: str, password: str) -> User:
     return user
 
 
+async def reset_password(db: AsyncSession, email: str, new_password: str) -> User:
+    """Resets a user's password with no verification step (no OTP/email link) —
+    caller is trusted to have already confirmed the requester's identity."""
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise AuthError("No account found with this email.")
+
+    user.hashed_password = hash_password(new_password)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
 async def request_otp(db: AsyncSession, phone: str) -> tuple[str, int]:
     """Dev-mode OTP: generates and stores a real code with a real expiry, but
     returns it in the response instead of sending an SMS. Swap the "return

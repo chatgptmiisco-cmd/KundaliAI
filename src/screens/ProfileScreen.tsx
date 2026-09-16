@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import React, { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { getSubscription } from '../api/client';
 import BirthDataFields from '../components/BirthDataFields';
@@ -10,6 +10,7 @@ import LanguageToggle from '../components/LanguageToggle';
 import PrimaryButton from '../components/PrimaryButton';
 import { useUserStore } from '../store/useUserStore';
 import { BirthData } from '../types/kundali';
+import { showAlert } from '../utils/crossPlatformAlert';
 import { colors, spacing, typography } from '../theme/theme';
 
 export default function ProfileScreen() {
@@ -48,16 +49,16 @@ export default function ProfileScreen() {
     try {
       await setBirthData(draft);
       setEditing(false);
-      Alert.alert(t('common.save'), t('profile.savedMessage'));
+      showAlert(t('common.save'), t('profile.savedMessage'));
     } catch (err: any) {
-      Alert.alert(t('common.tryAgain'), err?.message ?? String(err));
+      showAlert(t('common.tryAgain'), err?.message ?? String(err));
     } finally {
       setSaving(false);
     }
   };
 
   const handleLogOut = () => {
-    Alert.alert(
+    showAlert(
       t('profile.logOutConfirmTitle'),
       t('profile.logOutConfirmMessage'),
       [
@@ -68,7 +69,7 @@ export default function ProfileScreen() {
   };
 
   const handleRestartOnboarding = () => {
-    Alert.alert(
+    showAlert(
       t('profile.restartOnboardingConfirmTitle'),
       t('profile.restartOnboardingConfirmMessage'),
       [

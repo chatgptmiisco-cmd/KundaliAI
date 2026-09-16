@@ -18,6 +18,19 @@ export function getAuthToken(): string | null {
   return authToken;
 }
 
+// Fires when an authenticated request comes back 401 — meaning the token
+// itself is dead (expired, or points at an account that no longer exists,
+// e.g. after a backend database reset), not a login/signup attempt with the
+// wrong password (those calls pass `auth: false` and never reach this).
+// Wired up by useUserStore to log the device out locally instead of leaving
+// the user stuck on a broken screen with a session the server has already
+// discarded.
+let onSessionExpired: (() => void) | null = null;
+
+export function setSessionExpiredHandler(handler: () => void) {
+  onSessionExpired = handler;
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
@@ -62,6 +75,9 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const payload = isJson ? await response.json().catch(() => null) : null;
 
   if (!response.ok) {
+    if (response.status === 401 && auth && authToken) {
+      onSessionExpired?.();
+    }
     const message = payload?.detail ?? response.statusText ?? 'Request failed';
     throw new ApiError(response.status, typeof message === 'string' ? message : JSON.stringify(message));
   }
