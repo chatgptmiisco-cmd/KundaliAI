@@ -146,6 +146,14 @@ def _dict_to_response(data: dict, cached: bool) -> ChartResponse:
     )
 
 
+# Bump this whenever build_house_breakdown/detect_yogas wording or logic
+# changes — otherwise an existing cached row (keyed only on birth_profile
+# version, which doesn't change just because the app's explanation text
+# changed) keeps serving stale text forever. Same pattern as
+# prediction_service._TIMING_ALGO_VERSION.
+_CHART_EXPLANATION_ALGO_VERSION = 6
+
+
 def _select_stmt(profile: BirthProfile, chart_type: ChartType):
     return select(ChartCache).where(
         ChartCache.user_id == profile.user_id,
@@ -164,7 +172,11 @@ async def get_chart(db: AsyncSession, profile: BirthProfile, birth: BirthDataOut
 
     result = await db.execute(_select_stmt(profile, chart_type))
     cached_row = result.scalar_one_or_none()
-    if cached_row is not None and all(key in cached_row.data for key in _REQUIRED_CACHE_KEYS):
+    if (
+        cached_row is not None
+        and all(key in cached_row.data for key in _REQUIRED_CACHE_KEYS)
+        and cached_row.data.get("explanation_algo_version") == _CHART_EXPLANATION_ALGO_VERSION
+    ):
         return _dict_to_response(cached_row.data, cached=True)
 
     jd_ut = julian_day_ut(birth_datetime_utc(birth))
@@ -190,6 +202,7 @@ async def get_chart(db: AsyncSession, profile: BirthProfile, birth: BirthDataOut
     # is a documented simplification (not every classical text endorses
     # checking Panch Mahapurusha in Navamsha/Dashamsha), not a fabricated one.
     data["yogas"] = detect_yogas(chart_result)
+    data["explanation_algo_version"] = _CHART_EXPLANATION_ALGO_VERSION
 
     if cached_row is not None:
         cached_row.data = data

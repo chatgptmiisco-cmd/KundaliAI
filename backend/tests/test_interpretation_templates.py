@@ -388,9 +388,26 @@ _CHAT_CONTEXT = {
         10: "Mercury sits here, bringing a mentally busy quality — this house governs career.",
         7: "No planet sits here — relationships depend on Mercury, this house's lord.",
     },
+    # Plain verdict per house — this (not house_breakdown above) is what a
+    # static topic chat answer actually returns; see
+    # chart_explanation_service._VERDICT_BY_HOUSE_EN/HI.
+    "house_verdict": {
+        10: "Your career may have both good phases and hard phases.",
+        7: "Your relationships may have both good and hard moments.",
+    },
     "yogas": [
-        {"key": "gajakesari", "name": "Gajakesari Yoga", "description": "Moon and Jupiter in mutual Kendra houses."},
-        {"key": "manglik", "name": "Manglik (Mangal) Dosha", "description": "Mars sits in a Manglik-checked house."},
+        {
+            "key": "gajakesari",
+            "name": "Gajakesari Yoga",
+            "description": "Moon and Jupiter in mutual Kendra houses.",
+            "chat_summary": "Yes, you have Gajakesari Yoga.",
+        },
+        {
+            "key": "manglik",
+            "name": "Manglik (Mangal) Dosha",
+            "description": "Mars sits in a Manglik-checked house.",
+            "chat_summary": "Yes, you are Manglik.",
+        },
     ],
     "mahadasha_lord": "Jupiter",
     "antardasha_lord": "Saturn",
@@ -408,17 +425,17 @@ def _history(message: str) -> list[dict[str, str]]:
 
 async def test_chat_reply_answers_career_question_from_real_house_ten_text():
     reply = await interpreter.chat_reply(_history("How's my career looking this year?"), _CHAT_CONTEXT, "en")
-    assert reply == _CHAT_CONTEXT["house_breakdown"][10]
+    assert reply == _CHAT_CONTEXT["house_verdict"][10]
 
 
 async def test_chat_reply_answers_marriage_question_from_real_house_seven_text():
     reply = await interpreter.chat_reply(_history("Tell me about my marriage prospects"), _CHAT_CONTEXT, "en")
-    assert reply == _CHAT_CONTEXT["house_breakdown"][7]
+    assert reply == _CHAT_CONTEXT["house_verdict"][7]
 
 
 async def test_chat_reply_answers_hindi_career_question():
     reply = await interpreter.chat_reply(_history("मेरा करियर कैसा रहेगा?"), _CHAT_CONTEXT, "hi")
-    assert reply == _CHAT_CONTEXT["house_breakdown"][10]
+    assert reply == _CHAT_CONTEXT["house_verdict"][10]
 
 
 async def test_chat_reply_answers_dosha_question_with_real_findings():
@@ -491,11 +508,11 @@ async def test_chat_reply_word_boundary_matching_avoids_substring_false_positive
     extremely common word "will" ("when WILL I get married"), and bare "kid"
     (children keyword) is a substring of "kidney"/"kidding" — plain substring
     matching caught both live before word-boundary matching was added."""
-    context1 = {**_CHAT_CONTEXT, "house_breakdown": {**_CHAT_CONTEXT["house_breakdown"], 6: "Health house text."}}
+    context1 = {**_CHAT_CONTEXT, "house_verdict": {**_CHAT_CONTEXT["house_verdict"], 6: "Health house text."}}
     reply = await interpreter.chat_reply(_history("When will I get a promotion?"), context1, "en")
     assert "Health house text." not in reply
 
-    context = {**_CHAT_CONTEXT, "house_breakdown": {**_CHAT_CONTEXT["house_breakdown"], 5: "Children house text."}}
+    context = {**_CHAT_CONTEXT, "house_verdict": {**_CHAT_CONTEXT["house_verdict"], 5: "Children house text."}}
     reply2 = await interpreter.chat_reply(_history("My kidney has been hurting lately"), context, "en")
     assert "Children house text." not in reply2
 
@@ -559,8 +576,8 @@ async def test_chat_reply_answers_both_topics_in_a_compound_question():
     reply = await interpreter.chat_reply(
         _history("How's my career and marriage looking?"), _CHAT_CONTEXT, "en"
     )
-    assert _CHAT_CONTEXT["house_breakdown"][10] in reply
-    assert _CHAT_CONTEXT["house_breakdown"][7] in reply
+    assert _CHAT_CONTEXT["house_verdict"][10] in reply
+    assert _CHAT_CONTEXT["house_verdict"][7] in reply
 
 
 async def test_chat_reply_caps_compound_questions_at_two_topics():
@@ -568,14 +585,14 @@ async def test_chat_reply_caps_compound_questions_at_two_topics():
     # should come back, not an ever-growing wall of text.
     context = {
         **_CHAT_CONTEXT,
-        "house_breakdown": {**_CHAT_CONTEXT["house_breakdown"], 2: "Venus sits here — this house governs money."},
+        "house_verdict": {**_CHAT_CONTEXT["house_verdict"], 2: "Venus sits here — this house governs money."},
     }
     reply = await interpreter.chat_reply(
         _history("How's my career, money, and marriage looking?"), context, "en"
     )
     matched = sum(
         text in reply
-        for text in (context["house_breakdown"][10], context["house_breakdown"][2], context["house_breakdown"][7])
+        for text in (context["house_verdict"][10], context["house_verdict"][2], context["house_verdict"][7])
     )
     assert matched == 2
 
@@ -596,7 +613,7 @@ async def test_bhrigu_answers_career_question_in_his_own_domain():
     # (see _pick_variant) rather than returned bare, so this checks
     # containment of the real fact, not an exact string match.
     reply = await interpreter.chat_reply(_history("How's my career looking?"), _rishi_context("bhrigu"), "en")
-    assert _CHAT_CONTEXT["house_breakdown"][10] in reply
+    assert _CHAT_CONTEXT["house_verdict"][10] in reply
 
 
 async def test_bhrigu_still_answers_a_marriage_question_but_points_to_gargi():
@@ -604,17 +621,17 @@ async def test_bhrigu_still_answers_a_marriage_question_but_points_to_gargi():
     # the real, chart-grounded answer, just with a pointer to the specialist
     # for more depth.
     reply = await interpreter.chat_reply(_history("Tell me about my marriage prospects"), _rishi_context("bhrigu"), "en")
-    assert _CHAT_CONTEXT["house_breakdown"][7] in reply
+    assert _CHAT_CONTEXT["house_verdict"][7] in reply
     assert "Gargi" in reply
-    assert reply != _CHAT_CONTEXT["house_breakdown"][7]  # the pointer is appended, not silently dropped
+    assert reply != _CHAT_CONTEXT["house_verdict"][7]  # the pointer is appended, not silently dropped
 
 
 async def test_gargi_answers_marriage_but_still_answers_career_with_a_pointer_to_bhrigu():
     in_domain = await interpreter.chat_reply(_history("Tell me about my marriage prospects"), _rishi_context("gargi"), "en")
-    assert _CHAT_CONTEXT["house_breakdown"][7] in in_domain
+    assert _CHAT_CONTEXT["house_verdict"][7] in in_domain
 
     out_of_domain = await interpreter.chat_reply(_history("How's my career looking?"), _rishi_context("gargi"), "en")
-    assert _CHAT_CONTEXT["house_breakdown"][10] in out_of_domain
+    assert _CHAT_CONTEXT["house_verdict"][10] in out_of_domain
     assert "Bhrigu" in out_of_domain
 
 
@@ -625,8 +642,8 @@ async def test_gargi_answers_both_topics_of_a_mixed_scope_compound_question():
     reply = await interpreter.chat_reply(
         _history("How's my career and marriage looking?"), _rishi_context("gargi"), "en"
     )
-    assert _CHAT_CONTEXT["house_breakdown"][7] in reply
-    assert _CHAT_CONTEXT["house_breakdown"][10] in reply
+    assert _CHAT_CONTEXT["house_verdict"][7] in reply
+    assert _CHAT_CONTEXT["house_verdict"][10] in reply
     assert reply.count("Bhrigu") == 1
 
 
@@ -648,7 +665,7 @@ async def test_agastya_answers_dosha_and_yoga_but_points_to_bhrigu_for_money():
     yoga_reply = await interpreter.chat_reply(_history("Do I have any yoga in my chart?"), _rishi_context("agastya"), "en")
     assert "Gajakesari" in yoga_reply
 
-    # _CHAT_CONTEXT's house_breakdown fixture has no house 2 (money) entry —
+    # _CHAT_CONTEXT's house_verdict fixture has no house 2 (money) entry —
     # a real chart always would, but this exercises the "genuinely nothing to
     # answer with" fallback path: a pure pointer to Bhrigu, not a fabricated
     # answer.
@@ -674,7 +691,7 @@ async def test_each_rishi_gives_a_distinct_specialized_fallback_when_nothing_mat
 
 async def test_rishi_specialization_answers_in_hindi_too():
     reply = await interpreter.chat_reply(_history("मेरी शादी कैसी रहेगी?"), _rishi_context("gargi"), "hi")
-    assert _CHAT_CONTEXT["house_breakdown"][7] in reply
+    assert _CHAT_CONTEXT["house_verdict"][7] in reply
 
 
 def _history_with_length(message: str, total_length: int) -> list[dict[str, str]]:
@@ -693,7 +710,7 @@ async def test_rishi_lead_in_and_fallback_rotate_instead_of_repeating():
     ]
     assert len(set(replies)) == 3
     for reply in replies:
-        assert _CHAT_CONTEXT["house_breakdown"][10] in reply
+        assert _CHAT_CONTEXT["house_verdict"][10] in reply
 
     # Same rotation applies to the "nothing matched" fallback text.
     fallback_replies = [
@@ -703,5 +720,5 @@ async def test_rishi_lead_in_and_fallback_rotate_instead_of_repeating():
     assert len(set(fallback_replies)) == 3
 
     redirect = await interpreter.chat_reply(_history("मेरा करियर कैसा रहेगा?"), _rishi_context("gargi"), "hi")
-    assert _CHAT_CONTEXT["house_breakdown"][10] in redirect
+    assert _CHAT_CONTEXT["house_verdict"][10] in redirect
     assert "भृगु" in redirect

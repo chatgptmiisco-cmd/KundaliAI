@@ -46,6 +46,171 @@ from app.services.interpretation.templates import (
     _strip_trailing_stop,
 )
 
+# A one-line, jargon-free verdict per house — no planet names, no dignity
+# terms, just a plain "is this good, bad, or mixed for this area of your
+# life" statement (favorable/unfavorable/mixed), for chat's "what does my
+# chart say about X" answers. The detailed planet-by-planet explanation
+# above stays available separately for the dedicated chart-explanation
+# screen, which is a different reading context from a quick chat answer.
+_VERDICT_BY_HOUSE_EN: dict[int, dict[str, str]] = {
+    1: {
+        "favorable": "This is a good time to focus on yourself and build confidence.",
+        "unfavorable": "You may feel low on energy or unsure of yourself at times.",
+        "mixed": "Your confidence and energy may go up and down.",
+    },
+    2: {
+        "favorable": "This is good for your money — financial gains are likely.",
+        "unfavorable": "You may face money troubles or financial loss.",
+        "mixed": "You may see both gains and losses with money.",
+    },
+    3: {
+        "favorable": "This is a good time for communication — your words will land well.",
+        "unfavorable": "Communication may lead to misunderstandings.",
+        "mixed": "Communication may go smoothly at times and cause friction at other times.",
+    },
+    4: {
+        "favorable": "This is good for your home and family life.",
+        "unfavorable": "There may be some tension or difficulty at home or with family.",
+        "mixed": "Home and family life may have both easy and difficult times.",
+    },
+    5: {
+        "favorable": "This is a good time for romance and creative pursuits.",
+        "unfavorable": "Romance or creative plans may face difficulty.",
+        "mixed": "Romance and creativity may bring mixed results.",
+    },
+    6: {
+        "favorable": "This is good for your health and daily routine.",
+        "unfavorable": "You may need to be careful about your health.",
+        "mixed": "Your health may be fine at times and weak at other times.",
+    },
+    7: {
+        "favorable": "This is a good sign for your relationships and partnerships.",
+        "unfavorable": "This can affect your relationships — expect some difficulty or delay.",
+        "mixed": "Your relationships may have both good and hard moments.",
+    },
+    8: {
+        "favorable": "Sudden changes are likely to work in your favor.",
+        "unfavorable": "Be careful of sudden setbacks or unexpected trouble.",
+        "mixed": "Unexpected changes may bring both good and bad surprises.",
+    },
+    9: {
+        "favorable": "This is good for learning, higher studies, and travel.",
+        "unfavorable": "Learning or travel plans may face obstacles.",
+        "mixed": "Learning and travel may go smoothly at times and hit snags at other times.",
+    },
+    10: {
+        "favorable": "This is a good time for your career.",
+        "unfavorable": "Your career may see struggle or slow progress.",
+        "mixed": "Your career may have both good phases and hard phases.",
+    },
+    11: {
+        "favorable": "This is good for gains, income, and friendships.",
+        "unfavorable": "You may see fewer gains than expected, or friction with friends.",
+        "mixed": "Gains and friendships may go up and down.",
+    },
+    12: {
+        "favorable": "This is a good time for rest, healing, or spiritual growth.",
+        "unfavorable": "You may feel drained or face unnecessary expenses.",
+        "mixed": "Rest and letting go may feel easy at times and hard at other times.",
+    },
+}
+_VERDICT_BY_HOUSE_HI: dict[int, dict[str, str]] = {
+    1: {
+        "favorable": "यह समय खुद पर ध्यान देने और आत्मविश्वास बढ़ाने के लिए अच्छा है।",
+        "unfavorable": "आप कभी-कभी ऊर्जा की कमी या आत्मविश्वास में कमी महसूस कर सकते हैं।",
+        "mixed": "आपका आत्मविश्वास और ऊर्जा ऊपर-नीचे हो सकती है।",
+    },
+    2: {
+        "favorable": "यह आपके धन के लिए अच्छा है — आर्थिक लाभ की संभावना है।",
+        "unfavorable": "आपको पैसों से जुड़ी परेशानी या नुकसान हो सकता है।",
+        "mixed": "धन के मामले में लाभ और नुकसान दोनों हो सकते हैं।",
+    },
+    3: {
+        "favorable": "यह संवाद के लिए अच्छा समय है — आपकी बातों का असर पड़ेगा।",
+        "unfavorable": "संवाद में गलतफहमी हो सकती है।",
+        "mixed": "संवाद कभी अच्छा रहेगा तो कभी तनावपूर्ण।",
+    },
+    4: {
+        "favorable": "यह घर और परिवार के लिए अच्छा समय है।",
+        "unfavorable": "घर या परिवार में कुछ तनाव या परेशानी हो सकती है।",
+        "mixed": "पारिवारिक जीवन में अच्छे और मुश्किल दोनों समय आ सकते हैं।",
+    },
+    5: {
+        "favorable": "यह प्रेम और रचनात्मक कामों के लिए अच्छा समय है।",
+        "unfavorable": "प्रेम या रचनात्मक योजनाओं में परेशानी आ सकती है।",
+        "mixed": "प्रेम और रचनात्मकता में मिले-जुले नतीजे मिल सकते हैं।",
+    },
+    6: {
+        "favorable": "यह आपके स्वास्थ्य और दिनचर्या के लिए अच्छा है।",
+        "unfavorable": "आपको अपने स्वास्थ्य का ध्यान रखने की ज़रूरत है।",
+        "mixed": "स्वास्थ्य कभी ठीक रहेगा तो कभी कमज़ोर।",
+    },
+    7: {
+        "favorable": "यह आपके रिश्तों के लिए अच्छा संकेत है।",
+        "unfavorable": "इससे आपके रिश्तों पर असर पड़ सकता है और कुछ मुश्किलें आ सकती हैं।",
+        "mixed": "आपके रिश्तों में अच्छे और मुश्किल दोनों पल आ सकते हैं।",
+    },
+    8: {
+        "favorable": "अचानक होने वाले बदलाव आपके पक्ष में जा सकते हैं।",
+        "unfavorable": "अचानक होने वाली परेशानियों से सावधान रहें।",
+        "mixed": "अचानक बदलाव अच्छे और बुरे दोनों तरह के हो सकते हैं।",
+    },
+    9: {
+        "favorable": "यह पढ़ाई, उच्च शिक्षा और यात्रा के लिए अच्छा समय है।",
+        "unfavorable": "पढ़ाई या यात्रा की योजनाओं में रुकावट आ सकती है।",
+        "mixed": "पढ़ाई और यात्रा में कभी आसानी तो कभी रुकावट आ सकती है।",
+    },
+    10: {
+        "favorable": "यह आपके करियर के लिए अच्छा समय है।",
+        "unfavorable": "आपके करियर में संघर्ष या धीमी प्रगति हो सकती है।",
+        "mixed": "करियर में अच्छे और मुश्किल दोनों दौर आ सकते हैं।",
+    },
+    11: {
+        "favorable": "यह लाभ, आमदनी और दोस्ती के लिए अच्छा है।",
+        "unfavorable": "उम्मीद से कम लाभ हो सकता है या दोस्तों से थोड़ी अनबन हो सकती है।",
+        "mixed": "लाभ और दोस्ती के मामले में उतार-चढ़ाव रह सकता है।",
+    },
+    12: {
+        "favorable": "यह आराम, उपचार या आध्यात्मिक विकास के लिए अच्छा समय है।",
+        "unfavorable": "आप थका हुआ महसूस कर सकते हैं या अनावश्यक खर्च हो सकता है।",
+        "mixed": "आराम और चीज़ों को छोड़ने का यह अनुभव कभी आसान तो कभी मुश्किल हो सकता है।",
+    },
+}
+
+# A one-line plain-language "why" that follows the verdict above — same
+# reason text regardless of which house/topic, since the underlying cause is
+# always the same shape (strong support / real strain / no strong pull
+# either way). Deliberately still no planet names or astrology terms, so the
+# verdict doesn't read as an unexplained, arbitrary label.
+_VERDICT_REASON_EN: dict[str, str] = {
+    "favorable": "There's a strong, positive push behind this right now, so things are likely to work in your favor.",
+    "unfavorable": "There's real strain behind this right now, so expect some extra effort or difficulty.",
+    "mixed": "There's no strong push in either direction right now, so a lot depends on your own effort and choices.",
+}
+_VERDICT_REASON_HI: dict[str, str] = {
+    "favorable": "अभी इसके पीछे एक मज़बूत, सकारात्मक ताकत है, इसलिए चीज़ें आपके पक्ष में जाने की संभावना है।",
+    "unfavorable": "अभी इसके पीछे वास्तविक दबाव है, इसलिए थोड़ी ज़्यादा मेहनत या मुश्किल की उम्मीद रखें।",
+    "mixed": "अभी इसके पीछे कोई मज़बूत ताकत नहीं है, इसलिए काफ़ी कुछ आपकी अपनी मेहनत और चुनाव पर निर्भर करता है।",
+}
+
+
+def _dignity_bucket(dignities: list[str | None]) -> str:
+    """Collapses one or more planets' classical dignity into a single plain
+    verdict bucket. Rahu/Ketu (dignity always None) simply don't vote either
+    way. Conflicting signals (one planet strong, another weak) and "nothing
+    strong either way" both land on "mixed" deliberately — a real, honest
+    answer rather than picking an arbitrary winner."""
+    good = any(d in ("exalted", "own_sign") for d in dignities)
+    bad = any(d == "debilitated" for d in dignities)
+    if good and bad:
+        return "mixed"
+    if good:
+        return "favorable"
+    if bad:
+        return "unfavorable"
+    return "mixed"
+
+
 # Natal-placement framing for a *neutral*-dignity planet (or Rahu/Ketu, which
 # have no classical dignity) — deliberately NOT reusing _PERIOD_CONTENT's
 # one-liners here, since those are written for "this is currently your
@@ -75,6 +240,34 @@ _NEUTRAL_EFFECT_HI: dict[PlanetKey, str] = {
     "Ke": "यहां आप अलगाव महसूस कर सकते हैं या छोड़ना चाहते हैं।",
 }
 
+# A short, practical closing line per planet — what to actually DO with the
+# tendency described above, explicitly tied back to whichever house/life-area
+# it's being read for (see build_house_breakdown). This is the piece that
+# turns "here's a fact about your chart" into a real, useful explanation
+# instead of a flat statement.
+_PRACTICAL_TIP_EN: dict[PlanetKey, str] = {
+    "Su": "it helps to let your effort be seen instead of staying in the background",
+    "Mo": "it helps to notice how you're feeling here instead of pushing it aside",
+    "Ma": "it helps to slow down and think before acting on impulse",
+    "Me": "it helps to say what's actually on your mind instead of overthinking it",
+    "Ju": "it helps to trust your instinct to grow here, even if it feels like a stretch",
+    "Ve": "it helps to make real time for comfort and connection here",
+    "Sa": "it helps to be patient — progress here is slow but tends to last",
+    "Ra": "it helps to stay grounded here instead of chasing every new impulse",
+    "Ke": "it helps to stay engaged here instead of withdrawing when it gets hard",
+}
+_PRACTICAL_TIP_HI: dict[PlanetKey, str] = {
+    "Su": "यहां पीछे रहने के बजाय अपने काम को सामने लाना फायदेमंद रहेगा",
+    "Mo": "यहां अपनी भावनाओं को नज़रअंदाज़ करने के बजाय उन्हें पहचानना फायदेमंद रहेगा",
+    "Ma": "यहां जल्दबाज़ी में कुछ करने से पहले थोड़ा रुककर सोचना फायदेमंद रहेगा",
+    "Me": "यहां ज़्यादा सोचने के बजाय मन की बात कहना फायदेमंद रहेगा",
+    "Ju": "यहां बढ़ने की अपनी सहज इच्छा पर भरोसा करना फायदेमंद रहेगा, भले ही यह मुश्किल लगे",
+    "Ve": "यहां सुख और जुड़ाव के लिए असली समय निकालना फायदेमंद रहेगा",
+    "Sa": "यहां धैर्य रखना फायदेमंद रहेगा — प्रगति धीमी है पर टिकाऊ होती है",
+    "Ra": "यहां हर नई इच्छा के पीछे भागने के बजाय स्थिर रहना फायदेमंद रहेगा",
+    "Ke": "यहां मुश्किल होने पर पीछे हटने के बजाय जुड़े रहना फायदेमंद रहेगा",
+}
+
 _MAHAPURUSHA_DESCRIPTIONS_EN = {
     "Ma": "Mars is exalted or in its own sign in an angular (Kendra) house — classical Ruchaka Yoga, giving real courage, physical drive, and a natural instinct to lead rather than follow.",
     "Me": "Mercury is exalted or in its own sign in an angular (Kendra) house — classical Bhadra Yoga, giving sharp, quick intellect and real skill in communication.",
@@ -88,6 +281,24 @@ _MAHAPURUSHA_DESCRIPTIONS_HI = {
     "Ju": "गुरु किसी केंद्र भाव में उच्च या अपनी राशि में है — शास्त्रीय हंस योग, जो ज्ञान, नैतिकता और सम्मानजनक व्यक्तित्व देता है।",
     "Ve": "शुक्र किसी केंद्र भाव में उच्च या अपनी राशि में है — शास्त्रीय मालव्य योग, जो आकर्षण, सौंदर्यबोध और वास्तविक सुख-सुविधा देता है।",
     "Sa": "शनि किसी केंद्र भाव में उच्च या अपनी राशि में है — शास्त्रीय शश योग, जो अनुशासन, अधिकार और कठिन समय में टिके रहने की क्षमता देता है।",
+}
+
+# Direct "yes, you have this" versions of the above, for chat answers — the
+# detailed descriptions stay available for the dedicated chart-explanation
+# screen (see the verdict_en/hi split on HouseBreakdown for the same pattern).
+_MAHAPURUSHA_CHAT_SUMMARY_EN = {
+    "Ma": "Yes, you have Ruchaka Yoga — a sign of real courage and natural leadership.",
+    "Me": "Yes, you have Bhadra Yoga — a sign of sharp intellect and strong communication skills.",
+    "Ju": "Yes, you have Hamsa Yoga — a sign of wisdom and a presence people naturally respect.",
+    "Ve": "Yes, you have Malavya Yoga — a sign of charm and a life with real comfort in it.",
+    "Sa": "Yes, you have Sasa Yoga — a sign of discipline and the ability to outlast hard times.",
+}
+_MAHAPURUSHA_CHAT_SUMMARY_HI = {
+    "Ma": "हां, आपकी कुंडली में रुचक योग है — यह वास्तविक साहस और स्वाभाविक नेतृत्व क्षमता का संकेत है।",
+    "Me": "हां, आपकी कुंडली में भद्र योग है — यह तेज़ बुद्धि और अच्छे संवाद कौशल का संकेत है।",
+    "Ju": "हां, आपकी कुंडली में हंस योग है — यह ज्ञान और सम्मानजनक व्यक्तित्व का संकेत है।",
+    "Ve": "हां, आपकी कुंडली में मालव्य योग है — यह आकर्षण और वास्तविक सुख-सुविधा भरे जीवन का संकेत है।",
+    "Sa": "हां, आपकी कुंडली में शश योग है — यह अनुशासन और कठिन समय में टिके रहने की क्षमता का संकेत है।",
 }
 
 
@@ -122,7 +333,6 @@ def _planet_effect(planet: PlanetKey, dignity: str | None) -> tuple[str, str]:
 def build_house_breakdown(chart: ChartResult) -> list[dict]:
     names_en, names_hi = PLANET_NAMES_EN, PLANET_NAMES_HI
     focus_en, focus_hi = _FOCUS_BY_HOUSE_EN, _FOCUS_BY_HOUSE_HI
-    tone_en, tone_hi = _TONE_BY_LORD_EN, _TONE_BY_LORD_HI
     qualifier_en, qualifier_hi = _DIGNITY_QUALIFIER_EN, _DIGNITY_QUALIFIER_HI
 
     planets_by_house: dict[int, list[PlanetKey]] = {h: [] for h in range(1, 13)}
@@ -138,58 +348,80 @@ def build_house_breakdown(chart: ChartResult) -> list[dict]:
             lord = house_lord(house, chart.lagna_sign_index)
             lord_house = chart.planet_house[lord]
             lord_dignity = planet_dignity(lord, chart.planet_sign_index[lord])
+            verdict_bucket = _dignity_bucket([lord_dignity])
             effect_en, effect_hi = _planet_effect(lord, lord_dignity)
             explanation_en = (
-                f"No planet sits here — how {focus_en[house]} plays out depends mainly on "
-                f"{names_en[lord]}, this house's lord, who sits in your {_ordinal(lord_house)} house, "
-                f"{qualifier_en[lord_dignity]}. Real effect: {effect_en}"
+                f"No planet sits directly in this house. How {focus_en[house]} plays out for you depends on "
+                f"{names_en[lord]}, this house's ruling planet, who sits in your {_ordinal(lord_house)} house "
+                f"and is {qualifier_en[lord_dignity]}. {names_en[lord]} generally brings "
+                f"{_a_or_an(_TONE_BY_LORD_EN[lord])} {_TONE_BY_LORD_EN[lord]} quality. {effect_en} "
+                f"In {focus_en[house]} specifically, {_PRACTICAL_TIP_EN[lord]}."
             )
             explanation_hi = (
-                f"इस भाव में कोई ग्रह नहीं है — {focus_hi[house]} का अनुभव मुख्यतः इस भाव के स्वामी "
+                f"इस भाव में सीधे कोई ग्रह नहीं है। {focus_hi[house]} का अनुभव मुख्यतः इस भाव के स्वामी "
                 f"{names_hi[lord]} की स्थिति से तय होगा, जो आपके {_hindi_house(lord_house)} में है और "
-                f"{qualifier_hi[lord_dignity]}। असली असर: {effect_hi}"
+                f"{qualifier_hi[lord_dignity]}। {names_hi[lord]} आमतौर पर {_TONE_BY_LORD_HI[lord]} भाव लाता है। "
+                f"{effect_hi} खासकर {focus_hi[house]} के मामले में, {_PRACTICAL_TIP_HI[lord]}।"
             )
+        elif len(planets_here) == 1:
+            # The common case (most houses hold 0 or 1 planet): a real,
+            # connected explanation — what's here, how strong it is, what
+            # that generally feels like, the concrete effect, and a plain
+            # closing line tying it back to the specific life-area asked
+            # about, instead of a flat list of disconnected facts.
+            p = planets_here[0]
+            retro_en = " (retrograde)" if chart.planet_retrograde.get(p) else ""
+            retro_hi = " (वक्री)" if chart.planet_retrograde.get(p) else ""
+            dignity = planet_dignity(p, chart.planet_sign_index[p]) if p in CLASSICAL_PLANETS else None
+            verdict_bucket = _dignity_bucket([dignity])
+            effect_en, effect_hi = _planet_effect(p, dignity)
+            sentences_en = [f"{names_en[p]}{retro_en} sits in the part of your chart that's about {focus_en[house]}."]
+            sentences_hi = [f"{names_hi[p]}{retro_hi} आपकी कुंडली के उस हिस्से में है जो {focus_hi[house]} से जुड़ा है।"]
+            if dignity:
+                sentences_en.append(f"It is {qualifier_en[dignity]}.")
+                sentences_hi.append(f"यह {qualifier_hi[dignity]}।")
+            sentences_en.append(f"{names_en[p]} generally brings {_a_or_an(_TONE_BY_LORD_EN[p])} {_TONE_BY_LORD_EN[p]} quality.")
+            sentences_hi.append(f"{names_hi[p]} आमतौर पर {_TONE_BY_LORD_HI[p]} भाव लाता है।")
+            sentences_en.append(effect_en)
+            sentences_hi.append(effect_hi)
+            sentences_en.append(f"In {focus_en[house]} specifically, {_PRACTICAL_TIP_EN[p]}.")
+            sentences_hi.append(f"खासकर {focus_hi[house]} के मामले में, {_PRACTICAL_TIP_HI[p]}।")
+            explanation_en = " ".join(sentences_en)
+            explanation_hi = " ".join(sentences_hi)
         else:
-            parts_en, parts_hi = [], []
-            effects_en, effects_hi = [], []
+            # Multiple planets sharing a house — each gets its own full
+            # explanation (placement, tone, effect, practical tip), named
+            # so it's clear which sentence belongs to which planet.
+            sentences_en, sentences_hi = [], []
+            dignities_here: list[str | None] = []
             for p in planets_here:
                 retro_en = " (retrograde)" if chart.planet_retrograde.get(p) else ""
                 retro_hi = " (वक्री)" if chart.planet_retrograde.get(p) else ""
-                if p in CLASSICAL_PLANETS:
-                    dignity = planet_dignity(p, chart.planet_sign_index[p])
-                    parts_en.append(
-                        f"{names_en[p]}{retro_en} is {qualifier_en[dignity]}, bringing "
-                        f"{_a_or_an(tone_en[p])} {tone_en[p]} quality"
-                    )
-                    parts_hi.append(f"{names_hi[p]}{retro_hi} {qualifier_hi[dignity]}, जो {tone_hi[p]} भाव लाता है")
-                else:
-                    dignity = None
-                    parts_en.append(f"{names_en[p]}{retro_en} sits here")
-                    parts_hi.append(f"{names_hi[p]}{retro_hi} यहां स्थित है")
+                dignity = planet_dignity(p, chart.planet_sign_index[p]) if p in CLASSICAL_PLANETS else None
+                dignities_here.append(dignity)
                 effect_en, effect_hi = _planet_effect(p, dignity)
-                effects_en.append(f"{names_en[p]}: {effect_en}")
-                effects_hi.append(f"{names_hi[p]}: {effect_hi}")
+                placement_en = f"{names_en[p]}{retro_en} is {qualifier_en[dignity]}" if dignity else f"{names_en[p]}{retro_en} is here"
+                placement_hi = f"{names_hi[p]}{retro_hi} {qualifier_hi[dignity]}" if dignity else f"{names_hi[p]}{retro_hi} यहां है"
+                sentences_en.append(
+                    f"{placement_en}, generally bringing {_a_or_an(_TONE_BY_LORD_EN[p])} {_TONE_BY_LORD_EN[p]} "
+                    f"quality. {effect_en} In {focus_en[house]} specifically, {_PRACTICAL_TIP_EN[p]}."
+                )
+                sentences_hi.append(
+                    f"{placement_hi}, जो आमतौर पर {_TONE_BY_LORD_HI[p]} भाव लाता है। {effect_hi} "
+                    f"खासकर {focus_hi[house]} के मामले में, {_PRACTICAL_TIP_HI[p]}।"
+                )
 
             conjunction_en = (
                 f" {_join_and([names_en[p] for p in planets_here])} are conjunct here (sharing the same "
                 "house), so their effects blend into one another rather than acting separately."
-                if len(planets_here) > 1
-                else ""
             )
             conjunction_hi = (
                 f" {' और '.join(names_hi[p] for p in planets_here)} एक ही भाव में युति में हैं, इसलिए इनका असर अलग-अलग नहीं "
                 "बल्कि आपस में मिला-जुला रहता है।"
-                if len(planets_here) > 1
-                else ""
             )
-            explanation_en = (
-                f"{'; '.join(parts_en)} — this house governs {focus_en[house]}, so that's where the effect lands most directly."
-                f"{conjunction_en} Real effect — {' '.join(effects_en)}"
-            )
-            explanation_hi = (
-                f"{'; '.join(parts_hi)} — यह भाव {focus_hi[house]} को दर्शाता है, इसलिए असर सीधे यहीं दिखता है।"
-                f"{conjunction_hi} असली असर — {' '.join(effects_hi)}"
-            )
+            explanation_en = f"This house governs {focus_en[house]}.{conjunction_en} " + " ".join(sentences_en)
+            explanation_hi = f"यह भाव {focus_hi[house]} को दर्शाता है।{conjunction_hi} " + " ".join(sentences_hi)
+            verdict_bucket = _dignity_bucket(dignities_here)
 
         breakdown.append(
             {
@@ -199,6 +431,8 @@ def build_house_breakdown(chart: ChartResult) -> list[dict]:
                 "planets": planets_here,
                 "explanation_en": explanation_en,
                 "explanation_hi": explanation_hi,
+                "verdict_en": f"{_VERDICT_BY_HOUSE_EN[house][verdict_bucket]} {_VERDICT_REASON_EN[verdict_bucket]}",
+                "verdict_hi": f"{_VERDICT_BY_HOUSE_HI[house][verdict_bucket]} {_VERDICT_REASON_HI[verdict_bucket]}",
             }
         )
     return breakdown
@@ -229,6 +463,8 @@ def detect_yogas(chart: ChartResult) -> list[dict]:
                     "चंद्रमा और गुरु एक-दूसरे से केंद्र भाव में हैं — यह शांत स्वभाव, सामाजिक सम्मान और "
                     "सामान्यतः स्थिर सौभाग्य का शास्त्रीय संयोग है।"
                 ),
+                "chat_summary_en": "Yes, you have Gajakesari Yoga — a sign of a calm nature and generally steady good fortune.",
+                "chat_summary_hi": "हां, आपकी कुंडली में गजकेसरी योग है — यह शांत स्वभाव और सामान्यतः स्थिर सौभाग्य का संकेत है।",
             }
         )
 
@@ -241,6 +477,8 @@ def detect_yogas(chart: ChartResult) -> list[dict]:
                 "name_hi": f"{MAHAPURUSHA_PLANET_NAMES_HI[m.planet]} योग",
                 "description_en": _MAHAPURUSHA_DESCRIPTIONS_EN[m.planet],
                 "description_hi": _MAHAPURUSHA_DESCRIPTIONS_HI[m.planet],
+                "chat_summary_en": _MAHAPURUSHA_CHAT_SUMMARY_EN[m.planet],
+                "chat_summary_hi": _MAHAPURUSHA_CHAT_SUMMARY_HI[m.planet],
             }
         )
 
@@ -259,6 +497,8 @@ def detect_yogas(chart: ChartResult) -> list[dict]:
                     "एक केंद्र भाव का स्वामी और एक त्रिकोण भाव का स्वामी एक ही भाव में हैं — यह प्रतिष्ठा और "
                     "सफलता बढ़ाने वाला शास्त्रीय राज योग है।"
                 ),
+                "chat_summary_en": "Yes, you have Raj Yoga — a classical boost to status and success.",
+                "chat_summary_hi": "हां, आपकी कुंडली में राज योग है — यह प्रतिष्ठा और सफलता को बढ़ावा देने वाला शास्त्रीय योग है।",
             }
         )
 
@@ -280,6 +520,13 @@ def detect_yogas(chart: ChartResult) -> list[dict]:
                 "description_hi": (
                     "मंगल लग्न से 1, 2, 4, 7, 8 या 12वें भाव में है, जहां परंपरागत रूप से मंगलिक दोष जांचा जाता है। "
                     "कई परिवार विवाह से पहले साथी की कुंडली से इसका सावधानी से मिलान करते हैं।"
+                ),
+                "chat_summary_en": (
+                    "Yes, you are Manglik. This is something many families check carefully when matching "
+                    "charts before marriage."
+                ),
+                "chat_summary_hi": (
+                    "हां, आप मंगलिक हैं। शादी से पहले परिवार अक्सर साथी की कुंडली से इसका सावधानी से मिलान करते हैं।"
                 ),
             }
         )
@@ -303,6 +550,14 @@ def detect_yogas(chart: ChartResult) -> list[dict]:
                     "सभी सात मुख्य ग्रह राहु-केतु अक्ष के एक ही ओर हैं — यह तीव्र, सब-कुछ-या-कुछ-नहीं जैसी जीवन "
                     "प्रवृत्तियों से जुड़ा शास्त्रीय कालसर्प दोष है।"
                 ),
+                "chat_summary_en": (
+                    "Yes, you have Kaal Sarp Dosha — classically linked to intense, all-or-nothing life "
+                    "patterns rather than slow and steady ones."
+                ),
+                "chat_summary_hi": (
+                    "हां, आपकी कुंडली में कालसर्प दोष है — यह तीव्र, सब-कुछ-या-कुछ-नहीं जैसी जीवन प्रवृत्तियों से "
+                    "जुड़ा होता है।"
+                ),
             }
         )
 
@@ -324,6 +579,14 @@ def detect_yogas(chart: ChartResult) -> list[dict]:
                 "description_hi": (
                     "चंद्रमा को किसी भी निकटवर्ती या केंद्र भाव से किसी ग्रह का समर्थन नहीं है — यह भावनात्मक "
                     "अकेलेपन से जुड़ा शास्त्रीय केमद्रुम दोष है, जब तक अन्य मज़बूत स्थितियां इसे संतुलित न करें।"
+                ),
+                "chat_summary_en": (
+                    "Yes, you have Kemadruma Dosha — classically linked to feeling emotionally isolated at "
+                    "times, unless other strong placements balance it out."
+                ),
+                "chat_summary_hi": (
+                    "हां, आपकी कुंडली में केमद्रुम दोष है — यह कभी-कभी भावनात्मक अकेलापन महसूस होने से जुड़ा है, "
+                    "जब तक अन्य मज़बूत स्थितियां इसे संतुलित न करें।"
                 ),
             }
         )

@@ -83,16 +83,16 @@ _FOCUS_BY_HOUSE_HI = {
 # Qualitative read of a planet's classical dignity, reused across every
 # house-lord placement sentence below — see app.astro.natal_insights.
 _DIGNITY_QUALIFIER_EN = {
-    "exalted": "operating unusually well from here",
-    "debilitated": "under real strain from here",
-    "own_sign": "comfortably placed, drawing on its natural strength",
-    "neutral": "placed in an ordinary, unremarkable way",
+    "exalted": "working exceptionally well",
+    "debilitated": "struggling",
+    "own_sign": "strong and comfortable",
+    "neutral": "in an average, unremarkable position",
 }
 _DIGNITY_QUALIFIER_HI = {
-    "exalted": "यहां से असामान्य रूप से अच्छा असर दे रहा है",
-    "debilitated": "यहां वास्तविक दबाव में है",
-    "own_sign": "यहां सहज है और अपनी स्वाभाविक ताकत दिखा रहा है",
-    "neutral": "यहां एक साधारण, सामान्य स्थिति में है",
+    "exalted": "बहुत अच्छी स्थिति में है",
+    "debilitated": "संघर्ष में है",
+    "own_sign": "मज़बूत और सहज स्थिति में है",
+    "neutral": "सामान्य, साधारण स्थिति में है",
 }
 
 # Per-lord period content: honest, specific, no hedging — the immediate
@@ -713,6 +713,81 @@ def message_mentions_foreign_travel_timing(message: str) -> bool:
     return has_foreign and _has_timing_signal(lowered)
 
 
+# --- Phase 2 sub-intents (career_promotion/business_partnership/
+# business_expansion) — deliberately their own keyword lists, checked
+# ALONGSIDE (not instead of) the generic "career" topic above, which
+# already contains "promotion"/"business" itself: a message can and often
+# does match both, and app.api.v1.chat fetches every category that
+# matches rather than picking one, so the LLM just gets both the generic
+# career_timing AND the more specific sub-intent's windows to choose from.
+_CAREER_PROMOTION_KEYWORDS = ["promotion", "promoted", "raise", "pay rise", "पदोन्नति", "प्रमोशन"]
+_BUSINESS_EXPANSION_KEYWORDS = [
+    "expand", "expansion", "grow my business", "scale my business", "new branch",
+    "business badhana", "business ko badhana",
+    "व्यापार का विस्तार", "व्यवसाय बढ़ाना",
+]
+_BUSINESS_PARTNERSHIP_KEYWORDS = [
+    "business partner", "co-founder", "cofounder", "partnership",
+    "व्यापारिक साझेदारी", "साझेदार",
+]
+
+
+def message_mentions_career_promotion_timing(message: str) -> bool:
+    lowered = message.lower()
+    return _contains_any_keyword(lowered, _CAREER_PROMOTION_KEYWORDS) and _has_timing_signal(lowered)
+
+
+def message_mentions_business_expansion_timing(message: str) -> bool:
+    # Accepts a decision-style signal too ("should I expand my business
+    # now?"), not just a "when" timing signal — real business-expansion
+    # questions are phrased as often one way as the other, and either one
+    # genuinely calls for the same business_expansion windows.
+    lowered = message.lower()
+    has_expansion = _contains_any_keyword(lowered, _BUSINESS_EXPANSION_KEYWORDS)
+    return has_expansion and (_has_timing_signal(lowered) or _has_decision_signal(lowered))
+
+
+def message_mentions_business_partnership_timing(message: str) -> bool:
+    lowered = message.lower()
+    has_partnership = _contains_any_keyword(lowered, _BUSINESS_PARTNERSHIP_KEYWORDS)
+    return has_partnership and (_has_timing_signal(lowered) or _has_decision_signal(lowered))
+
+
+# --- Phase 3 decision support ("should I do X now?") ----------------------
+# A decision question needs its own signal, distinct from _has_timing_signal
+# ("when will X happen") — "should I switch jobs" isn't asking when, it's
+# asking whether now is a good idea, which routes to
+# prediction_service.get_decision instead of a timing window scan.
+_DECISION_SIGNAL_KEYWORDS = [
+    "should i", "should we", "is it a good idea", "is this a good idea",
+    "क्या मुझे", "kya mujhe",
+]
+_JOB_CHANGE_DECISION_KEYWORDS = [
+    "switch jobs", "switch my job", "change jobs", "change my job", "quit my job", "leave my job",
+    "naukri badal", "job badal",
+    "नौकरी बदल", "जॉब बदल",
+]
+_BUSINESS_START_DECISION_KEYWORDS = [
+    "start a business", "start my own business", "start my business",
+    "business shuru", "apna business shuru",
+    "व्यवसाय शुरू", "बिज़नेस शुरू",
+]
+
+
+def _has_decision_signal(lowered_message: str) -> bool:
+    return _contains_any_keyword(lowered_message, _DECISION_SIGNAL_KEYWORDS)
+
+
+def message_mentions_job_change_decision(message: str) -> bool:
+    lowered = message.lower()
+    return _contains_any_keyword(lowered, _JOB_CHANGE_DECISION_KEYWORDS) and _has_decision_signal(lowered)
+
+
+def message_mentions_business_start_decision(message: str) -> bool:
+    lowered = message.lower()
+    return _contains_any_keyword(lowered, _BUSINESS_START_DECISION_KEYWORDS) and _has_decision_signal(lowered)
+
+
 # --- Past-event reflection: tense detection + a target-date resolver ------
 # "Why did my marriage get delayed", "what happened to me around 2016",
 # "why was 28 such a hard year" — real astrologers narrate the PAST from the
@@ -876,23 +951,43 @@ _LIFE_EVENT_LABEL_EN: dict[str, str] = {
     "wealth_timing": "your financial growth",
     "children_timing": "having a child",
     "foreign_travel_timing": "foreign travel or relocation",
+    "career_promotion_timing": "a promotion",
+    "business_expansion_timing": "expanding your business",
+    "business_partnership_timing": "a business partnership",
 }
 _LIFE_EVENT_LABEL_HI: dict[str, str] = {
     "career_timing": "करियर या नौकरी में बदलाव",
     "wealth_timing": "आपकी आर्थिक वृद्धि",
     "children_timing": "संतान प्राप्ति",
     "foreign_travel_timing": "विदेश यात्रा या स्थानांतरण",
+    "career_promotion_timing": "पदोन्नति",
+    "business_expansion_timing": "आपके व्यवसाय का विस्तार",
+    "business_partnership_timing": "व्यापारिक साझेदारी",
 }
 _LIFE_EVENT_CONTEXT_KEY: dict[str, str] = {
     "career_timing": "career_timing_windows",
     "wealth_timing": "wealth_timing_windows",
     "children_timing": "children_timing_windows",
     "foreign_travel_timing": "foreign_travel_timing_windows",
+    "career_promotion_timing": "career_promotion_timing_windows",
+    "business_expansion_timing": "business_expansion_timing_windows",
+    "business_partnership_timing": "business_partnership_timing_windows",
+}
+# When a life-event category's windows list comes back empty because of a
+# LifeState gate (currently only business_partnership_timing — see
+# prediction_service.get_life_event_timing), the context also carries a
+# `{category}_note` explaining why, so the reply can say that honestly
+# instead of "no window found" reading as though nothing matched at all.
+_LIFE_EVENT_NOTE_CONTEXT_KEY: dict[str, str] = {
+    "business_partnership_timing": "business_partnership_timing_note",
 }
 
 
 def _life_event_chat_answer(category: str, context: dict[str, Any], hi: bool) -> str:
     windows: list[dict[str, Any]] = context.get(_LIFE_EVENT_CONTEXT_KEY[category]) or []
+    note_key = _LIFE_EVENT_NOTE_CONTEXT_KEY.get(category)
+    if not windows and note_key and context.get(note_key):
+        return context[note_key]
     label = (_LIFE_EVENT_LABEL_HI if hi else _LIFE_EVENT_LABEL_EN)[category]
     direction = context.get(f"{category}_direction", "future")
     birth_year = context.get("birth_year")
@@ -909,7 +1004,14 @@ _RISHI_SPECIALTY: dict[str, set[str]] = {
     "parashara": {"dasha", "today", "year_ahead", "life_theme"},
     "gargi": {"marriage", "family", "friends", "siblings", "children", "marriage_timing", "children_timing"},
     "agastya": {"dosha", "yoga", "health"},
-    "bhrigu": {"career", "money", "career_timing", "wealth_timing"},
+    "bhrigu": {
+        "career", "money", "career_timing", "wealth_timing",
+        # Phase 2/3 sub-intents — same specialist as career/wealth, since
+        # they're career- and business-flavored variants of that same
+        # domain, not a new topic of their own.
+        "career_promotion_timing", "business_expansion_timing", "business_partnership_timing",
+        "job_change_decision", "business_start_decision",
+    },
 }
 _CATEGORY_RISHI: dict[str, str] = {
     category: rishi for rishi, categories in _RISHI_SPECIALTY.items() for category in categories
@@ -1153,6 +1255,12 @@ _TIMING_SUPPRESSES_TOPIC = {
     "wealth_timing": "money",
     "children_timing": "children",
     "foreign_travel_timing": "travel",
+    # "business" isn't its own _TOPIC_HOUSE topic — it's folded into
+    # "career" (see _TOPIC_KEYWORDS["career"]) — so all three Phase 2/3
+    # sub-intents suppress that same generic topic.
+    "career_promotion_timing": "career",
+    "business_expansion_timing": "career",
+    "business_partnership_timing": "career",
 }
 _TIMING_CATEGORIES = frozenset(_TIMING_SUPPRESSES_TOPIC)
 _MAX_CATEGORIES_PER_REPLY = 2
@@ -1186,6 +1294,16 @@ def _detect_categories(message: str, birth_year: int | None = None) -> list[str]
         add("children_timing")
     if message_mentions_foreign_travel_timing(message):
         add("foreign_travel_timing")
+    if message_mentions_career_promotion_timing(message):
+        add("career_promotion_timing")
+    if message_mentions_business_expansion_timing(message):
+        add("business_expansion_timing")
+    if message_mentions_business_partnership_timing(message):
+        add("business_partnership_timing")
+    if message_mentions_job_change_decision(message):
+        add("job_change_decision")
+    if message_mentions_business_start_decision(message):
+        add("business_start_decision")
     if message_mentions_year_ahead(message):
         add("year_ahead")
 
@@ -1225,7 +1343,6 @@ def _compute_answer_for_category(
     context: dict[str, Any],
     hi: bool,
     daily: dict[str, Any],
-    house_breakdown: dict[int, str],
     yogas: list[dict[str, str]],
     mahadasha_lord: str | None,
     antardasha_lord: str | None,
@@ -1248,6 +1365,17 @@ def _compute_answer_for_category(
 
     if category in _LIFE_EVENT_CONTEXT_KEY:
         return _life_event_chat_answer(category, context, hi)
+
+    if category in ("job_change_decision", "business_start_decision"):
+        # A verdict + reasoning (see prediction_service.get_decision), not a
+        # ranked window list — the composed `reasoning` text already reads
+        # as a complete answer on its own, same as how the timing categories
+        # above hand back _format_timing_reply's finished sentence rather
+        # than raw window data for chat_reply to re-narrate.
+        decision: dict[str, Any] | None = context.get(category)
+        if not decision:
+            return None
+        return decision.get("note") or decision.get("reasoning")
 
     if category == "life_theme":
         theme_data: dict[str, Any] | None = context.get("life_theme")
@@ -1304,46 +1432,62 @@ def _compute_answer_for_category(
         # active Sade Sati or Dhaiya was silently omitted — caught live: the
         # same chart's Dhaiya only ever surfaced through a life-theme
         # question, never a direct dosha question.
+        # A direct "yes/no" answer first — the previous version returned only
+        # the classical rule text (which houses are checked, etc.) and never
+        # actually said whether the person IS Manglik, caught live from a
+        # real "Am I Manglik?" question. chat_summary is written as a
+        # standalone yes-statement per finding; see
+        # chart_explanation_service._MAHAPURUSHA_CHAT_SUMMARY_EN etc.
         findings = [y for y in yogas if y["key"] in _DOSHA_KEYS]
-        sentences = [f"{y['name']}: {y['description']}" for y in findings]
+        sentences = [y["chat_summary"] for y in findings]
 
         daily_doshas = {d["key"]: d for d in (daily.get("doshas") or [])}
         if daily_doshas.get("sade_sati", {}).get("is_present"):
             sentences.append(
-                "साढ़े साती: शनि की साढ़े साती फिलहाल सक्रिय है — यह शास्त्रीय रूप से संघर्ष, देरी और सामान्य से ज़्यादा भारीपन से जुड़ी होती है।"
+                "हां, शनि की साढ़े साती फिलहाल आपके लिए सक्रिय है — यह शास्त्रीय रूप से सामान्य से ज़्यादा मेहनत और "
+                "संघर्ष वाला दौर माना जाता है।"
                 if hi else
-                "Sade Sati: Saturn's Sade Sati is currently active — classically linked to hardship, delay, and "
-                "a heavier load than usual."
+                "Yes, Saturn's Sade Sati is currently active for you — classically a heavier, more effortful "
+                "period than usual."
             )
         if daily_doshas.get("dhaiya", {}).get("is_present"):
             sentences.append(
-                "ढैया: शनि की ढैया फिलहाल सक्रिय है — यह भी एक जाना-पहचाना कठिन दौर माना जाता है।"
+                "हां, शनि की ढैया फिलहाल आपके लिए सक्रिय है — यह भी एक जाना-पहचाना कठिन दौर माना जाता है, हालांकि "
+                "आमतौर पर साढ़े साती से हल्का।"
                 if hi else
-                "Dhaiya: Saturn's Dhaiya is currently active — another classically recognized difficult stretch."
+                "Yes, Saturn's Dhaiya is currently active for you — another classically difficult stretch, "
+                "usually lighter than Sade Sati."
             )
 
         if sentences:
             return " ".join(sentences)
         return (
-            "आपकी कुंडली में मंगलिक, कालसर्प, केमद्रुम, साढ़े साती या ढैया जैसा कोई प्रमुख दोष अभी सक्रिय नहीं मिला।"
+            "नहीं — आपकी कुंडली में मंगलिक, कालसर्प, केमद्रुम, साढ़े साती या ढैया जैसा कोई प्रमुख दोष अभी सक्रिय नहीं मिला।"
             if hi
-            else "I didn't find Manglik, Kaal Sarp, Kemadruma, Sade Sati, or Dhaiya active in your chart right now."
+            else "No — I didn't find Manglik, Kaal Sarp, Kemadruma, Sade Sati, or Dhaiya active in your chart "
+            "right now."
         )
 
     if category == "yoga":
         findings = [y for y in yogas if y["key"] not in _DOSHA_KEYS]
         if findings:
-            return " ".join(f"{y['name']}: {y['description']}" for y in findings)
+            return " ".join(y["chat_summary"] for y in findings)
         return (
-            "आपकी कुंडली में कोई विशेष शास्त्रीय योग नहीं मिला — यह कमज़ोर कुंडली का संकेत नहीं है, कई मज़बूत "
+            "नहीं — आपकी कुंडली में कोई विशेष शास्त्रीय योग नहीं मिला। यह कमज़ोर कुंडली का संकेत नहीं है, कई मज़बूत "
             "कुंडलियों में भी कोई नामी योग नहीं होता।"
             if hi
-            else "I didn't detect a named classical yoga in your chart — that's not a sign of a weak chart, "
-            "plenty of strong charts don't carry one either."
+            else "No — I didn't detect a named classical yoga in your chart. That's not a sign of a weak "
+            "chart — plenty of strong charts don't carry one either."
         )
 
     if category in _TOPIC_HOUSE:
-        return house_breakdown.get(_TOPIC_HOUSE[category])
+        # A plain good/bad/mixed verdict, not the detailed planet-by-planet
+        # explanation (house_breakdown above) — chat answers a "what does my
+        # chart say about X" question with a direct, jargon-free statement
+        # about that life area, not a chart-reading lesson. See
+        # chart_explanation_service._VERDICT_BY_HOUSE_EN/HI.
+        house_verdict: dict[int, str] = context.get("house_verdict", {})
+        return house_verdict.get(_TOPIC_HOUSE[category])
 
     return None
 
@@ -1718,7 +1862,6 @@ class TemplateInterpreter(Interpreter):
         directly, matching the original persona-agnostic behaviour."""
         hi = language == "hi"
         lagna = context.get("lagna_sign", "")
-        house_breakdown: dict[int, str] = context.get("house_breakdown", {})
         yogas: list[dict[str, str]] = context.get("yogas", [])
         daily: dict[str, Any] = context.get("daily_reading", {})
         mahadasha_lord = context.get("mahadasha_lord")
@@ -1740,7 +1883,7 @@ class TemplateInterpreter(Interpreter):
         answered: list[tuple[str, str]] = [
             (c, a)
             for c in categories
-            if (a := _compute_answer_for_category(c, context, hi, daily, house_breakdown, yogas, mahadasha_lord, antardasha_lord))
+            if (a := _compute_answer_for_category(c, context, hi, daily, yogas, mahadasha_lord, antardasha_lord))
         ]
 
         if answered:

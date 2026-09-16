@@ -35,6 +35,13 @@ class HouseBreakdown(BaseModel):
     planets: list[str]
     explanation_en: str
     explanation_hi: str
+    # A one-line, jargon-free verdict for this house's life area (favorable /
+    # unfavorable / mixed, in plain language, no planet names) — separate
+    # from the detailed explanation_en/hi above, which stays planet-by-
+    # planet for the dedicated chart-explanation screen. Chat's "what does
+    # my chart say about X" answers use this instead of the detailed text.
+    verdict_en: str
+    verdict_hi: str
 
 
 class YogaFinding(BaseModel):
@@ -43,6 +50,11 @@ class YogaFinding(BaseModel):
     name_hi: str
     description_en: str
     description_hi: str
+    # Direct "yes, you have this" version for chat's dosha/yoga answers — no
+    # classical rule/house-number jargon, unlike description_en/hi above
+    # (kept for the dedicated chart-explanation screen).
+    chat_summary_en: str
+    chat_summary_hi: str
 
 
 class ChartResponse(BaseModel):

@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
@@ -21,13 +20,24 @@ import RishiSwitcher from '../components/RishiSwitcher';
 import { ALL_FEATURES_FREE } from '../config/env';
 import { DEFAULT_RISHI_ID, findRishi, RishiId } from '../constants/rishis';
 import { getRishiReply } from '../data/chatReplies';
+import { VYASA_CATEGORIES, VyasaCategory } from '../data/vyasaGuidedChat';
 import { toContentLanguage } from '../i18n/contentLanguage';
 import { useChatStore } from '../store/useChatStore';
 import { useUserStore } from '../store/useUserStore';
 import { useVoiceStore } from '../store/useVoiceStore';
 import { colors, elevation, fontFamily, minTouchTarget, radius, spacing, typography } from '../theme/theme';
+import { showAlert } from '../utils/crossPlatformAlert';
 
 type Phase = 'idle' | 'thinking';
+// Vyasa-only guided flow: tap a category, tap a question, see the answer,
+// then either ask another in the same category or change category. No free
+// text anywhere in this flow — see FlowStage below.
+type FlowStage = 'idle' | 'categories' | 'questions';
+// A chat "session" is considered over after this much inactivity — checked
+// lazily off the last message's timestamp (see checkSessionExpiry) rather
+// than a running timer, so it stays correct across backgrounding/tab
+// switches with no cleanup needed.
+const CHAT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
 // The center tab-bar button (see MainTabs.CenterMicButton) is 68px tall but
 // popped up `top: -22` out of its ~50px-tall cell, so roughly 30px of it
@@ -69,6 +79,15 @@ export default function RishiChatScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [typedInput, setTypedInput] = useState('');
   const [lockVisible, setLockVisible] = useState(false);
+  // Guided flow state — only ever read/rendered when isVyasa (declared
+  // further down); always starts at 'idle' so the welcome screen is the
+  // first thing shown on every fresh mount of this screen.
+  const [flowStage, setFlowStage] = useState<FlowStage>('idle');
+  const [activeCategory, setActiveCategory] = useState<VyasaCategory | null>(null);
+  // Within the 'questions' stage: false shows the question buttons, true
+  // shows the "ask another" / "change category" follow-up instead — set
+  // true right after a question's reply comes back.
+  const [hasAnsweredInCategory, setHasAnsweredInCategory] = useState(false);
   // Shown only once earlier messages have scrolled out of view below the
   // current screen — lets the user jump back to the latest reply instead of
   // manually scrolling down. Works the same whether they're reading the
@@ -110,6 +129,23 @@ export default function RishiChatScreen() {
     initConversation(rishi.id, t(`rishiPicker.${rishi.id}.greeting`));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rishi.id]);
+
+  // This screen stays mounted across tab switches (no unmountOnBlur), so
+  // local flowStage state would otherwise sit at whatever it was left at
+  // indefinitely — re-checking on every re-focus is what actually enforces
+  // "end the chat after 30 minutes of no new message": returning to a stale
+  // session drops back to the welcome screen instead of resuming mid-flow.
+  useFocusEffect(
+    useCallback(() => {
+      const last = messages[messages.length - 1];
+      const expired = !last || Date.now() - last.createdAt > CHAT_SESSION_TIMEOUT_MS;
+      if (expired) {
+        setFlowStage('idle');
+        setActiveCategory(null);
+        setHasAnsweredInCategory(false);
+      }
+    }, [messages]),
+  );
 
   const sendToAssistant = async (text: string) => {
     if (!text.trim()) return;
@@ -159,7 +195,7 @@ export default function RishiChatScreen() {
   };
 
   const handleMicPress = () => {
-    Alert.alert(t('voiceChat.comingSoonTitle'), t('voiceChat.comingSoonMessage'));
+    showAlert(t('voiceChat.comingSoonTitle'), t('voiceChat.comingSoonMessage'));
   };
 
   const handleSendTyped = async () => {
@@ -170,8 +206,50 @@ export default function RishiChatScreen() {
   };
 
   const quickPrompts = [t('rishi.promptWeek'), t('rishi.promptDasha'), t('rishi.promptCareer'), t('rishi.promptPast')];
+  const isVyasa = rishi.id === 'vyasa';
   const micLabel = phase === 'thinking' ? t('voiceChat.thinking') : t('voiceChat.tapToAsk');
   const micBusy = phase === 'thinking';
+
+  // Vyasa is the generalist persona (answers every topic directly, see
+  // constants/rishis.ts) — the natural home for a guided "ask anything" menu
+  // covering every category the backend can genuinely answer, including
+  // decision support (see data/vyasaGuidedChat.ts). The 5 specialist Rishis
+  // keep their existing free-text chat + 4-prompt row unchanged.
+  const handleStartChat = () => {
+    // The very first-ever Start tap has nothing to add — initConversation's
+    // seeded greeting (messages.length === 1) already serves as the
+    // welcome. Every later tap (a fresh session after 30 min idle, with
+    // real prior conversation) gets a short "welcome back" line instead so
+    // it still reads as a real chat re-opening, not a silent menu swap.
+    if (messages.length > 1) {
+      addMessage(rishi.id, {
+        id: `a-welcome-${Date.now()}`,
+        role: 'assistant',
+        text: t('rishi.welcomeBackMessage'),
+        createdAt: Date.now(),
+      });
+    }
+    setFlowStage('categories');
+  };
+
+  const handleSelectCategory = (category: VyasaCategory) => {
+    setActiveCategory(category);
+    setHasAnsweredInCategory(false);
+    setFlowStage('questions');
+  };
+
+  const handleChangeCategory = () => {
+    setActiveCategory(null);
+    setHasAnsweredInCategory(false);
+    setFlowStage('categories');
+  };
+
+  const handleAskAnotherInCategory = () => setHasAnsweredInCategory(false);
+
+  const handleSelectQuestion = async (question: string) => {
+    await sendToAssistant(question);
+    setHasAnsweredInCategory(true);
+  };
 
   return (
     <View style={styles.screen}>
@@ -246,48 +324,123 @@ export default function RishiChatScreen() {
         )}
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promptsRow} contentContainerStyle={{ gap: spacing.xs, paddingHorizontal: spacing.md }}>
-        {quickPrompts.map((p) => (
-          <Pressable key={p} onPress={() => sendToAssistant(p)} style={styles.promptChip}>
-            <Text style={styles.promptChipText}>{p}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      {isVyasa ? (
+        <View style={styles.guidedFlowWrap}>
+          {flowStage === 'idle' && (
+            <View style={styles.welcomeCard}>
+              <Text style={styles.welcomeTitle}>{t('rishi.guidedWelcomeTitle')}</Text>
+              <Text style={styles.welcomeSubtitle}>{t('rishi.guidedWelcomeSubtitle')}</Text>
+              <Pressable onPress={handleStartChat} style={({ pressed }) => [styles.startButton, pressed && styles.pressedDim]}>
+                <LinearGradient colors={rishi.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.startButtonGradient}>
+                  <Text style={styles.startButtonText}>{t('rishi.startChatButton')}</Text>
+                </LinearGradient>
+              </Pressable>
+            </View>
+          )}
 
-      <View style={styles.typedRow}>
-        <TextInput
-          value={typedInput}
-          onChangeText={setTypedInput}
-          placeholder={micBusy ? micLabel : (t('voiceChat.typeInsteadPlaceholder') as string)}
-          placeholderTextColor={colors.textSecondary}
-          editable={!micBusy}
-          style={styles.typedInput}
-          onSubmitEditing={handleSendTyped}
-        />
-        {/* One button on the right, like any standard chat composer: mic
-            when the field is empty, send when there's something to send —
-            never two separate buttons competing for the same spot. */}
-        <Pressable
-          onPress={typedInput.trim() ? handleSendTyped : handleMicPress}
-          disabled={micBusy}
-          accessibilityRole="button"
-          accessibilityLabel={typedInput.trim() ? t('rishi.send') : micLabel}
-          style={({ pressed }) => [pressed && styles.pressedDim]}
-        >
-          <LinearGradient
-            colors={rishi.gradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.composerAction, micBusy && styles.micButtonBusy]}
-          >
-            {micBusy ? (
-              <ActivityIndicator size="small" color={colors.textInverse} />
-            ) : (
-              <Ionicons name={typedInput.trim() ? 'arrow-up' : 'mic'} size={20} color={colors.textInverse} />
-            )}
-          </LinearGradient>
-        </Pressable>
-      </View>
+          {flowStage === 'categories' && (
+            <ScrollView style={styles.categoriesWrap} nestedScrollEnabled showsVerticalScrollIndicator>
+              <Text style={styles.flowPrompt}>{t('rishi.chooseCategoryPrompt')}</Text>
+              {VYASA_CATEGORIES.map((cat) => (
+                <Pressable key={cat.key} onPress={() => handleSelectCategory(cat)} style={styles.menuRow}>
+                  <Text style={styles.menuRowText}>{t(cat.labelKey)}</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                </Pressable>
+              ))}
+            </ScrollView>
+          )}
+
+          {flowStage === 'questions' && activeCategory && (
+            <ScrollView style={styles.categoriesWrap} nestedScrollEnabled showsVerticalScrollIndicator>
+              <Pressable onPress={handleChangeCategory} style={styles.backRow} hitSlop={8}>
+                <Ionicons name="chevron-back" size={16} color={colors.primary} />
+                <Text style={styles.backRowText}>{t('rishi.changeCategory')}</Text>
+              </Pressable>
+
+              {!hasAnsweredInCategory ? (
+                <>
+                  <Text style={styles.flowPrompt}>{t('rishi.chooseQuestionPrompt')}</Text>
+                  {activeCategory.questionKeys.map((qKey) => {
+                    const question = t(qKey);
+                    return (
+                      <Pressable
+                        key={qKey}
+                        onPress={() => handleSelectQuestion(question)}
+                        disabled={micBusy}
+                        style={[styles.menuRow, micBusy && styles.menuRowDisabled]}
+                      >
+                        <Text style={styles.menuRowText}>{question}</Text>
+                        {micBusy ? (
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </>
+              ) : (
+                <View style={styles.followUpActions}>
+                  <Pressable onPress={handleAskAnotherInCategory} style={({ pressed }) => [styles.startButton, pressed && styles.pressedDim]}>
+                    <LinearGradient colors={rishi.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.startButtonGradient}>
+                      <Text style={styles.startButtonText}>{t('rishi.askAnotherInCategory')}</Text>
+                    </LinearGradient>
+                  </Pressable>
+                  <Pressable onPress={handleChangeCategory} style={styles.menuRow}>
+                    <Text style={styles.menuRowText}>{t('rishi.changeCategory')}</Text>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                  </Pressable>
+                </View>
+              )}
+            </ScrollView>
+          )}
+        </View>
+      ) : (
+        <>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promptsRow} contentContainerStyle={{ gap: spacing.xs, paddingHorizontal: spacing.md }}>
+            {quickPrompts.map((p) => (
+              <Pressable key={p} onPress={() => sendToAssistant(p)} style={styles.promptChip}>
+                <Text style={styles.promptChipText}>{p}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+
+          <View style={styles.typedRow}>
+            <TextInput
+              value={typedInput}
+              onChangeText={setTypedInput}
+              placeholder={micBusy ? micLabel : (t('voiceChat.typeInsteadPlaceholder') as string)}
+              placeholderTextColor={colors.textSecondary}
+              editable={!micBusy}
+              style={styles.typedInput}
+              onSubmitEditing={handleSendTyped}
+            />
+            {/* One button on the right, like any standard chat composer: mic
+                when the field is empty, send when there's something to send —
+                never two separate buttons competing for the same spot. */}
+            <Pressable
+              onPress={typedInput.trim() ? handleSendTyped : handleMicPress}
+              disabled={micBusy}
+              accessibilityRole="button"
+              accessibilityLabel={typedInput.trim() ? t('rishi.send') : micLabel}
+              style={({ pressed }) => [pressed && styles.pressedDim]}
+            >
+              <LinearGradient
+                colors={rishi.gradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.composerAction, micBusy && styles.micButtonBusy]}
+              >
+                {micBusy ? (
+                  <ActivityIndicator size="small" color={colors.textInverse} />
+                ) : (
+                  <Ionicons name={typedInput.trim() ? 'arrow-up' : 'mic'} size={20} color={colors.textInverse} />
+                )}
+              </LinearGradient>
+            </Pressable>
+          </View>
+        </>
+      )}
 
       <PremiumModal
         visible={lockVisible}
@@ -430,6 +583,90 @@ const styles = StyleSheet.create({
     ...typography.caption,
     fontSize: 12,
     lineHeight: 16,
+  },
+  // Vyasa-only guided flow (see data/vyasaGuidedChat.ts) — replaces both the
+  // chip rows and the text-input composer entirely for this persona. Extra
+  // bottom padding clears the tab bar's popped-up center button, same
+  // reason typedRow below needs it.
+  guidedFlowWrap: {
+    backgroundColor: colors.surface,
+    paddingBottom: TAB_BAR_BUTTON_CLEARANCE,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  welcomeCard: {
+    padding: spacing.lg,
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  welcomeTitle: {
+    ...typography.sectionTitle,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  welcomeSubtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  startButton: {
+    alignSelf: 'stretch',
+  },
+  startButtonGradient: {
+    minHeight: minTouchTarget,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  startButtonText: {
+    ...typography.bodyBold,
+    color: colors.textInverse,
+  },
+  categoriesWrap: {
+    maxHeight: 320,
+  },
+  flowPrompt: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: minTouchTarget,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  menuRowDisabled: {
+    opacity: 0.6,
+  },
+  menuRowText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  backRowText: {
+    ...typography.caption,
+    color: colors.primary,
+  },
+  followUpActions: {
+    padding: spacing.md,
+    gap: spacing.sm,
   },
   promptsRow: {
     flexGrow: 0,

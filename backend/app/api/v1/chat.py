@@ -18,9 +18,14 @@ from app.services.dasha_service import get_current_dasha
 from app.services.interpretation.factory import get_interpreter
 from app.services.interpretation.templates import (
     detect_answering_rishi,
+    message_mentions_business_expansion_timing,
+    message_mentions_business_partnership_timing,
+    message_mentions_business_start_decision,
+    message_mentions_career_promotion_timing,
     message_mentions_career_timing,
     message_mentions_children_timing,
     message_mentions_foreign_travel_timing,
+    message_mentions_job_change_decision,
     message_mentions_marriage_timing,
     message_mentions_past_tense,
     message_mentions_wealth_timing,
@@ -69,8 +74,25 @@ async def chat_astro(
         "house_breakdown": {
             h.house: (h.explanation_hi if hi else h.explanation_en) for h in chart.house_breakdown
         },
+        # Plain-language good/bad/mixed verdict per house, no planet names or
+        # astrology terms — this (not the detailed explanation above) is what
+        # a static "what does my chart say about X" chat answer uses; the
+        # detailed version stays available for the dedicated chart-
+        # explanation screen, a different reading context from a quick
+        # chat answer.
+        "house_verdict": {
+            h.house: (h.verdict_hi if hi else h.verdict_en) for h in chart.house_breakdown
+        },
         "yogas": [
-            {"key": y.key, "name": y.name_hi if hi else y.name_en, "description": y.description_hi if hi else y.description_en}
+            {
+                "key": y.key,
+                "name": y.name_hi if hi else y.name_en,
+                "description": y.description_hi if hi else y.description_en,
+                # Plain "yes, you have this" version — used by chat's dosha/
+                # yoga answers instead of description above, which stays
+                # available for the dedicated chart-explanation screen.
+                "chat_summary": y.chat_summary_hi if hi else y.chat_summary_en,
+            }
             for y in chart.yogas
         ],
         "mahadasha_lord": mahadasha_lord,
@@ -131,6 +153,16 @@ async def chat_astro(
         ("wealth", message_mentions_wealth_timing, "wealth_timing"),
         ("children", message_mentions_children_timing, "children_timing"),
         ("foreign_travel", message_mentions_foreign_travel_timing, "foreign_travel_timing"),
+        # Phase 2 sub-intents — same generic fetch, just three more event
+        # types. business_partnership can come back empty with a `note`
+        # (gated by the user's LifeState.business_state — see
+        # prediction_service.get_life_event_timing) instead of windows, so
+        # that note is threaded into context too, for every category, so
+        # the LLM can explain a gate honestly rather than describing an
+        # empty result as if nothing was found.
+        ("career_promotion", message_mentions_career_promotion_timing, "career_promotion_timing"),
+        ("business_expansion", message_mentions_business_expansion_timing, "business_expansion_timing"),
+        ("business_partnership", message_mentions_business_partnership_timing, "business_partnership_timing"),
     )
     for event_type, mentions_fn, category in _LIFE_EVENT_CHECKS:
         if mentions_fn(body.message):
@@ -148,6 +180,27 @@ async def chat_astro(
                 }
                 for w in life_event.windows
             ]
+            if life_event.note:
+                context[f"{category}_note"] = life_event.note
+
+    # Phase 3 decision support ("should I do X now?") — a genuinely
+    # different question shape from every timing category above: a verdict
+    # + reasoning, not a list of windows. See prediction_service.get_decision.
+    _DECISION_CHECKS = (
+        ("job_change", message_mentions_job_change_decision),
+        ("business_start", message_mentions_business_start_decision),
+    )
+    for decision_type, mentions_fn in _DECISION_CHECKS:
+        if mentions_fn(body.message):
+            decision = await prediction_service.get_decision(db, profile, birth, decision_type, body.language)
+            context[f"{decision_type}_decision"] = {
+                "verdict": decision.verdict,
+                "reasoning": decision.reasoning,
+                "current_period": decision.current_period.model_dump() if decision.current_period else None,
+                "better_window": decision.better_window.model_dump() if decision.better_window else None,
+                "history_nudge": decision.history_nudge,
+                "note": decision.note,
+            }
 
     # The general "what was going on then" reflection — only fires when a
     # past reference actually resolves to a real date (never guessed); a
