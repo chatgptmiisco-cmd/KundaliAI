@@ -126,5 +126,17 @@ def test_corroborate_with_transits_checks_the_right_house_per_event_type():
 
 
 def test_different_event_types_use_different_houses():
-    houses = set(EVENT_HOUSE.values())
-    assert len(houses) == len(EVENT_HOUSE)  # every event type maps to its own distinct house
+    # Phase 2 sub-intents deliberately reuse a parent domain's own primary
+    # house — career_promotion is career's own 10th house (a promotion IS
+    # a career event); business_partnership is the 7th house's OTHER
+    # classical meaning (shared with marriage_timing.py's own separate
+    # _SEVENTH_HOUSE constant, not part of this dict at all). Every OTHER
+    # event type still maps to its own distinct house.
+    original_and_new_domains = {
+        "career": 10, "wealth": 2, "children": 5, "foreign_travel": 12, "business_expansion": 11,
+    }
+    houses = {EVENT_HOUSE[event_type] for event_type in original_and_new_domains}
+    assert houses == set(original_and_new_domains.values())
+    assert len(houses) == len(original_and_new_domains)
+    assert EVENT_HOUSE["career_promotion"] == EVENT_HOUSE["career"]
+    assert EVENT_HOUSE["business_partnership"] == 7

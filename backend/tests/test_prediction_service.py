@@ -9,7 +9,17 @@ from app.astro.transit_corroboration import TransitCheck
 from app.services.prediction_service import (
     _CANDIDATE_POOL_SIZE,
     _FUTURE_HORIZON_YEARS,
+    _LONG_TERM_PEAK_MARGIN,
+    _PAST_RECENCY_YEARS,
+    _current_period_score,
+    _delivery_anchor_window,
+    _dusthana_lords,
     _evidence_level,
+    _find_long_term_peak,
+    _history_nudge,
+    _is_currently_dusthana_afflicted,
+    _peak_window_for,
+    _resolve_past_windows,
     _rerank_with_transit_bonus,
     _search_bounds,
     _select_candidate_pool,
@@ -28,10 +38,30 @@ def _mahadasha(lord, start, years, antardasha_lords) -> Mahadasha:
     return Mahadasha(lord=lord, start=start, end=end, antardashas=antardashas)
 
 
-def test_search_bounds_past_is_unaffected_by_mahadashas():
+def test_search_bounds_past_defaults_to_recency_window():
+    # v18: "what happened in my past" defaults to recent life, not the
+    # entire birth-to-now span — see _PAST_RECENCY_YEARS.
     birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     from_dt, horizon_years = _search_bounds("past", birth_dt, now)
+    assert horizon_years == pytest.approx(_PAST_RECENCY_YEARS)
+    assert from_dt == now - timedelta(days=_PAST_RECENCY_YEARS * DAYS_PER_YEAR)
+
+
+def test_search_bounds_past_recency_window_never_predates_birth():
+    # A user younger than _PAST_RECENCY_YEARS: the recency window clamps to
+    # their actual age instead of reaching before they were born.
+    birth_dt = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)  # age 6
+    from_dt, horizon_years = _search_bounds("past", birth_dt, now)
+    assert from_dt == birth_dt
+    assert horizon_years == pytest.approx((now - birth_dt).days / DAYS_PER_YEAR)
+
+
+def test_search_bounds_past_full_lifetime_still_available_explicitly():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    from_dt, horizon_years = _search_bounds("past", birth_dt, now, past_full_lifetime=True)
     assert from_dt == birth_dt
     assert horizon_years == pytest.approx((now - birth_dt).days / DAYS_PER_YEAR)
 
@@ -102,6 +132,61 @@ _NO_TRANSIT = TransitCheck(
     corroborated=False, corroboration_strength=1.0, corroborating_planet=None,
     obstructed=False, obstructing_planet=None, obstruction_fraction=0.0,
 )
+
+
+def test_resolve_past_windows_falls_back_to_full_lifetime_when_recent_pool_is_weak():
+    # v18: recency-default search only covers the last _PAST_RECENCY_YEARS
+    # by default (see _search_bounds) — but if that recent-only pool's best
+    # candidate is still backdrop-only evidence, a genuinely strong window
+    # further back must not be silently hidden, same lesson as v16's
+    # future-horizon fix.
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    now = birth_dt + timedelta(days=30 * DAYS_PER_YEAR)  # age 30
+    weak_recent = _window_at_age(birth_dt, 25.0, score=1.0)  # no "_antardasha" key -> backdrop_only
+    strong_old = _window_at_age(birth_dt, 10.0, score=5.0, reason_keys=["seventh_lord_antardasha"])
+
+    calls = []
+
+    def scan_and_select(from_dt, horizon_years):
+        calls.append(horizon_years)
+        if horizon_years == pytest.approx(_PAST_RECENCY_YEARS):
+            return [weak_recent]
+        return [strong_old]
+
+    result = _resolve_past_windows("past", birth_dt, now, None, "marriage", scan_and_select)
+    assert result == [strong_old]
+    assert len(calls) == 2  # recency attempt, then the full-lifetime fallback
+
+
+def test_resolve_past_windows_does_not_fall_back_when_recent_pool_is_already_good():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    now = birth_dt + timedelta(days=30 * DAYS_PER_YEAR)
+    strong_recent = _window_at_age(birth_dt, 25.0, score=5.0, reason_keys=["seventh_lord_antardasha"])
+
+    calls = []
+
+    def scan_and_select(from_dt, horizon_years):
+        calls.append(horizon_years)
+        return [strong_recent]
+
+    result = _resolve_past_windows("past", birth_dt, now, None, "marriage", scan_and_select)
+    assert result == [strong_recent]
+    assert len(calls) == 1  # no fallback call needed
+
+
+def test_resolve_past_windows_future_direction_delegates_straight_through():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    now = birth_dt + timedelta(days=30 * DAYS_PER_YEAR)
+    some_window = _window_at_age(birth_dt, 35.0, score=1.0)
+    calls = []
+
+    def scan_and_select(from_dt, horizon_years):
+        calls.append(horizon_years)
+        return [some_window]
+
+    result = _resolve_past_windows("future", birth_dt, now, None, "marriage", scan_and_select)
+    assert result == [some_window]
+    assert len(calls) == 1
 
 
 def test_select_candidate_pool_prefers_plausible_age_over_higher_raw_score():
@@ -279,3 +364,153 @@ def test_rerank_with_transit_bonus_never_lets_a_backdrop_only_window_outrank_dir
     pairs = [(backdrop_only_high_score, _NO_TRANSIT), (real_evidence_low_score, _NO_TRANSIT)]
     ranked = _rerank_with_transit_bonus(pairs, birth_dt, "wealth")
     assert [w for w, _ in ranked][0] is real_evidence_low_score
+
+
+def test_find_long_term_peak_surfaces_a_meaningfully_stronger_later_window():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    near = _window_at_age(birth_dt, 30.0, score=1.0, reason_keys=["career_house_lord_antardasha"])
+    far_peak = _window_at_age(
+        birth_dt, 45.0, score=1.0 * (_LONG_TERM_PEAK_MARGIN + 1), reason_keys=["career_house_lord_antardasha"]
+    )
+    pairs = [(near, _NO_TRANSIT), (far_peak, _NO_TRANSIT)]
+    result = _find_long_term_peak(pairs, birth_dt, "career", top_window=near)
+    assert result is not None
+    assert result[0] is far_peak
+
+
+def test_find_long_term_peak_returns_none_when_not_meaningfully_stronger():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    near = _window_at_age(birth_dt, 30.0, score=1.0, reason_keys=["career_house_lord_antardasha"])
+    slightly_higher = _window_at_age(
+        birth_dt, 45.0, score=1.05, reason_keys=["career_house_lord_antardasha"]
+    )
+    pairs = [(near, _NO_TRANSIT), (slightly_higher, _NO_TRANSIT)]
+    assert _find_long_term_peak(pairs, birth_dt, "career", top_window=near) is None
+
+
+def test_find_long_term_peak_ignores_a_weaker_evidence_tier_candidate():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    near = _window_at_age(birth_dt, 30.0, score=1.0, reason_keys=["career_house_lord_antardasha"])
+    # Much higher raw score, but backdrop_only -> different bucket, must not
+    # count as a "long-term peak" for the house-lord-level primary answer.
+    far_but_weaker_tier = _window_at_age(birth_dt, 45.0, score=100.0, reason_keys=["career_karaka_mahadasha_Ju"])
+    pairs = [(near, _NO_TRANSIT), (far_but_weaker_tier, _NO_TRANSIT)]
+    assert _find_long_term_peak(pairs, birth_dt, "career", top_window=near) is None
+
+
+def _antardasha_mahadasha(lord, start, years, antardasha_lords):
+    return _mahadasha(lord, start, years, antardasha_lords)
+
+
+def test_peak_window_for_narrows_to_matching_pratyantardashas():
+    from app.astro.constants import VIMSHOTTARI_SEQUENCE
+
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    # A Saturn Mahadasha whose FIRST Antardasha is Saturn's own (the actual
+    # Vimshottari self-first order) — its Pratyantardashas then also start
+    # from Saturn, so the first (shortest) PD sub-period is Sa's own.
+    sequence_from_sa = VIMSHOTTARI_SEQUENCE[VIMSHOTTARI_SEQUENCE.index("Sa"):] + VIMSHOTTARI_SEQUENCE[
+        : VIMSHOTTARI_SEQUENCE.index("Sa")
+    ]
+    maha = _antardasha_mahadasha("Sa", birth_dt, 19, sequence_from_sa)
+    sa_antardasha = maha.antardashas[0]
+    window = ScoredWindow(
+        start=sa_antardasha.start, end=sa_antardasha.end, mahadasha_lord="Sa", antardasha_lord="Sa",
+        score=1.0, reason_keys=["career_house_lord_antardasha"],
+    )
+    peak = _peak_window_for([maha], window, "career", house_lord_planet="Sa")
+    assert peak is not None
+    peak_start, peak_end = peak
+    assert peak_start == window.start
+    assert peak_end < window.end  # a real narrowing, not the whole window
+
+
+def test_peak_window_for_returns_none_when_source_antardasha_not_found():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    maha = _antardasha_mahadasha("Sa", birth_dt, 19, ["Sa", "Me", "Ke", "Ve", "Su", "Mo", "Ma", "Ra", "Ju"])
+    mismatched_window = _window_at_age(birth_dt, 5.0, score=1.0, lord="Ve")  # doesn't match maha's own lord
+    assert _peak_window_for([maha], mismatched_window, "career", house_lord_planet="Sa") is None
+
+
+def test_delivery_anchor_window_finds_the_antardasha_covering_the_target_date():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    maha = _mahadasha("Ju", birth_dt, 16, ["Ju", "Sa", "Me", "Ke", "Ve", "Su", "Mo", "Ma", "Ra"])
+    target = maha.antardashas[2].start + timedelta(days=10)  # inside the 3rd Antardasha
+    anchor = _delivery_anchor_window([maha], target)
+    assert anchor is not None
+    assert anchor.antardasha_lord == maha.antardashas[2].lord
+    assert anchor.start == maha.antardashas[2].start
+    assert anchor.end == maha.antardashas[2].end
+
+
+def test_delivery_anchor_window_returns_none_outside_every_mahadasha():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    maha = _mahadasha("Ju", birth_dt, 5, ["Ju"])  # ends ~1995
+    far_future_target = birth_dt + timedelta(days=50 * DAYS_PER_YEAR)
+    assert _delivery_anchor_window([maha], far_future_target) is None
+
+
+# --- Phase 3: decision support -----------------------------------------
+
+def test_history_nudge_fires_only_on_neutral_with_two_agreeing_priors():
+    assert _history_nudge("neutral", ["favorable", "favorable"]) == "favorable"
+    assert _history_nudge("neutral", ["unfavorable", "unfavorable"]) == "unfavorable"
+
+
+def test_history_nudge_never_touches_a_clear_verdict():
+    # A real, non-neutral verdict is NEVER overridden by history, no matter
+    # how consistent the prior answers were — this is the core guardrail
+    # the whole feature was scoped around.
+    assert _history_nudge("favorable", ["unfavorable", "unfavorable"]) is None
+    assert _history_nudge("unfavorable", ["favorable", "favorable"]) is None
+    assert _history_nudge("wait_for_better_window", ["favorable", "favorable"]) is None
+
+
+def test_history_nudge_requires_exactly_two_agreeing_priors():
+    assert _history_nudge("neutral", []) is None
+    assert _history_nudge("neutral", ["favorable"]) is None  # only one data point
+    assert _history_nudge("neutral", ["favorable", "unfavorable"]) is None  # disagree
+    assert _history_nudge("neutral", [None, None]) is None  # e.g. both were blocked/no-verdict calls
+
+
+def test_dusthana_lords_returns_the_sixth_eighth_twelfth_house_lords():
+    # Aries lagna (sign_index 0): 6th=Virgo(Me), 8th=Scorpio(Ma), 12th=Pisces(Ju).
+    assert _dusthana_lords(0) == {"Me", "Ma", "Ju"}
+
+
+def test_is_currently_dusthana_afflicted_true_when_running_antardasha_lord_is_dusthana():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    maha = _mahadasha("Ju", birth_dt, 16, ["Sa", "Me", "Ke", "Ve", "Su", "Mo", "Ma", "Ra", "Ju"])
+    now = maha.antardashas[0].start + timedelta(days=10)  # inside the Sa antardasha
+    assert _is_currently_dusthana_afflicted([maha], now, {"Sa"}) is True
+    assert _is_currently_dusthana_afflicted([maha], now, {"Me", "Ma"}) is False
+
+
+def test_is_currently_dusthana_afflicted_false_outside_every_mahadasha():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    maha = _mahadasha("Ju", birth_dt, 5, ["Ju"])
+    far_future = birth_dt + timedelta(days=50 * DAYS_PER_YEAR)
+    assert _is_currently_dusthana_afflicted([maha], far_future, {"Ju"}) is False
+
+
+def test_current_period_score_scores_the_antardasha_covering_now():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    maha = _mahadasha("Sa", birth_dt, 19, ["Sa", "Me", "Ke", "Ve", "Su", "Mo", "Ma", "Ra", "Ju"])
+    now = maha.antardashas[0].start + timedelta(days=10)  # Sa/Sa: house lord's own antardasha, same-lord bonus
+    window = _current_period_score([maha], now, "career_promotion", house_lord_planet="Sa", strength={})
+    assert window is not None
+    assert window.mahadasha_lord == "Sa"
+    assert window.antardasha_lord == "Sa"
+    assert window.start == maha.antardashas[0].start
+    assert window.end == maha.antardashas[0].end
+    assert window.score > 0
+
+
+def test_current_period_score_returns_none_when_no_rule_matches():
+    birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
+    # Mercury Mahadasha/Antardasha: not career_promotion's house lord (Sa),
+    # not a career karaka (Sa/Su), and no secondary house lord either.
+    maha = _mahadasha("Me", birth_dt, 17, ["Me"])
+    now = maha.antardashas[0].start + timedelta(days=10)
+    window = _current_period_score([maha], now, "career_promotion", house_lord_planet="Sa", strength={})
+    assert window is None

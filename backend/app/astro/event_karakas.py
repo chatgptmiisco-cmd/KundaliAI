@@ -31,12 +31,31 @@ CATEGORY_KARAKAS: dict[str, tuple[PlanetKey, ...]] = {
     "wealth": ("Ju", "Ve"),
     "children": ("Ju",),
     "foreign_travel": ("Ra", "Ju"),
+    # business_partnership is a genuinely new domain (Mercury, the
+    # classical trade/commerce karaka — distinct from marriage's Venus/
+    # Jupiter even though both share the 7th house; see
+    # prediction_service.get_life_event_timing's business_partnership
+    # life-state gate for why these two don't read identically), so it's
+    # counted for specificity like any other category below.
+    "business_partnership": ("Me",),
 }
 
 _KARAKA_CATEGORY_COUNT: dict[PlanetKey, int] = {}
 for _karakas in CATEGORY_KARAKAS.values():
     for _planet in _karakas:
         _KARAKA_CATEGORY_COUNT[_planet] = _KARAKA_CATEGORY_COUNT.get(_planet, 0) + 1
+
+# career_promotion/business_expansion deliberately reuse their PARENT
+# domain's own karaka set (a promotion IS a career event, not a second,
+# unrelated category a planet could win independently) — added to
+# CATEGORY_KARAKAS AFTER _KARAKA_CATEGORY_COUNT is computed, so they don't
+# inflate Sa/Su's or Ju/Ve's cross-category count and silently start
+# discounting the ALREADY-shipped career/wealth categories' own karaka
+# rules purely because a sub-intent was added. They still get the correct
+# multiplier at lookup time (karaka_specificity_multiplier reads the
+# planet's real count from the parent domain either way).
+CATEGORY_KARAKAS["career_promotion"] = CATEGORY_KARAKAS["career"]
+CATEGORY_KARAKAS["business_expansion"] = CATEGORY_KARAKAS["wealth"]
 
 # A karaka used by only ONE category (Sa/Su for career, Ra for
 # foreign_travel) is already fully category-discriminating — no discount.

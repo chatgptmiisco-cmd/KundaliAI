@@ -264,10 +264,14 @@ _AGE_IMPLAUSIBILITY_HI: dict[str, str] = {
 _EVENT_LABEL_EN: dict[str, str] = {
     "marriage": "marriage", "career": "a career shift", "wealth": "wealth growth",
     "children": "having children", "foreign_travel": "foreign travel or relocation",
+    "career_promotion": "a promotion", "business_partnership": "a business partnership",
+    "business_expansion": "business expansion",
 }
 _EVENT_LABEL_HI: dict[str, str] = {
     "marriage": "विवाह", "career": "करियर में बदलाव", "wealth": "धन वृद्धि",
     "children": "संतान होना", "foreign_travel": "विदेश यात्रा या स्थानांतरण",
+    "career_promotion": "पदोन्नति", "business_partnership": "व्यापारिक साझेदारी",
+    "business_expansion": "व्यापार का विस्तार",
 }
 
 
@@ -311,6 +315,18 @@ _REINTERPRETATION_EN: dict[str, str] = {
         "Independent travel isn't a realistic reading at this age, so read this more as a family-driven "
         "relocation or travel decision than your own trip."
     ),
+    "career_promotion": (
+        "No astrologically plausible window for a promotion was found nearby, so read this less as a literal "
+        "promotion and more as a change in responsibility or role."
+    ),
+    "business_partnership": (
+        "No astrologically plausible window for a formal business partnership was found nearby, so read this "
+        "more as a collaborative or contractual development than a literal partnership at that age."
+    ),
+    "business_expansion": (
+        "Independently-run business expansion isn't a realistic reading at this age, so read this more as "
+        "family finances or shared household resources than your own business."
+    ),
 }
 _REINTERPRETATION_HI: dict[str, str] = {
     "marriage": (
@@ -332,6 +348,18 @@ _REINTERPRETATION_HI: dict[str, str] = {
     "foreign_travel": (
         "इस उम्र में स्वतंत्र यात्रा एक व्यावहारिक व्याख्या नहीं है, इसलिए इसे अपनी यात्रा के बजाय परिवार-प्रेरित "
         "स्थानांतरण या यात्रा-निर्णय के रूप में देखें।"
+    ),
+    "career_promotion": (
+        "आस-पास पदोन्नति के लिए कोई ज्योतिषीय रूप से उपयुक्त अवधि नहीं मिली, इसलिए इसे शाब्दिक पदोन्नति के बजाय "
+        "ज़िम्मेदारी या भूमिका में बदलाव के रूप में देखें।"
+    ),
+    "business_partnership": (
+        "आस-पास औपचारिक व्यापारिक साझेदारी के लिए कोई ज्योतिषीय रूप से उपयुक्त अवधि नहीं मिली, इसलिए इसे उस उम्र "
+        "में साक्षात साझेदारी के बजाय सहयोग या अनुबंध से जुड़े विकास के रूप में देखें।"
+    ),
+    "business_expansion": (
+        "इस उम्र में स्वतंत्र रूप से चलाया गया व्यापार-विस्तार एक व्यावहारिक व्याख्या नहीं है, इसलिए इसे अपने "
+        "व्यापार के बजाय पारिवारिक वित्त या साझा घरेलू संसाधनों के रूप में देखें।"
     ),
 }
 
@@ -375,6 +403,57 @@ def _soft_age_interpretation_sentence(
     if event_key not in pool:
         return None
     return (f"इसलिए {pool[event_key]}।" if hi else f"So {pool[event_key]}.")
+
+
+# Life-state reframing — a chart-only engine has no idea whether a "when
+# will I get married?"/"when will I have a child?" question is even still
+# open: it just keeps searching for the astrologically strongest window and
+# calling it a first marriage or first child, even for a user who is
+# already married or already a parent (see app.services.prediction_service,
+# which fetches the user's optional LifeState and passes these flags
+# through). Deliberately just a reframing SENTENCE on the existing window —
+# not a new intent/sub-category — since Phase 1 doesn't invent the fuller
+# married-life/family-expansion taxonomy from the original proposal, only
+# stops the reason text from implying a first marriage/child that already
+# happened. Only applies to `tense == "future"`: a PAST "strongest
+# marriage/commitment period" question is still a sensible thing to ask
+# regardless of current marital status.
+def _already_married_sentence(marriage_date: str | None, hi: bool) -> str:
+    if hi:
+        return (
+            f"आप {marriage_date} से विवाहित हैं — इसे पहली शादी के बजाय वैवाहिक जीवन या रिश्ते के विकास के रूप में समझें।"
+            if marriage_date else
+            "आप पहले से विवाहित हैं — इसे पहली शादी के बजाय वैवाहिक जीवन या रिश्ते के विकास के रूप में समझें।"
+        )
+    return (
+        f"You're already married as of {marriage_date} — read this as married-life or relationship "
+        "development rather than a first marriage."
+        if marriage_date else
+        "You're already married — read this as married-life or relationship development rather than a "
+        "first marriage."
+    )
+
+
+_D9_CONFIRMATION_EN = (
+    "Your chart's Navamsa (D9) — the classical marriage-confirmation chart — independently supports this too."
+)
+_D9_CONFIRMATION_HI = (
+    "आपकी कुंडली की नवांश (D9) — विवाह की पुष्टि करने वाली शास्त्रीय कुंडली — भी इसी बात का स्वतंत्र रूप से समर्थन करती है।"
+)
+
+
+def _d9_confirmation_sentence(d9_confirmed: bool, hi: bool) -> str | None:
+    if not d9_confirmed:
+        return None
+    return _D9_CONFIRMATION_HI if hi else _D9_CONFIRMATION_EN
+
+
+def _already_has_children_sentence(hi: bool) -> str:
+    return (
+        "आपके पहले से बच्चे हैं — इसे पहले बच्चे के बजाय परिवार के विस्तार के रूप में समझें।"
+        if hi else
+        "You already have children — read this as family expansion rather than a first child."
+    )
 
 
 # Surfaced when prediction_service._select_candidate_pool couldn't find any
@@ -511,11 +590,29 @@ def marriage_window_reason_text(
     age_implausibility: Literal["early", "late"] | None = None,
     literal_event_plausible: bool = True,
     evidence_level: str = "house_lord_antardasha",
+    already_married: bool = False,
+    marriage_date: str | None = None,
+    d9_confirmed: bool = False,
 ) -> str:
     """Leads with a real, plain-language EFFECT (the running planet's own
     classical one-liner, already written for period_analysis — honest,
     tested, jargon-free) before the "why" mechanism explanation, instead of
     opening with Sanskrit period-names a reader has to already know.
+
+    `d9_confirmed` (Phase 2): whether the window's own Antardasha lord is
+    exalted or in its own sign in the D9 (Navamsa) chart — the classical
+    marriage-confirmation chart, checked independently of the D1 dasha
+    math this window was already selected from. Appends one sentence when
+    True; silent when False (an unconfirmed D9 doesn't mean the window is
+    wrong, just that this SPECIFIC extra corroboration isn't present —
+    same "silent when absent" convention as `transit_obstructing_planet`).
+
+    `already_married` (with the user's own `marriage_date`, if known) is a
+    life-state fact — not astrology — from the user's optional LifeState
+    profile (see app.services.prediction_service). Only applied for
+    `tense == "future"`: it reframes "when will I get married?" as
+    married-life/relationship development instead of implying a first
+    marriage that already happened. See _already_married_sentence.
 
     `natal_strength` ("strong"/"weak"/None) surfaces whether the Antardasha
     lord itself is dignified or afflicted in the natal chart — the same
@@ -579,6 +676,9 @@ def marriage_window_reason_text(
     if transit_obstructing_planet is not None:
         template = _TRANSIT_OBSTRUCTION_HI if hi else _TRANSIT_OBSTRUCTION_EN
         mechanism += " " + template.format(planet=transit_obstructing_planet)
+    d9_sentence = _d9_confirmation_sentence(d9_confirmed, hi)
+    if d9_sentence is not None:
+        mechanism += " " + d9_sentence
     age_sentence = _age_implausibility_sentence("marriage", age_implausibility, hi)
     if age_sentence is not None:
         mechanism += " " + age_sentence
@@ -588,6 +688,8 @@ def marriage_window_reason_text(
     reinterpretation = _reinterpretation_sentence("marriage", literal_event_plausible, hi)
     if reinterpretation is not None:
         mechanism += " " + reinterpretation
+    if already_married and tense == "future":
+        mechanism += " " + _already_married_sentence(marriage_date, hi)
     if tense == "past":
         mechanism = _apply_past_tense(mechanism, hi)
     weak_evidence = _weak_evidence_sentence("marriage", evidence_level, hi)
@@ -607,11 +709,25 @@ def marriage_window_reason_text(
 _EVENT_HOUSE_PHRASE_EN: dict[str, str] = {
     "career": "your 10th house of career", "wealth": "your 2nd house of wealth",
     "children": "your 5th house of children", "foreign_travel": "your 12th house of foreign lands",
+    # Phase 2 sub-intents — career_promotion shares career's own house
+    # (10th) under its own event_type key; business_partnership reuses the
+    # 7th house's OTHER classical meaning (all partnerships, not just
+    # marriage); business_expansion is the 11th house of gains.
+    "career_promotion": "your 10th house of career", "business_partnership": "your 7th house of partnerships",
+    "business_expansion": "your 11th house of gains",
 }
 _EVENT_HOUSE_PHRASE_HI: dict[str, str] = {
     "career": "आपके करियर के दसवें भाव", "wealth": "आपके धन के दूसरे भाव",
     "children": "आपकी संतान के पांचवें भाव", "foreign_travel": "आपके विदेश के बारहवें भाव",
+    "career_promotion": "आपके करियर के दसवें भाव", "business_partnership": "आपके साझेदारी के सातवें भाव",
+    "business_expansion": "आपके लाभ के ग्यारहवें भाव",
 }
+# Phrase for a SECONDARY supporting house (Phase 2 multi-house events —
+# see app.astro.life_event_timing.EVENT_SECONDARY_HOUSES), keyed by house
+# number rather than event type since the same house means the same thing
+# regardless of which multi-house event it's supporting.
+_HOUSE_NUMBER_PHRASE_EN: dict[int, str] = {2: "your 2nd house of wealth", 11: "your 11th house of gains"}
+_HOUSE_NUMBER_PHRASE_HI: dict[int, str] = {2: "आपके धन के दूसरे भाव", 11: "आपके लाभ के ग्यारहवें भाव"}
 # Per-(event, karaka) framing — the SAME planet means something different
 # depending which event it's a karaka for (Jupiter is the children karaka
 # here, a wealth significator there), so this is keyed by pair, not by
@@ -625,12 +741,18 @@ _EVENT_KARAKA_NAME_EN: dict[tuple[str, str], str] = {
     ("wealth", "Ju"): "Jupiter", ("wealth", "Ve"): "Venus",
     ("children", "Ju"): "Jupiter",
     ("foreign_travel", "Ra"): "Rahu", ("foreign_travel", "Ju"): "Jupiter",
+    ("career_promotion", "Sa"): "Saturn", ("career_promotion", "Su"): "the Sun",
+    ("business_partnership", "Me"): "Mercury",
+    ("business_expansion", "Ju"): "Jupiter", ("business_expansion", "Ve"): "Venus",
 }
 _EVENT_KARAKA_NAME_HI: dict[tuple[str, str], str] = {
     ("career", "Sa"): "शनि", ("career", "Su"): "सूर्य",
     ("wealth", "Ju"): "गुरु", ("wealth", "Ve"): "शुक्र",
     ("children", "Ju"): "गुरु",
     ("foreign_travel", "Ra"): "राहु", ("foreign_travel", "Ju"): "गुरु",
+    ("career_promotion", "Sa"): "शनि", ("career_promotion", "Su"): "सूर्य",
+    ("business_partnership", "Me"): "बुध",
+    ("business_expansion", "Ju"): "गुरु", ("business_expansion", "Ve"): "शुक्र",
 }
 _EVENT_KARAKA_DESC_EN: dict[tuple[str, str], str] = {
     ("career", "Sa"): "your karma/profession karaka",
@@ -640,6 +762,11 @@ _EVENT_KARAKA_DESC_EN: dict[tuple[str, str], str] = {
     ("children", "Ju"): "the classical santan (children) karaka",
     ("foreign_travel", "Ra"): "the classical significator of foreign lands and relocation",
     ("foreign_travel", "Ju"): "co-significator of long journeys",
+    ("career_promotion", "Sa"): "your karma/profession karaka",
+    ("career_promotion", "Su"): "the karaka for authority and status",
+    ("business_partnership", "Me"): "the classical karaka for trade and commerce",
+    ("business_expansion", "Ju"): "a classical wealth significator",
+    ("business_expansion", "Ve"): "a classical wealth significator",
 }
 _EVENT_KARAKA_DESC_HI: dict[tuple[str, str], str] = {
     ("career", "Sa"): "आपका कर्म/पेशा कारक",
@@ -649,6 +776,11 @@ _EVENT_KARAKA_DESC_HI: dict[tuple[str, str], str] = {
     ("children", "Ju"): "संतान का शास्त्रीय कारक",
     ("foreign_travel", "Ra"): "विदेश और स्थानांतरण का शास्त्रीय कारक",
     ("foreign_travel", "Ju"): "लंबी यात्राओं का सह-कारक",
+    ("career_promotion", "Sa"): "आपका कर्म/पेशा कारक",
+    ("career_promotion", "Su"): "अधिकार और प्रतिष्ठा का कारक",
+    ("business_partnership", "Me"): "व्यापार और वाणिज्य का शास्त्रीय कारक",
+    ("business_expansion", "Ju"): "धन का एक शास्त्रीय कारक",
+    ("business_expansion", "Ve"): "धन का एक शास्त्रीय कारक",
 }
 _EVENT_TRANSIT_CORROBORATION_EN = "A relevant planet is also passing through {house} during this window — a second real signal pointing the same way."
 _EVENT_TRANSIT_CORROBORATION_HI = "इस अवधि के दौरान एक संबंधित ग्रह भी {house} से गुज़र रहा है — यह उसी दिशा में एक और वास्तविक संकेत है।"
@@ -668,6 +800,7 @@ def life_event_reason_text(
     age_implausibility: Literal["early", "late"] | None = None,
     literal_event_plausible: bool = True,
     evidence_level: str = "house_lord_antardasha",
+    already_has_children: bool = False,
 ) -> str:
     """Leads with a real, plain-language EFFECT (the running planet's own
     classical one-liner) before the "why" mechanism sentences, mirroring
@@ -676,7 +809,13 @@ def life_event_reason_text(
     `natal_strength`, `antardasha_lord_retrograde`, `transit_obstructing_
     planet`, `age_implausibility`, `literal_event_plausible`, and
     `evidence_level` mirror marriage_window_reason_text's parameters of
-    the same name — see its docstring."""
+    the same name — see its docstring.
+
+    `already_has_children` mirrors `marriage_window_reason_text`'s
+    `already_married` — a life-state fact, only applied when
+    `event_type == "children"` and `tense == "future"`: reframes "when will
+    I have a child?" as family expansion instead of implying a first child
+    that already exists. See _already_has_children_sentence."""
     hi = language == "hi"
     house_phrase = (_EVENT_HOUSE_PHRASE_HI if hi else _EVENT_HOUSE_PHRASE_EN)[event_type]
     karaka_names = _EVENT_KARAKA_NAME_HI if hi else _EVENT_KARAKA_NAME_EN
@@ -714,6 +853,25 @@ def life_event_reason_text(
                 if hi else
                 f"This stretch runs under a longer period led by {name} ({desc})."
             )
+        elif key.startswith(f"{event_type}_secondary_house_") and key.endswith("_antardasha"):
+            # Phase 2 multi-house events (see app.astro.life_event_timing.
+            # EVENT_SECONDARY_HOUSES) — the rule fired on THIS window's own
+            # antardasha_lord (that's how the key came to exist at all), so
+            # unlike the karaka sentences above, no separate name lookup by
+            # planet code is needed; just the supporting house's phrase.
+            house_num = int(key[len(f"{event_type}_secondary_house_"):-len("_antardasha")])
+            secondary_phrase = (_HOUSE_NUMBER_PHRASE_HI if hi else _HOUSE_NUMBER_PHRASE_EN)[house_num]
+            sentences.append(
+                f"{names[antardasha_lord]} — {secondary_phrase} से भी जुड़ा — इस दौर में भी सक्रिय है।" if hi else
+                f"{names[antardasha_lord]} — also tied to {secondary_phrase} — is active during this phase too."
+            )
+        elif key.startswith(f"{event_type}_secondary_house_") and key.endswith("_mahadasha"):
+            house_num = int(key[len(f"{event_type}_secondary_house_"):-len("_mahadasha")])
+            secondary_phrase = (_HOUSE_NUMBER_PHRASE_HI if hi else _HOUSE_NUMBER_PHRASE_EN)[house_num]
+            sentences.append(
+                f"यह अवधि {secondary_phrase} को भी प्रभावित करने वाली एक बड़ी अवधि के अंतर्गत आती है।" if hi else
+                f"This stretch also runs under a longer period touching {secondary_phrase}."
+            )
 
     sentences.extend(_dasha_relationship_sentences(reason_keys, hi))
     mechanism = " ".join(sentences)
@@ -737,6 +895,8 @@ def life_event_reason_text(
     reinterpretation = _reinterpretation_sentence(event_type, literal_event_plausible, hi)
     if reinterpretation is not None:
         mechanism += " " + reinterpretation
+    if already_has_children and event_type == "children" and tense == "future":
+        mechanism += " " + _already_has_children_sentence(hi)
     if tense == "past":
         mechanism = _apply_past_tense(mechanism, hi)
     weak_evidence = _weak_evidence_sentence(event_type, evidence_level, hi)
@@ -746,6 +906,114 @@ def life_event_reason_text(
         # docstring for why.
         return f"{weak_evidence} {effect} {mechanism}"
     return f"{effect} {mechanism}"
+
+
+def expecting_delivery_reason_text(antardasha_lord: PlanetKey, expected_delivery: str, language: Language) -> str:
+    """The reason text for a future children_timing query when the user's
+    own LifeState says they're already expecting (see
+    app.services.prediction_service.get_life_event_timing's
+    `expecting_override` branch and _delivery_anchor_window) — the window
+    is chosen by the user's own known `expected_delivery` date, not by
+    dasha scoring, so this deliberately does NOT route through
+    life_event_reason_text's rule-key pipeline: there's no "why this
+    window scored highest" mechanism to explain when the answer is already
+    known from the user's own life state."""
+    hi = language == "hi"
+    content_pool = _PERIOD_CONTENT_HI if hi else _PERIOD_CONTENT_EN
+    effect = content_pool.get(antardasha_lord, content_pool["Mo"])["one_liner"]
+    if hi:
+        return (
+            f"{effect} यह अवधि आपकी अपेक्षित प्रसव तिथि ({expected_delivery}) को कवर करती है — इसे पहले बच्चे की "
+            "खोज के बजाय जन्म के बाद के पारिवारिक समायोजन काल के रूप में देखें।"
+        )
+    return (
+        f"{effect} This window covers your expected delivery ({expected_delivery}) — read it as the "
+        "family-adjustment period following the birth, not a search for when you'll have your first child."
+    )
+
+
+# --- Decision support ("should I do X now?") ------------------------------
+# Answers a genuinely different question from every other function in this
+# file: not "when," but "is now a good idea" — see
+# app.services.prediction_service.get_decision for the full verdict logic
+# this narrates. Deliberately its own composer rather than routed through
+# life_event_reason_text's rule-key pipeline: there's no ranked list of
+# reason_keys to walk here, just a small, fixed set of decision facts
+# (verdict, risk flag, a cited alternative window, an optional history
+# nudge) already computed by the caller.
+
+_DECISION_LABEL_EN: dict[str, str] = {"job_change": "switching jobs", "business_start": "starting or expanding your business"}
+_DECISION_LABEL_HI: dict[str, str] = {"job_change": "नौकरी बदलना", "business_start": "व्यवसाय शुरू या विस्तार करना"}
+
+_VERDICT_HEADLINE_EN: dict[str, str] = {
+    "favorable": "The current period reads as a genuinely favorable time for {decision}.",
+    "unfavorable": "The current period is not a good time for {decision}.",
+    "wait_for_better_window": "The current period is workable, but a meaningfully stronger window for {decision} is coming up soon.",
+    "neutral": "The current period is mixed for {decision} — no strong signal either way.",
+}
+_VERDICT_HEADLINE_HI: dict[str, str] = {
+    "favorable": "मौजूदा दौर {decision} के लिए वास्तव में अनुकूल समय दिखता है।",
+    "unfavorable": "मौजूदा दौर {decision} के लिए अच्छा समय नहीं है।",
+    "wait_for_better_window": "मौजूदा दौर ठीक-ठाक है, लेकिन {decision} के लिए जल्द ही एक कहीं ज़्यादा मज़बूत दौर आने वाला है।",
+    "neutral": "मौजूदा दौर {decision} के लिए मिला-जुला है — किसी भी दिशा में कोई मज़बूत संकेत नहीं है।",
+}
+
+_DUSTHANA_WARNING_EN = (
+    "{lord}, the planet currently running your Antardasha, rules one of your chart's dusthana (6th/8th/12th, "
+    "the classical difficulty houses) — a real risk/friction signal, independent of the specific decision."
+)
+_DUSTHANA_WARNING_HI = (
+    "{lord}, जो अभी आपकी अंतर्दशा चला रहा है, आपकी कुंडली के दुष्ट भावों (छठे/आठवें/बारहवें, कठिनाई के शास्त्रीय भाव) "
+    "में से एक का स्वामी है — यह एक वास्तविक जोखिम/घर्षण का संकेत है, चाहे निर्णय कोई भी हो।"
+)
+
+_BETTER_WINDOW_EN = "A notably stronger window opens around {date} — if the decision isn't urgent, that's worth waiting for."
+_BETTER_WINDOW_HI = "लगभग {date} के आसपास एक उल्लेखनीय रूप से मज़बूत दौर शुरू होता है — अगर निर्णय तुरंत ज़रूरी न हो, तो उसका इंतज़ार करना उचित रहेगा।"
+
+_HISTORY_NUDGE_EN = (
+    "On its own this reads as mixed, but your last two checks on this exact question ({dates}) both came back "
+    "{nudge} — treating that consistency as corroborating evidence, not overriding what the chart alone shows."
+)
+_HISTORY_NUDGE_HI = (
+    "अपने आप में यह मिला-जुला लगता है, पर ठीक इसी सवाल पर आपकी पिछली दो जाँचें ({dates}) दोनों बार {nudge} आईं — इस "
+    "निरंतरता को एक समर्थक संकेत की तरह लिया जा रहा है, न कि कुंडली के संकेत को दरकिनार करते हुए।"
+)
+_NUDGE_LABEL_EN = {"favorable": "favorable", "unfavorable": "unfavorable"}
+_NUDGE_LABEL_HI = {"favorable": "अनुकूल", "unfavorable": "प्रतिकूल"}
+
+
+def decision_reason_text(
+    decision_type: Literal["job_change", "business_start"],
+    verdict: Literal["favorable", "unfavorable", "wait_for_better_window", "neutral"],
+    language: Language,
+    current_period_lord: PlanetKey | None,
+    dusthana_afflicted: bool,
+    better_window_start: str | None,
+    history_nudge: Literal["favorable", "unfavorable"] | None,
+    history_dates: list[str],
+) -> str:
+    hi = language == "hi"
+    labels = _DECISION_LABEL_HI if hi else _DECISION_LABEL_EN
+    headlines = _VERDICT_HEADLINE_HI if hi else _VERDICT_HEADLINE_EN
+    decision_label = labels[decision_type]
+
+    sentences = [headlines[verdict].format(decision=decision_label)]
+
+    if dusthana_afflicted and current_period_lord is not None:
+        names = PLANET_NAMES_HI if hi else PLANET_NAMES_EN
+        template = _DUSTHANA_WARNING_HI if hi else _DUSTHANA_WARNING_EN
+        sentences.append(template.format(lord=names[current_period_lord]))
+
+    if better_window_start is not None:
+        template = _BETTER_WINDOW_HI if hi else _BETTER_WINDOW_EN
+        sentences.append(template.format(date=better_window_start))
+
+    if history_nudge is not None and history_dates:
+        template = _HISTORY_NUDGE_HI if hi else _HISTORY_NUDGE_EN
+        nudge_label = (_NUDGE_LABEL_HI if hi else _NUDGE_LABEL_EN)[history_nudge]
+        sentences.append(template.format(dates=" and ".join(history_dates), nudge=nudge_label))
+
+    return " ".join(sentences)
 
 
 # --- Life theme reflection (general "what was going on then") -------------

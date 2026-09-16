@@ -2,6 +2,8 @@ from datetime import date
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.life_state import LifeStateOut
+
 # Must match the frontend's PreferenceKey union (src/types/kundali.ts) — the
 # five Home focus areas a user can follow. Kept as an explicit allow-list
 # (not a free-form string) so a stale/renamed key from an old client build
@@ -33,6 +35,7 @@ class UserProfileOut(BaseModel):
     subscription_tier: str
     birth_data: BirthDataOut | None
     preferences: list[str]
+    life_state: LifeStateOut | None = None
 
 
 class UserProfileUpdate(BaseModel):

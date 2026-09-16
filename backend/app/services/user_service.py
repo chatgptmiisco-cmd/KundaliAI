@@ -5,7 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_pii_cipher
 from app.db.models.audit import AuditLog
 from app.db.models.birth_profile import BirthProfile
+from app.db.models.life_state import LifeState
 from app.db.models.user import User
+from app.schemas.life_state import LifeStateIn, LifeStateOut
 from app.schemas.user import BirthDataIn, BirthDataOut, UserProfileOut
 from app.services.payments.subscription_service import get_or_create_subscription
 
@@ -74,8 +76,75 @@ async def upsert_birth_profile(db: AsyncSession, user_id: str, data: BirthDataIn
     return profile
 
 
+async def get_life_state(db: AsyncSession, user_id: str) -> LifeState | None:
+    result = await db.execute(select(LifeState).where(LifeState.user_id == user_id))
+    return result.scalar_one_or_none()
+
+
+def decrypt_life_state(life_state: LifeState) -> LifeStateOut:
+    cipher = get_pii_cipher()
+    return LifeStateOut(
+        marital_status=life_state.marital_status,
+        marriage_date=cipher.decrypt(life_state.marriage_date_encrypted)
+        if life_state.marriage_date_encrypted
+        else None,
+        children_count=life_state.children_count,
+        pregnancy_status=life_state.pregnancy_status,
+        expected_delivery=cipher.decrypt(life_state.expected_delivery_encrypted)
+        if life_state.expected_delivery_encrypted
+        else None,
+        career_state=life_state.career_state,
+        business_state=life_state.business_state,
+        version=life_state.version,
+    )
+
+
+async def upsert_life_state(db: AsyncSession, user_id: str, data: LifeStateIn) -> LifeState:
+    cipher = get_pii_cipher()
+    existing = await get_life_state(db, user_id)
+
+    marriage_date_encrypted = cipher.encrypt(data.marriage_date.isoformat()) if data.marriage_date else None
+    expected_delivery_encrypted = (
+        cipher.encrypt(data.expected_delivery.isoformat()) if data.expected_delivery else None
+    )
+
+    if existing is None:
+        life_state = LifeState(
+            user_id=user_id,
+            marital_status=data.marital_status,
+            marriage_date_encrypted=marriage_date_encrypted,
+            children_count=data.children_count,
+            pregnancy_status=data.pregnancy_status,
+            expected_delivery_encrypted=expected_delivery_encrypted,
+            career_state=data.career_state,
+            business_state=data.business_state,
+            version=1,
+        )
+        db.add(life_state)
+    else:
+        life_state = existing
+        life_state.marital_status = data.marital_status
+        life_state.marriage_date_encrypted = marriage_date_encrypted
+        life_state.children_count = data.children_count
+        life_state.pregnancy_status = data.pregnancy_status
+        life_state.expected_delivery_encrypted = expected_delivery_encrypted
+        life_state.career_state = data.career_state
+        life_state.business_state = data.business_state
+        # Same staleness convention as BirthProfile.version — the Prediction
+        # Engine stores this inside each cached row's JSON blob and treats a
+        # mismatch as "recompute," so an edit here can't keep serving a
+        # prediction framed for the user's OLD life state.
+        life_state.version += 1
+
+    db.add(AuditLog(actor_user_id=user_id, subject_user_id=user_id, action="life_state.write"))
+    await db.commit()
+    await db.refresh(life_state)
+    return life_state
+
+
 async def get_user_profile(db: AsyncSession, user: User) -> UserProfileOut:
     profile = await get_birth_profile(db, user.id)
+    life_state = await get_life_state(db, user.id)
     subscription = await get_or_create_subscription(db, user.id)
     db.add(AuditLog(actor_user_id=user.id, subject_user_id=user.id, action="birth_profile.read"))
     await db.commit()
@@ -88,6 +157,7 @@ async def get_user_profile(db: AsyncSession, user: User) -> UserProfileOut:
         subscription_tier=subscription.tier,
         birth_data=decrypt_birth_data(profile) if profile else None,
         preferences=user.preferences,
+        life_state=decrypt_life_state(life_state) if life_state else None,
     )
 
 

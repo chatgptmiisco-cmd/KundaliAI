@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,7 @@ from app.core.rate_limit import limiter
 from app.db.base import get_db
 from app.db.models.birth_profile import BirthProfile
 from app.schemas.prediction import (
+    DecisionResponse,
     LifeEventTimingResponse,
     LifeThemeResponse,
     MarriageTimingResponse,
@@ -81,6 +83,19 @@ async def life_event_timing(
 ):
     birth = user_service.decrypt_birth_data(profile)
     return await prediction_service.get_life_event_timing(db, profile, birth, event_type, language, direction)
+
+
+@router.get("/decision", response_model=DecisionResponse)
+@limiter.limit("20/minute")
+async def decision(
+    request: Request,
+    decision_type: Literal["job_change", "business_start"] = Query(...),
+    language: Language = Query(default="en"),
+    profile: BirthProfile = Depends(require_birth_profile),
+    db: AsyncSession = Depends(get_db),
+):
+    birth = user_service.decrypt_birth_data(profile)
+    return await prediction_service.get_decision(db, profile, birth, decision_type, language)
 
 
 @router.get("/life-theme", response_model=LifeThemeResponse)

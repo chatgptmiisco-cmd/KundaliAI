@@ -5,23 +5,32 @@ LLM call, no scraped/templated third-party content (see the Prediction
 Engine plan). Both languages are computed and cached together, same
 convention as every other cached artifact in this app.
 """
-from datetime import date, datetime, timezone
-from typing import Literal
+from datetime import date, datetime, timedelta, timezone
+from typing import Callable, Literal
 
 import anyio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.astro.charts import house_number, navamsa_sign_index, sign_index
-from app.astro.constants import DAYS_PER_YEAR, PLANET_NAMES_EN, PLANET_NAMES_HI
-from app.astro.dasha import Mahadasha, find_current_antardasha, find_current_mahadasha
+from app.astro.constants import DAYS_PER_YEAR, PLANET_NAMES_EN, PLANET_NAMES_HI, PlanetKey
+from app.astro.dasha import (
+    Antardasha,
+    Mahadasha,
+    SubPeriod,
+    compute_pratyantardashas,
+    find_current_antardasha,
+    find_current_mahadasha,
+)
 from app.astro.doshas import compute_dhaiya, compute_sade_sati
 from app.astro.ephemeris import all_planet_positions, ascendant_sidereal, declination, julian_day_ut
-from app.astro.event_window_scanner import ScoredWindow
+from app.astro.event_karakas import CATEGORY_KARAKAS
+from app.astro.event_window_scanner import _DASHA_RELATIONSHIP_MULTIPLIER, ScoredWindow, _dasha_relationship
 from app.astro.life_event_timing import EventType
 from app.astro.life_event_timing import EVENT_HOUSE as LIFE_EVENT_HOUSE
+from app.astro.life_event_timing import EVENT_SECONDARY_HOUSES
 from app.astro.life_event_timing import corroborate_with_transits as corroborate_life_event_with_transits
-from app.astro.life_event_timing import find_event_windows
+from app.astro.life_event_timing import event_rules, find_event_windows
 from app.astro.life_stage_plausibility import (
     EventCategory,
     age_plausibility_multiplier,
@@ -55,25 +64,31 @@ from app.db.models.cache import (
     SignificatorStrengthCache,
     YearOutlookCache,
 )
+from app.db.models.prediction_query_log import PredictionQueryLog
 from app.schemas.prediction import (
+    DecisionResponse,
     LifeEventTimingResponse,
     LifeThemeResponse,
     MarriageTimingResponse,
     MultiYearOutlookResponse,
     YearOutlookResponse,
 )
+from app.schemas.life_state import LifeStateOut
 from app.schemas.user import BirthDataOut
 from app.services.cache_utils import add_and_commit_or_fetch_existing
 from app.services.chart_service import birth_datetime_utc, get_chart
 from app.services.dasha_service import get_mahadashas_raw
 from app.services.interpretation.base import Language
 from app.services.interpretation.prediction_templates import (
+    decision_reason_text,
+    expecting_delivery_reason_text,
     life_event_reason_text,
     life_theme_text,
     marriage_window_reason_text,
     overall_year_theme,
     year_outlook_text,
 )
+from app.services.user_service import decrypt_life_state, get_life_state
 
 Direction = Literal["past", "future"]
 # How far ahead of "now" a future-direction search looks. Needs to be long
@@ -92,6 +107,16 @@ Direction = Literal["past", "future"]
 # window instead, purely because the real answer was never in the search
 # window at all, not because it was outranked. See _TIMING_ALGO_VERSION v16.
 _FUTURE_HORIZON_YEARS = 30.0
+
+# Default look-back for direction="past" — "what happened in my past" reads
+# as "what happened recently," not "what's the single strongest period
+# anywhere in my life, even in early childhood." Same "narrow, but never
+# with a hard wall" lesson as _FUTURE_HORIZON_YEARS: if the recent-only
+# search's best candidate is still hard-implausible-age or backdrop-only
+# evidence, _resolve_past_windows falls back to the full birth-to-now
+# lifetime instead of silently returning a weak recent answer when a much
+# better one exists further back. See _TIMING_ALGO_VERSION v18.
+_PAST_RECENCY_YEARS = 10.0
 
 # Transit corroboration (Jupiter/Saturn transiting the event's own house
 # during the window — the classical gochar confirmation) used to be purely
@@ -315,7 +340,67 @@ _TRANSIT_OBSTRUCTION_PENALTY = 1.0
 # hard-implausible-age window win against a better one. direction="past"
 # is unchanged (score-first) since "which past period was strongest" is a
 # different question than "when will X next happen."
-_TIMING_ALGO_VERSION = 17
+# v18: four changes from comparing engine output against a real user's
+# actual life state, not just against independent chart reads —
+#   - a user's optional LifeState (marital_status/marriage_date/
+#     children_count/pregnancy_status/expected_delivery — see
+#     app.db.models.life_state) now reframes marriage_timing/
+#     life_event_timing(event_type="children") reason text when the
+#     "first marriage"/"first child" question is already resolved (see
+#     prediction_templates._already_married_sentence/
+#     _already_has_children_sentence), and an already-expecting user's
+#     FUTURE children query anchors directly to their own
+#     expected_delivery instead of running a blind search that would
+#     otherwise propose a nonsensical brand-new future window (see
+#     _delivery_anchor_window). Cache rows now also key on
+#     `life_state_version` (stored inside the JSON blob, same convention
+#     as `algo_version`) so editing your life state invalidates stale
+#     predictions without a cache-table migration.
+#   - direction="past" now defaults to searching only _PAST_RECENCY_YEARS
+#     instead of full birth-to-now, falling back to the full lifetime only
+#     when the recent-only pool's best candidate is still hard-implausible
+#     or backdrop-only (see _resolve_past_windows) — "what happened in my
+#     past" reads as "what happened recently," not "what's the strongest
+#     period anywhere in my life, even in early childhood."
+#   - `long_term_peak` (see LongTermPeak/_find_long_term_peak) separately
+#     surfaces the single highest-scoring plausible-age window in the
+#     whole future search horizon when it's genuinely different from and
+#     meaningfully stronger than `windows[0]` — restoring visibility into
+#     what v17's earliest-wins-ties change intentionally stopped
+#     defaulting to, instead of losing that information entirely.
+#   - `peak_window` (see PeakWindow/_peak_window_for) narrows a window's
+#     own Antardasha down to a tighter Pratyantardasha-level sub-range
+#     when a real PD-level house-lord/karaka match exists — the PD math
+#     already existed (app.astro.dasha.compute_pratyantardashas, used
+#     elsewhere for "what's running right now") but was never wired into
+#     window selection/presentation before.
+# v19 (Phase 2 — event-specific sub-intents): ships the subset of the
+# user's original ~20-sub-intent wishlist that's either explicitly spec'd
+# by them or a direct, well-grounded reuse of houses/karakas this engine
+# already computes — see the "iterative-strolling-truffle" plan for the
+# full scoping rationale and what's deliberately still deferred.
+#   - MarriageWindow gains `stage` ("marriage"/"serious_commitment"/
+#     "relationship_stress") — no new astrology, relabels evidence_level/
+#     transit_corroborated/transit_obstructed (already computed) into a
+#     plain marriage-specific name — and `d9_confirmed`: whether the
+#     window's own Antardasha lord is exalted/own-sign in the D9 (Navamsa)
+#     chart, the classical marriage-confirmation chart, checked
+#     independently of the D1 dasha math the window was already selected
+#     from.
+#   - LifeEventWindow gains `theme` (event_type="career" only):
+#     "leadership_authority" when the Sun (career's existing "authority
+#     and status" karaka) runs the window, "structural_change" when the
+#     actual house lord does — a real distinction the reason text already
+#     drew in prose, now also exposed as its own field.
+#   - Three new event_type values via app.astro.life_event_timing's new
+#     multi-house rule-set support (EVENT_SECONDARY_HOUSES): "career_promotion"
+#     (10th+11th+2nd house lords, the user's own spec), "business_expansion"
+#     (11th+2nd), and "business_partnership" (the 7th house's OTHER
+#     classical meaning — all partnerships, not just marriage; Mercury as
+#     trade/commerce karaka) — gated by the user's LifeState.business_state
+#     so it doesn't return a generic 7th-house reading indistinguishable
+#     from marriage_timing for someone with no stated business intent.
+_TIMING_ALGO_VERSION = 19
 
 # The 7 classical planets Shadbala scores (Rahu/Ketu excluded — see
 # app.astro.shadbala's module docstring). MINIMUM_RUPAS.keys() is the public
@@ -700,13 +785,146 @@ def _rerank_with_transit_bonus(
     return scored_pairs[:_FINAL_WINDOW_COUNT]
 
 
+# How much higher a candidate's effective score must be than the primary
+# window's to count as a genuinely different "long-term peak" rather than
+# noise — see _find_long_term_peak. 20% is deliberately not tiny: v17
+# already lets a much-higher-scoring SAME-tier window lose to an earlier
+# one, so re-surfacing every marginal difference here would just recreate
+# the "always show the highest score" behavior v17 fixed, one field over.
+_LONG_TERM_PEAK_MARGIN = 1.2
+
+
+def _find_long_term_peak(
+    pairs: list[tuple[ScoredWindow, TransitCheck]],
+    birth_dt: datetime,
+    event_category: EventCategory,
+    top_window: ScoredWindow,
+) -> tuple[ScoredWindow, TransitCheck] | None:
+    """The single highest-`_effective_score` candidate in the SAME
+    (is_hard_implausible, evidence_rank) bucket as `top_window` — what
+    `top_window` itself would have been before v17 made direction="future"
+    prefer the earliest window in a bucket over the highest-scoring one.
+    Returns None when there's nothing meaningfully better/different, so a
+    boring chart doesn't get a redundant `long_term_peak` restating
+    `windows[0]` — see MarriageWindow.peak_window's sibling,
+    LongTermPeak, and `_LONG_TERM_PEAK_MARGIN`.
+
+    Only meaningful for direction="future" — callers don't invoke this for
+    "past" (see get_marriage_timing/get_life_event_timing)."""
+    top_bucket = _pool_priority(top_window, birth_dt, event_category)
+    same_bucket = [p for p in pairs if _pool_priority(p[0], birth_dt, event_category) == top_bucket]
+    if len(same_bucket) < 2:
+        return None
+
+    top_pair = next((p for p in same_bucket if p[0] is top_window), None)
+    if top_pair is None:
+        return None
+    top_score = _effective_score(top_pair[0], top_pair[1], birth_dt, event_category)
+
+    best = max(same_bucket, key=lambda p: _effective_score(p[0], p[1], birth_dt, event_category))
+    if best[0] is top_window or best[0].start == top_window.start:
+        return None
+    best_score = _effective_score(best[0], best[1], birth_dt, event_category)
+    if top_score <= 0 or best_score < top_score * _LONG_TERM_PEAK_MARGIN:
+        return None
+    return best
+
+
+def _find_source_antardasha(mahadashas: list[Mahadasha], window: ScoredWindow) -> Antardasha | None:
+    """The real Antardasha `window` was scored from — needed to compute its
+    Pratyantardashas (see _peak_window_for), since a ScoredWindow only
+    keeps [start, end) already clipped to the search horizon, not a
+    reference to the Antardasha object it came from."""
+    for maha in mahadashas:
+        if maha.lord != window.mahadasha_lord:
+            continue
+        for antar in maha.antardashas:
+            if antar.lord == window.antardasha_lord and antar.start <= window.start < antar.end:
+                return antar
+    return None
+
+
+def _delivery_anchor_window(mahadashas: list[Mahadasha], expected_delivery: datetime) -> ScoredWindow | None:
+    """For a user already expecting (see LifeState.pregnancy_status), "when
+    will I have a child?" is already resolved at the conception level —
+    searching for a NEW blind future children window would be wrong.
+    Anchors directly to whichever Antardasha already covers the user's own
+    `expected_delivery` date and reports THAT as the family-adjustment
+    window (see get_life_event_timing's `expecting_override` branch and
+    expecting_delivery_reason_text) — score is irrelevant here (0.0):
+    relevance comes from the user's own known life state, not dasha
+    scoring, so it's never compared against other windows."""
+    maha = find_current_mahadasha(mahadashas, expected_delivery)
+    if maha is None:
+        return None
+    antar = find_current_antardasha(maha, expected_delivery)
+    if antar is None:
+        return None
+    return ScoredWindow(
+        start=antar.start, end=antar.end, mahadasha_lord=maha.lord, antardasha_lord=antar.lord,
+        score=0.0, reason_keys=[],
+    )
+
+
+def _peak_window_for(
+    mahadashas: list[Mahadasha], window: ScoredWindow, event_category: EventCategory, house_lord_planet: PlanetKey
+) -> tuple[datetime, datetime] | None:
+    """Light Pratyantardasha (PD) narrowing: re-scores `window`'s own
+    Antardasha's 9 Pratyantardashas (app.astro.dasha.compute_pratyantardashas
+    — already computed elsewhere for "what's running right now" via
+    dasha_service.py, just never wired into window selection here) against
+    the SAME house-lord/karaka test already used at the Antardasha level
+    (see CATEGORY_KARAKAS), and returns the narrower [start, end) actually
+    covered by a real PD-level match — e.g. a few-month-wide "peak
+    commitment window" inside a multi-year "relationship activation"
+    window, the level of precision needed before a user says "wait, I
+    actually got married in November 2024."
+
+    Purely additive/presentational — does NOT change which Antardasha won
+    selection (still decided entirely by _pool_priority/_effective_score,
+    unchanged). Returns None when there's no PD-level match, or when the
+    "narrowed" range would be the whole window anyway (no real narrowing)."""
+    antar = _find_source_antardasha(mahadashas, window)
+    if antar is None:
+        return None
+
+    sub_periods = compute_pratyantardashas(antar)
+    relevant_lords = {house_lord_planet, *CATEGORY_KARAKAS.get(event_category, ())}
+    matching = [
+        (max(sp.start, window.start), min(sp.end, window.end))
+        for sp in sub_periods
+        if sp.lord in relevant_lords and sp.start < window.end and sp.end > window.start
+    ]
+    if not matching or len(matching) == len(sub_periods):
+        return None
+
+    start = min(s for s, _ in matching)
+    end = max(e for _, e in matching)
+    if start <= window.start and end >= window.end:
+        return None
+    return start, end
+
+
 def _search_bounds(
-    direction: Direction, birth_dt: datetime, now: datetime, mahadashas: list[Mahadasha] | None = None
+    direction: Direction,
+    birth_dt: datetime,
+    now: datetime,
+    mahadashas: list[Mahadasha] | None = None,
+    *,
+    past_full_lifetime: bool = False,
 ) -> tuple[datetime, float]:
-    """Where to point the window scanner — the entire past (birth to now),
-    or a forward-looking horizon out to +_FUTURE_HORIZON_YEARS from now. Same scanner
-    (app.astro.event_window_scanner.scan_dasha_windows) either way; this is
-    purely a different choice of bounds, not new astro logic.
+    """Where to point the window scanner — a recency-limited or (with
+    `past_full_lifetime=True`) full birth-to-now past search, or a
+    forward-looking horizon out to +_FUTURE_HORIZON_YEARS from now. Same
+    scanner (app.astro.event_window_scanner.scan_dasha_windows) either way;
+    this is purely a different choice of bounds, not new astro logic.
+
+    For "past" (`past_full_lifetime=False`, the default), searches only the
+    last _PAST_RECENCY_YEARS — "what happened in my past" reads as "what
+    happened recently," not "what's the strongest period anywhere in my
+    life, even in early childhood." `past_full_lifetime=True` searches the
+    entire birth-to-now span instead; see _resolve_past_windows for when
+    each is used (recency first, full lifetime as a fallback).
 
     For "future", if `mahadashas` is given and an Antardasha is ALREADY
     running right now, the search starts from THAT Antardasha's real start
@@ -722,8 +940,12 @@ def _search_bounds(
     backward, so the search still reaches +_FUTURE_HORIZON_YEARS from `now`,
     not from this earlier start."""
     if direction == "past":
-        age_years = (now - birth_dt).days / DAYS_PER_YEAR
-        return birth_dt, max(age_years, 0.0)
+        age_years = max((now - birth_dt).days / DAYS_PER_YEAR, 0.0)
+        if past_full_lifetime:
+            return birth_dt, age_years
+        recency_years = min(_PAST_RECENCY_YEARS, age_years)
+        from_dt = now - timedelta(days=recency_years * DAYS_PER_YEAR)
+        return from_dt, recency_years
 
     from_dt = now
     if mahadashas is not None:
@@ -733,6 +955,44 @@ def _search_bounds(
             from_dt = current_antar.start
     horizon_years = _FUTURE_HORIZON_YEARS + (now - from_dt).days / DAYS_PER_YEAR
     return from_dt, horizon_years
+
+
+def _resolve_past_windows(
+    direction: Direction,
+    birth_dt: datetime,
+    now: datetime,
+    mahadashas: list[Mahadasha] | None,
+    event_category: EventCategory,
+    scan_and_select: Callable[[datetime, float], list[ScoredWindow]],
+) -> list[ScoredWindow]:
+    """Runs `scan_and_select(from_dt, horizon_years)` with the bounds
+    `_search_bounds` picks for `direction`, applying the recency-default/
+    full-lifetime-fallback only for direction="past" (see
+    _PAST_RECENCY_YEARS and _search_bounds' docstring) — "future" just
+    delegates straight through with a single call.
+
+    The fallback check mirrors _pool_priority's own bucket test (hard-
+    implausible-age, then backdrop-only) rather than a score threshold:
+    if the recency-limited search's top pick is already a real,
+    plausible-age, non-backdrop window, a genuinely stronger CANDIDATE
+    further back wouldn't change the right answer to "what happened
+    recently" anyway — only re-scan the full lifetime when the recent-only
+    pool couldn't find anything better than that."""
+    from_dt, horizon_years = _search_bounds(direction, birth_dt, now, mahadashas)
+    candidates = scan_and_select(from_dt, horizon_years)
+    if direction != "past":
+        return candidates
+
+    top = candidates[0] if candidates else None
+    recent_pool_is_weak = top is None or _is_hard_implausible(top, birth_dt, event_category) or (
+        _evidence_level(top) == "backdrop_only"
+    )
+    if not recent_pool_is_weak:
+        return candidates
+
+    full_from_dt, full_horizon_years = _search_bounds(direction, birth_dt, now, mahadashas, past_full_lifetime=True)
+    return scan_and_select(full_from_dt, full_horizon_years)
+
 
 MAX_MULTI_YEARS = 3
 
@@ -901,6 +1161,10 @@ async def get_marriage_timing(
     db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, language: Language, direction: Direction = "future"
 ) -> MarriageTimingResponse:
     _REQUIRED_CACHE_KEYS = ("windows",)
+    life_state_row = await get_life_state(db, profile.user_id)
+    life_state = decrypt_life_state(life_state_row) if life_state_row else None
+    life_state_version = life_state.version if life_state else 0
+
     select_stmt = _marriage_select_stmt(profile, direction, language)
     result = await db.execute(select_stmt)
     cached_row = result.scalar_one_or_none()
@@ -908,42 +1172,71 @@ async def get_marriage_timing(
         cached_row is not None
         and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS)
         and cached_row.data.get("algo_version") == _TIMING_ALGO_VERSION
+        and cached_row.data.get("life_state_version") == life_state_version
     ):
+        await log_prediction_query(
+            db, profile.user_id, "marriage_timing", direction, language,
+            _timing_result_summary(cached_row.data.get("windows", [])),
+        )
         return MarriageTimingResponse(language=language, direction=direction, cached=True, **cached_row.data)
 
     d1 = await get_chart(db, profile, birth, "D1")
+    d9 = await get_chart(db, profile, birth, "D9")
+    d9_dignity = {p.planet: p.dignity for p in d9.planets}
     moon = next(p for p in d1.planets if p.planet == "Mo")
     mars = next(p for p in d1.planets if p.planet == "Ma")
     mahadashas = await get_mahadashas_raw(db, profile, birth)
     seventh_lord = house_lord(7, d1.lagna_sign_index)
     birth_dt = birth_datetime_utc(birth)
     now = datetime.now(timezone.utc)
-    from_dt, horizon_years = _search_bounds(direction, birth_dt, now, mahadashas)
     strength = await _get_cached_significator_strength(db, profile, birth, d1)
     retrograde = _significator_retrograde(d1)
     natal_planet_sign = _natal_planet_sign_index(d1)
 
     def _compute_windows():
-        raw_windows = find_marriage_windows(
-            mahadashas, seventh_lord, from_dt, horizon_years, top_n=_RAW_SCAN_POOL_SIZE, strength=strength
-        )
-        windows = _select_candidate_pool(raw_windows, birth_dt, "marriage", direction)
+        def scan_and_select(from_dt: datetime, horizon_years: float) -> list[ScoredWindow]:
+            raw_windows = find_marriage_windows(
+                mahadashas, seventh_lord, from_dt, horizon_years, top_n=_RAW_SCAN_POOL_SIZE, strength=strength
+            )
+            return _select_candidate_pool(raw_windows, birth_dt, "marriage", direction)
+
+        windows = _resolve_past_windows(direction, birth_dt, now, mahadashas, "marriage", scan_and_select)
         pairs = [
             (w, corroborate_with_transits(w, d1.lagna_sign_index, moon.sign_index, natal_planet_sign))
             for w in windows
         ]
-        return _rerank_with_transit_bonus(pairs, birth_dt, "marriage", direction)
+        scored_windows = _rerank_with_transit_bonus(pairs, birth_dt, "marriage", direction)
+        long_term_peak_pair = None
+        if direction == "future" and scored_windows:
+            long_term_peak_pair = _find_long_term_peak(pairs, birth_dt, "marriage", scored_windows[0][0])
+        return scored_windows, long_term_peak_pair
 
-    scored_windows = await anyio.to_thread.run_sync(_compute_windows)
+    scored_windows, long_term_peak_pair = await anyio.to_thread.run_sync(_compute_windows)
 
     names = PLANET_NAMES_HI if language == "hi" else PLANET_NAMES_EN
     seventh_lord_name = names[seventh_lord]
+    already_married = life_state is not None and life_state.marital_status == "married"
+    marriage_date_str = life_state.marriage_date.isoformat() if life_state and life_state.marriage_date else None
     windows_out = []
     for w, check in scored_windows:
         age_years = (w.start - birth_dt).days / DAYS_PER_YEAR
         age_multiplier = age_plausibility_multiplier("marriage", age_years)
         literal_event_plausible = not is_hard_implausible_age("marriage", age_years)
         evidence_level = _evidence_level(w)
+        d9_confirmed = d9_dignity.get(w.antardasha_lord) in ("exalted", "own_sign")
+        # `check.obstructed` alone (see app.astro.transit_corroboration) is
+        # True from even a single sampled point (of 3: start/mid/end) under
+        # a malefic transit — deliberately sensitive for the continuous
+        # score penalty (`check.obstruction_fraction` scales it), but WAY
+        # too noisy as a binary "this is a stress period" label: a
+        # majority of a chart's own windows have SOME momentary obstruction
+        # somewhere in a multi-year span. `relationship_stress` needs the
+        # MAJORITY of sampled points obstructed, not just one.
+        stage = (
+            "relationship_stress" if check.obstruction_fraction >= 0.5
+            else "marriage" if evidence_level == "house_lord_antardasha" and check.corroborated
+            else "serious_commitment"
+        )
         reason = marriage_window_reason_text(
             w.reason_keys, seventh_lord_name, w.antardasha_lord, check.corroborated, language, tense=direction,
             natal_strength=_natal_strength_category(strength.get(w.antardasha_lord, 1.0)),
@@ -952,7 +1245,15 @@ async def get_marriage_timing(
             age_implausibility=is_implausible_age("marriage", age_years),
             literal_event_plausible=literal_event_plausible,
             evidence_level=evidence_level,
+            already_married=already_married,
+            marriage_date=marriage_date_str,
+            d9_confirmed=d9_confirmed,
         )
+        peak_window = _peak_window_for(mahadashas, w, "marriage", seventh_lord)
+        peak_window_out = None
+        if peak_window is not None:
+            pw_start, pw_end = peak_window
+            peak_window_out = {"start_date": pw_start.date().isoformat(), "end_date": pw_end.date().isoformat()}
         windows_out.append(
             {
                 # ISO strings, not date objects — see the matching comment
@@ -965,6 +1266,7 @@ async def get_marriage_timing(
                 "antardasha_lord_name": names[w.antardasha_lord],
                 "score": w.score,
                 "reason": reason,
+                "peak_window": peak_window_out,
                 "transit_corroborated": check.corroborated,
                 "transit_corroboration_strength": check.corroboration_strength,
                 "transit_obstructed": check.obstructed,
@@ -973,8 +1275,23 @@ async def get_marriage_timing(
                 "literal_event_plausible": literal_event_plausible,
                 "evidence_level": evidence_level,
                 "confidence": _CONFIDENCE_FOR_EVIDENCE[evidence_level],
+                "stage": stage,
+                "d9_confirmed": d9_confirmed,
             }
         )
+
+    long_term_peak_out = None
+    if long_term_peak_pair is not None:
+        peak_w, _peak_check = long_term_peak_pair
+        long_term_peak_out = {
+            "start_date": peak_w.start.date().isoformat(),
+            "end_date": peak_w.end.date().isoformat(),
+            "mahadasha_lord": peak_w.mahadasha_lord,
+            "mahadasha_lord_name": names[peak_w.mahadasha_lord],
+            "antardasha_lord": peak_w.antardasha_lord,
+            "antardasha_lord_name": names[peak_w.antardasha_lord],
+            "score": peak_w.score,
+        }
 
     manglik = compute_manglik_facts(
         mars_sign_index=mars.sign_index, mars_house_from_lagna=mars.house, moon_sign_index=moon.sign_index
@@ -988,11 +1305,20 @@ async def get_marriage_timing(
             "partner's chart before marriage."
         )
 
-    data = {"windows": windows_out, "manglik_note": manglik_note, "algo_version": _TIMING_ALGO_VERSION}
+    data = {
+        "windows": windows_out,
+        "manglik_note": manglik_note,
+        "long_term_peak": long_term_peak_out,
+        "algo_version": _TIMING_ALGO_VERSION,
+        "life_state_version": life_state_version,
+    }
 
     if cached_row is not None:
         cached_row.data = data
         await db.commit()
+        await log_prediction_query(
+            db, profile.user_id, "marriage_timing", direction, language, _timing_result_summary(windows_out)
+        )
         return MarriageTimingResponse(language=language, direction=direction, cached=False, **data)
 
     row = MarriageTimingCache(
@@ -1000,6 +1326,9 @@ async def get_marriage_timing(
         data=data,
     )
     data, was_race = await add_and_commit_or_fetch_existing(db, row, select_stmt)
+    await log_prediction_query(
+        db, profile.user_id, "marriage_timing", direction, language, _timing_result_summary(data.get("windows", []))
+    )
     return MarriageTimingResponse(language=language, direction=direction, cached=was_race, **data)
 
 
@@ -1025,6 +1354,10 @@ async def get_life_event_timing(
     get_marriage_timing above, built on the same window scanner via
     app.astro.life_event_timing instead of app.astro.marriage_timing."""
     _REQUIRED_CACHE_KEYS = ("windows",)
+    life_state_row = await get_life_state(db, profile.user_id)
+    life_state = decrypt_life_state(life_state_row) if life_state_row else None
+    life_state_version = life_state.version if life_state else 0
+
     select_stmt = _life_event_select_stmt(profile, event_type, direction, language)
     result = await db.execute(select_stmt)
     cached_row = result.scalar_one_or_none()
@@ -1032,7 +1365,12 @@ async def get_life_event_timing(
         cached_row is not None
         and all(k in cached_row.data for k in _REQUIRED_CACHE_KEYS)
         and cached_row.data.get("algo_version") == _TIMING_ALGO_VERSION
+        and cached_row.data.get("life_state_version") == life_state_version
     ):
+        await log_prediction_query(
+            db, profile.user_id, event_type, direction, language,
+            _timing_result_summary(cached_row.data.get("windows", [])),
+        )
         return LifeEventTimingResponse(
             event_type=event_type, language=language, direction=direction, cached=True, **cached_row.data
         )
@@ -1041,76 +1379,192 @@ async def get_life_event_timing(
     moon = next(p for p in d1.planets if p.planet == "Mo")
     mahadashas = await get_mahadashas_raw(db, profile, birth)
     house_lord_planet = house_lord(LIFE_EVENT_HOUSE[event_type], d1.lagna_sign_index)
+    secondary_lords = {
+        house: house_lord(house, d1.lagna_sign_index) for house, _ in EVENT_SECONDARY_HOUSES.get(event_type, [])
+    }
     birth_dt = birth_datetime_utc(birth)
     now = datetime.now(timezone.utc)
-    from_dt, horizon_years = _search_bounds(direction, birth_dt, now, mahadashas)
     strength = await _get_cached_significator_strength(db, profile, birth, d1)
     retrograde = _significator_retrograde(d1)
     natal_planet_sign = _natal_planet_sign_index(d1)
-
-    def _compute_windows() -> list[tuple[ScoredWindow, TransitCheck]]:
-        raw_windows = find_event_windows(
-            mahadashas, event_type, house_lord_planet, from_dt, horizon_years,
-            top_n=_RAW_SCAN_POOL_SIZE, strength=strength,
-        )
-        windows = _select_candidate_pool(raw_windows, birth_dt, event_type, direction)
-        pairs = [
-            (
-                w,
-                corroborate_life_event_with_transits(
-                    event_type, w, d1.lagna_sign_index, moon.sign_index, natal_planet_sign
-                ),
-            )
-            for w in windows
-        ]
-        return _rerank_with_transit_bonus(pairs, birth_dt, event_type, direction)
-
-    scored_windows = await anyio.to_thread.run_sync(_compute_windows)
-
     names = PLANET_NAMES_HI if language == "hi" else PLANET_NAMES_EN
     house_lord_name = names[house_lord_planet]
-    windows_out = []
-    for w, check in scored_windows:
-        age_years = (w.start - birth_dt).days / DAYS_PER_YEAR
-        age_multiplier = age_plausibility_multiplier(event_type, age_years)
-        literal_event_plausible = not is_hard_implausible_age(event_type, age_years)
-        evidence_level = _evidence_level(w)
-        reason = life_event_reason_text(
-            event_type, w.reason_keys, house_lord_name, w.antardasha_lord, check.corroborated, language,
-            tense=direction,
-            natal_strength=_natal_strength_category(strength.get(w.antardasha_lord, 1.0)),
-            antardasha_lord_retrograde=retrograde.get(w.antardasha_lord, False),
-            transit_obstructing_planet=names[check.obstructing_planet] if check.obstructing_planet else None,
-            age_implausibility=is_implausible_age(event_type, age_years),
-            literal_event_plausible=literal_event_plausible,
-            evidence_level=evidence_level,
-        )
-        windows_out.append(
-            {
-                "start_date": w.start.date().isoformat(),
-                "end_date": w.end.date().isoformat(),
-                "mahadasha_lord": w.mahadasha_lord,
-                "mahadasha_lord_name": names[w.mahadasha_lord],
-                "antardasha_lord": w.antardasha_lord,
-                "antardasha_lord_name": names[w.antardasha_lord],
-                "score": w.score,
-                "reason": reason,
-                "transit_corroborated": check.corroborated,
-                "transit_corroboration_strength": check.corroboration_strength,
-                "transit_obstructed": check.obstructed,
-                "transit_obstruction_fraction": check.obstruction_fraction,
-                "age_plausibility_multiplier": age_multiplier,
-                "literal_event_plausible": literal_event_plausible,
-                "evidence_level": evidence_level,
-                "confidence": _CONFIDENCE_FOR_EVIDENCE[evidence_level],
-            }
-        )
 
-    data = {"windows": windows_out, "algo_version": _TIMING_ALGO_VERSION}
+    # Phase 2: business_partnership reuses the 7th house's OTHER classical
+    # meaning (all partnerships, not just marriage) — without a life-state
+    # gate, it would return a generic 7th-house reading indistinguishable
+    # from marriage_timing for anyone, regardless of whether business is
+    # even relevant to them.
+    business_partnership_blocked = event_type == "business_partnership" and not (
+        life_state is not None and life_state.business_state in ("running", "considering")
+    )
+
+    # Already expecting, with a known due date: "when will I have a child?"
+    # is already resolved at the conception level — searching for a NEW
+    # blind future window would be wrong. Anchor directly to whichever
+    # Antardasha already covers `expected_delivery` instead of scoring
+    # candidates at all. See _delivery_anchor_window.
+    expecting_override = (
+        event_type == "children"
+        and direction == "future"
+        and life_state is not None
+        and life_state.pregnancy_status == "expecting"
+        and life_state.expected_delivery is not None
+    )
+
+    note_out = None
+    if business_partnership_blocked:
+        windows_out = []
+        long_term_peak_out = None
+        note_out = (
+            "अपनी व्यावसायिक स्थिति प्रोफ़ाइल में सेट करें ताकि व्यापार-साझेदारी की समयावधि मिल सके।"
+            if language == "hi" else
+            "Set your business status in your profile to get business-partnership timing."
+        )
+    elif expecting_override:
+        expected_delivery_dt = datetime.combine(life_state.expected_delivery, datetime.min.time(), timezone.utc)
+        anchor = _delivery_anchor_window(mahadashas, expected_delivery_dt)
+        long_term_peak_out = None
+        if anchor is None:
+            windows_out = []
+        else:
+            # No PD narrowing here: this window is anchored to the user's
+            # OWN known expected_delivery date, not to wherever a PD-level
+            # house-lord/karaka match happens to fall — narrowing to a
+            # sub-range that doesn't even cover expected_delivery would be
+            # actively misleading (see _delivery_anchor_window's docstring).
+            peak_window_out = None
+            reason = expecting_delivery_reason_text(anchor.antardasha_lord, life_state.expected_delivery.isoformat(), language)
+            age_years = (anchor.start - birth_dt).days / DAYS_PER_YEAR
+            windows_out = [
+                {
+                    "start_date": anchor.start.date().isoformat(),
+                    "end_date": anchor.end.date().isoformat(),
+                    "mahadasha_lord": anchor.mahadasha_lord,
+                    "mahadasha_lord_name": names[anchor.mahadasha_lord],
+                    "antardasha_lord": anchor.antardasha_lord,
+                    "antardasha_lord_name": names[anchor.antardasha_lord],
+                    "score": anchor.score,
+                    "reason": reason,
+                    "peak_window": peak_window_out,
+                    "transit_corroborated": False,
+                    "transit_corroboration_strength": 1.0,
+                    "transit_obstructed": False,
+                    "transit_obstruction_fraction": 0.0,
+                    "age_plausibility_multiplier": age_plausibility_multiplier(event_type, age_years),
+                    "literal_event_plausible": True,
+                    "evidence_level": "house_lord_antardasha",
+                    "confidence": "strong",
+                }
+            ]
+    else:
+        def _compute_windows() -> tuple[list[tuple[ScoredWindow, TransitCheck]], tuple[ScoredWindow, TransitCheck] | None]:
+            def scan_and_select(from_dt: datetime, horizon_years: float) -> list[ScoredWindow]:
+                raw_windows = find_event_windows(
+                    mahadashas, event_type, house_lord_planet, from_dt, horizon_years,
+                    top_n=_RAW_SCAN_POOL_SIZE, strength=strength, secondary_lords=secondary_lords,
+                )
+                return _select_candidate_pool(raw_windows, birth_dt, event_type, direction)
+
+            windows = _resolve_past_windows(direction, birth_dt, now, mahadashas, event_type, scan_and_select)
+            pairs = [
+                (
+                    w,
+                    corroborate_life_event_with_transits(
+                        event_type, w, d1.lagna_sign_index, moon.sign_index, natal_planet_sign
+                    ),
+                )
+                for w in windows
+            ]
+            scored_windows = _rerank_with_transit_bonus(pairs, birth_dt, event_type, direction)
+            long_term_peak_pair = None
+            if direction == "future" and scored_windows:
+                long_term_peak_pair = _find_long_term_peak(pairs, birth_dt, event_type, scored_windows[0][0])
+            return scored_windows, long_term_peak_pair
+
+        scored_windows, long_term_peak_pair = await anyio.to_thread.run_sync(_compute_windows)
+
+        already_has_children = life_state is not None and life_state.children_count > 0 and not (
+            life_state.pregnancy_status == "expecting"
+        )
+        windows_out = []
+        for w, check in scored_windows:
+            age_years = (w.start - birth_dt).days / DAYS_PER_YEAR
+            age_multiplier = age_plausibility_multiplier(event_type, age_years)
+            literal_event_plausible = not is_hard_implausible_age(event_type, age_years)
+            evidence_level = _evidence_level(w)
+            reason = life_event_reason_text(
+                event_type, w.reason_keys, house_lord_name, w.antardasha_lord, check.corroborated, language,
+                tense=direction,
+                natal_strength=_natal_strength_category(strength.get(w.antardasha_lord, 1.0)),
+                antardasha_lord_retrograde=retrograde.get(w.antardasha_lord, False),
+                transit_obstructing_planet=names[check.obstructing_planet] if check.obstructing_planet else None,
+                age_implausibility=is_implausible_age(event_type, age_years),
+                literal_event_plausible=literal_event_plausible,
+                evidence_level=evidence_level,
+                already_has_children=already_has_children,
+            )
+            peak_window = _peak_window_for(mahadashas, w, event_type, house_lord_planet)
+            peak_window_out = None
+            if peak_window is not None:
+                pw_start, pw_end = peak_window
+                peak_window_out = {"start_date": pw_start.date().isoformat(), "end_date": pw_end.date().isoformat()}
+            theme = None
+            if event_type == "career":
+                if w.antardasha_lord == "Su":
+                    theme = "leadership_authority"
+                elif w.antardasha_lord == house_lord_planet:
+                    theme = "structural_change"
+            windows_out.append(
+                {
+                    "start_date": w.start.date().isoformat(),
+                    "end_date": w.end.date().isoformat(),
+                    "mahadasha_lord": w.mahadasha_lord,
+                    "mahadasha_lord_name": names[w.mahadasha_lord],
+                    "antardasha_lord": w.antardasha_lord,
+                    "antardasha_lord_name": names[w.antardasha_lord],
+                    "score": w.score,
+                    "reason": reason,
+                    "peak_window": peak_window_out,
+                    "transit_corroborated": check.corroborated,
+                    "transit_corroboration_strength": check.corroboration_strength,
+                    "transit_obstructed": check.obstructed,
+                    "transit_obstruction_fraction": check.obstruction_fraction,
+                    "age_plausibility_multiplier": age_multiplier,
+                    "literal_event_plausible": literal_event_plausible,
+                    "evidence_level": evidence_level,
+                    "confidence": _CONFIDENCE_FOR_EVIDENCE[evidence_level],
+                    "theme": theme,
+                }
+            )
+
+        long_term_peak_out = None
+        if long_term_peak_pair is not None:
+            peak_w, _peak_check = long_term_peak_pair
+            long_term_peak_out = {
+                "start_date": peak_w.start.date().isoformat(),
+                "end_date": peak_w.end.date().isoformat(),
+                "mahadasha_lord": peak_w.mahadasha_lord,
+                "mahadasha_lord_name": names[peak_w.mahadasha_lord],
+                "antardasha_lord": peak_w.antardasha_lord,
+                "antardasha_lord_name": names[peak_w.antardasha_lord],
+                "score": peak_w.score,
+            }
+
+    data = {
+        "windows": windows_out,
+        "long_term_peak": long_term_peak_out,
+        "note": note_out,
+        "algo_version": _TIMING_ALGO_VERSION,
+        "life_state_version": life_state_version,
+    }
 
     if cached_row is not None:
         cached_row.data = data
         await db.commit()
+        await log_prediction_query(
+            db, profile.user_id, event_type, direction, language, _timing_result_summary(windows_out)
+        )
         return LifeEventTimingResponse(
             event_type=event_type, language=language, direction=direction, cached=False, **data
         )
@@ -1124,8 +1578,283 @@ async def get_life_event_timing(
         data=data,
     )
     data, was_race = await add_and_commit_or_fetch_existing(db, row, select_stmt)
+    await log_prediction_query(
+        db, profile.user_id, event_type, direction, language, _timing_result_summary(data.get("windows", []))
+    )
     return LifeEventTimingResponse(
         event_type=event_type, language=language, direction=direction, cached=was_race, **data
+    )
+
+
+async def log_prediction_query(
+    db: AsyncSession, user_id: str, intent: str, direction: str | None, language: Language, result_summary: dict
+) -> None:
+    """Appends one row to the user's Prediction Engine question/answer
+    history (see app.db.models.prediction_query_log.PredictionQueryLog) —
+    called for EVERY call to marriage-timing/life-event-timing/decision,
+    cached or freshly computed, since this is meant to be a real usage
+    history a later question can draw on (see get_decision's history-nudge
+    logic), not just a cache-miss log. `result_summary` is a small
+    structured dict (top window dates/score/evidence_level, or a
+    decision's verdict/current-period-start) — never the full response."""
+    db.add(
+        PredictionQueryLog(
+            user_id=user_id, intent=intent, direction=direction, language=language, result_summary=result_summary
+        )
+    )
+    await db.commit()
+
+
+def _timing_result_summary(windows_out: list[dict]) -> dict:
+    """Small structured summary of a marriage-timing/life-event-timing
+    response for PredictionQueryLog — just the top window's key facts, not
+    the full payload (reason text, all 3 windows, etc.)."""
+    if not windows_out:
+        return {"top_window_start": None}
+    top = windows_out[0]
+    return {"top_window_start": top["start_date"], "score": top["score"], "evidence_level": top["evidence_level"]}
+
+
+_DUSTHANA_HOUSES = (6, 8, 12)
+
+
+def _dusthana_lords(lagna_sign_index: int) -> set[PlanetKey]:
+    """The 6th/8th/12th house lords from lagna — the classical dusthana
+    (difficulty) houses. Their own Antardashas are the traditional "expect
+    friction or disruption" signal, independent of which specific decision
+    is being asked about — see _is_currently_dusthana_afflicted."""
+    return {house_lord(house, lagna_sign_index) for house in _DUSTHANA_HOUSES}
+
+
+def _is_currently_dusthana_afflicted(mahadashas: list[Mahadasha], now: datetime, dusthana_lords: set[PlanetKey]) -> bool:
+    current_maha = find_current_mahadasha(mahadashas, now)
+    if current_maha is None:
+        return False
+    current_antar = find_current_antardasha(current_maha, now)
+    if current_antar is None:
+        return False
+    return current_antar.lord in dusthana_lords
+
+
+def _current_period_score(
+    mahadashas: list[Mahadasha],
+    now: datetime,
+    event_type: EventType,
+    house_lord_planet: PlanetKey,
+    strength: dict[PlanetKey, float],
+    secondary_lords: dict[int, PlanetKey] | None = None,
+) -> ScoredWindow | None:
+    """Scores the Antardasha covering "now" using the exact SAME classical
+    rule set (event_rules) and dasha-relationship weighting
+    (_DASHA_RELATIONSHIP_MULTIPLIER) already applied to every full-horizon
+    scan (see app.astro.event_window_scanner.scan_dasha_windows) — just
+    evaluated for the one window containing "now" instead of a ranked
+    search, so a decision about "right now" can be compared apples-to-
+    apples against the near-term alternative windows those scans return.
+    Returns None when no rule matches at all (score would be 0) — a
+    decision has nothing to say about a period with zero classical tie to
+    the event."""
+    current_maha = find_current_mahadasha(mahadashas, now)
+    if current_maha is None:
+        return None
+    current_antar = find_current_antardasha(current_maha, now)
+    if current_antar is None:
+        return None
+
+    score = 0.0
+    reason_keys: list[str] = []
+    for rule in event_rules(event_type, house_lord_planet, strength, secondary_lords):
+        lord = current_antar.lord if rule.applies_to == "antardasha_lord" else current_maha.lord
+        if lord == rule.target:
+            score += rule.weight
+            reason_keys.append(rule.reason_key)
+    if score <= 0:
+        return None
+    relationship = _dasha_relationship(current_maha.lord, current_antar.lord)
+    score *= _DASHA_RELATIONSHIP_MULTIPLIER[relationship]
+
+    return ScoredWindow(
+        start=current_antar.start, end=current_antar.end,
+        mahadasha_lord=current_maha.lord, antardasha_lord=current_antar.lord,
+        score=score, reason_keys=reason_keys,
+    )
+
+
+# How much higher the best near-term future window's score must be than
+# the current period's to count as "wait for it" rather than noise — same
+# convention/value as _LONG_TERM_PEAK_MARGIN (Phase 1), reused here for the
+# same reason: re-surfacing every marginal difference would make "should I
+# do X now" flip-flop on tiny score deltas instead of a real signal.
+_DECISION_NEAR_TERM_HORIZON_YEARS = 5.0
+_DECISION_WAIT_MAX_YEARS_AWAY = 3.0
+
+def _history_nudge(
+    verdict: Literal["favorable", "unfavorable", "wait_for_better_window", "neutral"], prior_verdicts: list[str | None]
+) -> Literal["favorable", "unfavorable"] | None:
+    """Only ever nudges a "neutral" verdict — a clear favorable/
+    unfavorable/wait_for_better_window signal from the chart is NEVER
+    touched by history, per the explicit choice this was built to (history
+    corroborates a borderline reading, it doesn't override a real one).
+    Requires the last exactly-2 prior logged verdicts for this same
+    decision_type to AGREE with each other and be a real, non-neutral
+    verdict — a single prior data point, or two that disagree, isn't
+    "consistent" enough to nudge anything."""
+    if verdict != "neutral":
+        return None
+    if len(prior_verdicts) == 2 and prior_verdicts[0] == prior_verdicts[1] and prior_verdicts[0] in (
+        "favorable", "unfavorable"
+    ):
+        return prior_verdicts[0]
+    return None
+
+
+_DECISION_EVENT_TYPE: dict[str, EventType] = {"job_change": "career_promotion", "business_start": "business_partnership"}
+_DECISION_HOUSE: dict[str, int] = {"job_change": 10, "business_start": 7}
+
+
+async def get_decision(
+    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, decision_type: Literal["job_change", "business_start"],
+    language: Language,
+) -> DecisionResponse:
+    """Answers "should I do X now?" with a verdict (favorable/unfavorable/
+    wait_for_better_window/neutral), not a list of windows — see the
+    "iterative-strolling-truffle" plan (Phase 3) for the full design
+    rationale. Not cached (unlike the other timing endpoints): "now" is
+    inherent to the question, so re-running this cheap, already-cached-
+    mahadasha-based computation is safer than serving a stale verdict for
+    weeks."""
+    life_state_row = await get_life_state(db, profile.user_id)
+    life_state = decrypt_life_state(life_state_row) if life_state_row else None
+
+    if decision_type == "business_start" and not (
+        life_state is not None and life_state.business_state in ("running", "considering")
+    ):
+        note = (
+            "अपनी व्यावसायिक स्थिति प्रोफ़ाइल में सेट करें ताकि यह निर्णय सुझाव मिल सके।" if language == "hi" else
+            "Set your business status in your profile to get this decision's guidance."
+        )
+        await log_prediction_query(
+            db, profile.user_id, f"{decision_type}_decision", None, language, {"verdict": None, "blocked": True}
+        )
+        return DecisionResponse(decision_type=decision_type, language=language, verdict="neutral", reasoning=note, note=note)
+
+    d1 = await get_chart(db, profile, birth, "D1")
+    moon = next(p for p in d1.planets if p.planet == "Mo")
+    mahadashas = await get_mahadashas_raw(db, profile, birth)
+    birth_dt = birth_datetime_utc(birth)
+    now = datetime.now(timezone.utc)
+    strength = await _get_cached_significator_strength(db, profile, birth, d1)
+    natal_planet_sign = _natal_planet_sign_index(d1)
+    names = PLANET_NAMES_HI if language == "hi" else PLANET_NAMES_EN
+
+    event_type = _DECISION_EVENT_TYPE[decision_type]
+    house_lord_planet = house_lord(_DECISION_HOUSE[decision_type], d1.lagna_sign_index)
+    secondary_lords = {
+        house: house_lord(house, d1.lagna_sign_index) for house, _ in EVENT_SECONDARY_HOUSES.get(event_type, [])
+    }
+    dusthana_lords = _dusthana_lords(d1.lagna_sign_index)
+
+    def _compute() -> tuple[ScoredWindow | None, bool, tuple[ScoredWindow, TransitCheck] | None]:
+        current = _current_period_score(mahadashas, now, event_type, house_lord_planet, strength, secondary_lords)
+        afflicted = _is_currently_dusthana_afflicted(mahadashas, now, dusthana_lords)
+
+        raw_windows = find_event_windows(
+            mahadashas, event_type, house_lord_planet, now, _DECISION_NEAR_TERM_HORIZON_YEARS,
+            top_n=_RAW_SCAN_POOL_SIZE, strength=strength, secondary_lords=secondary_lords,
+        )
+        pool = _select_candidate_pool(raw_windows, birth_dt, event_type, "future")
+        pairs = [
+            (w, corroborate_life_event_with_transits(event_type, w, d1.lagna_sign_index, moon.sign_index, natal_planet_sign))
+            for w in pool
+        ]
+        ranked = _rerank_with_transit_bonus(pairs, birth_dt, event_type, "future")
+        best_future = ranked[0] if ranked else None
+        return current, afflicted, best_future
+
+    current_period, dusthana_afflicted, best_future_pair = await anyio.to_thread.run_sync(_compute)
+
+    better_window = None
+    if best_future_pair is not None:
+        best_w, best_check = best_future_pair
+        current_score = current_period.score if current_period is not None else 0.0
+        years_away = (best_w.start - now).days / DAYS_PER_YEAR
+        if (
+            years_away <= _DECISION_WAIT_MAX_YEARS_AWAY
+            and _effective_score(best_w, best_check, birth_dt, event_type) >= max(current_score, 0.01) * _LONG_TERM_PEAK_MARGIN
+        ):
+            better_window = best_w
+
+    current_evidence = _evidence_level(current_period) if current_period is not None else None
+    if dusthana_afflicted:
+        verdict: Literal["favorable", "unfavorable", "wait_for_better_window", "neutral"] = "unfavorable"
+    elif current_period is not None and current_evidence in ("house_lord_antardasha", "karaka_antardasha") and better_window is None:
+        verdict = "favorable"
+    elif better_window is not None:
+        verdict = "wait_for_better_window"
+    else:
+        verdict = "neutral"
+
+    prior_rows = []
+    if verdict == "neutral":
+        result = await db.execute(
+            select(PredictionQueryLog)
+            .where(
+                PredictionQueryLog.user_id == profile.user_id,
+                PredictionQueryLog.intent == f"{decision_type}_decision",
+            )
+            .order_by(PredictionQueryLog.created_at.desc())
+            .limit(2)
+        )
+        prior_rows = result.scalars().all()
+    prior_verdicts = [row.result_summary.get("verdict") for row in prior_rows]
+    history_nudge = _history_nudge(verdict, prior_verdicts)
+    history_dates = [row.created_at.date().isoformat() for row in prior_rows] if history_nudge is not None else []
+
+    current_period_out = None
+    if current_period is not None:
+        current_period_out = {
+            "start_date": current_period.start.date().isoformat(),
+            "end_date": current_period.end.date().isoformat(),
+            "mahadasha_lord": current_period.mahadasha_lord,
+            "mahadasha_lord_name": names[current_period.mahadasha_lord],
+            "antardasha_lord": current_period.antardasha_lord,
+            "antardasha_lord_name": names[current_period.antardasha_lord],
+            "score": current_period.score,
+            "evidence_level": current_evidence,
+            "dusthana_afflicted": dusthana_afflicted,
+        }
+    better_window_out = None
+    if better_window is not None:
+        better_window_out = {
+            "start_date": better_window.start.date().isoformat(),
+            "end_date": better_window.end.date().isoformat(),
+            "mahadasha_lord": better_window.mahadasha_lord,
+            "mahadasha_lord_name": names[better_window.mahadasha_lord],
+            "antardasha_lord": better_window.antardasha_lord,
+            "antardasha_lord_name": names[better_window.antardasha_lord],
+            "score": better_window.score,
+        }
+
+    reasoning = decision_reason_text(
+        decision_type, verdict, language,
+        current_period_lord=current_period.antardasha_lord if current_period else None,
+        dusthana_afflicted=dusthana_afflicted,
+        better_window_start=better_window.start.date().isoformat() if better_window else None,
+        history_nudge=history_nudge,
+        history_dates=history_dates,
+    )
+
+    await log_prediction_query(
+        db, profile.user_id, f"{decision_type}_decision", None, language,
+        {
+            "verdict": verdict,
+            "current_period_start": current_period.start.date().isoformat() if current_period else None,
+        },
+    )
+
+    return DecisionResponse(
+        decision_type=decision_type, language=language, verdict=verdict, reasoning=reasoning,
+        current_period=current_period_out, better_window=better_window_out, history_nudge=history_nudge,
     )
 
 

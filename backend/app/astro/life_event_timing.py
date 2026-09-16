@@ -22,10 +22,30 @@ from app.astro.event_karakas import CATEGORY_KARAKAS, karaka_specificity_multipl
 from app.astro.event_window_scanner import ScoredWindow, WindowRule, scan_dasha_windows
 from app.astro.transit_corroboration import TransitCheck, check_transits
 
-EventType = Literal["career", "wealth", "children", "foreign_travel"]
+EventType = Literal[
+    "career", "wealth", "children", "foreign_travel",
+    "career_promotion", "business_partnership", "business_expansion",
+]
 
-# The house each event classically activates.
-EVENT_HOUSE: dict[EventType, int] = {"career": 10, "wealth": 2, "children": 5, "foreign_travel": 12}
+# The house each event classically activates. career_promotion/
+# business_partnership/business_expansion are new (Phase 2 sub-intents) —
+# see EVENT_SECONDARY_HOUSES below for the multi-house ones among them.
+EVENT_HOUSE: dict[EventType, int] = {
+    "career": 10, "wealth": 2, "children": 5, "foreign_travel": 12,
+    "career_promotion": 10, "business_partnership": 7, "business_expansion": 11,
+}
+
+# Secondary houses supporting a multi-house event, weighted below the
+# primary house's own 3.0 base weight (see event_rules) — e.g. promotion's
+# own house (career, 10th) is still the strongest signal; 11th (gains) and
+# 2nd (accumulated wealth) are real but supporting classical evidence, not
+# equal to the primary. Events not listed here (career/wealth/children/
+# foreign_travel/business_partnership) are single-house, unchanged from
+# before Phase 2.
+EVENT_SECONDARY_HOUSES: dict[EventType, list[tuple[int, float]]] = {
+    "career_promotion": [(11, 0.7), (2, 0.5)],
+    "business_expansion": [(2, 0.6)],
+}
 
 # Classical significators (karakas) for each event, beyond the house lord
 # itself — Saturn=karma/profession, Sun=authority/status, Jupiter/Venus=
@@ -36,12 +56,18 @@ EVENT_HOUSE: dict[EventType, int] = {"career": 10, "wealth": 2, "children": 5, "
 # there's one place to update if a karaka set ever changes.
 EVENT_KARAKAS: dict[EventType, list[PlanetKey]] = {
     event_type: list(CATEGORY_KARAKAS[event_type])
-    for event_type in ("career", "wealth", "children", "foreign_travel")
+    for event_type in (
+        "career", "wealth", "children", "foreign_travel",
+        "career_promotion", "business_partnership", "business_expansion",
+    )
 }
 
 
 def event_rules(
-    event_type: EventType, house_lord: PlanetKey, strength: dict[PlanetKey, float] | None = None
+    event_type: EventType,
+    house_lord: PlanetKey,
+    strength: dict[PlanetKey, float] | None = None,
+    secondary_lords: dict[int, PlanetKey] | None = None,
 ) -> list[WindowRule]:
     """House-lord Antardasha is the strongest signal (the event's own house
     is directly activated); each karaka's Antardasha is an equally-weighted
@@ -61,8 +87,20 @@ def event_rules(
     Venus are each classical karakas for MULTIPLE categories here, so
     without this a single strong Jupiter/Venus Antardasha could win
     several unrelated categories from the same real dasha window — see
-    that module's docstring for the empirical evidence this addresses."""
+    that module's docstring for the empirical evidence this addresses.
+
+    `secondary_lords` (Phase 2: `{house_number: lord}` for each of
+    EVENT_SECONDARY_HOUSES.get(event_type, [])) adds a weaker supporting
+    rule for a MULTI-house event like "career_promotion" (10th+11th+2nd) —
+    weighted below the primary house-lord rule (see EVENT_SECONDARY_HOUSES'
+    per-house multiplier), same karaka_specificity treatment as karaka
+    rules since these are also real but non-primary evidence. Reason keys
+    use "_secondary_house_{house}_antardasha" (no "house_lord"/"seventh_
+    lord" substring), so _evidence_level classifies them as karaka-tier —
+    correct: a supporting house's lord is real antardasha-level evidence,
+    just not as strong as the event's own primary house lord."""
     strength = strength or {}
+    secondary_lords = secondary_lords or {}
 
     def weight(planet: PlanetKey, base: float, karaka: bool = False) -> float:
         specificity = karaka_specificity_multiplier(planet) if karaka else 1.0
@@ -83,6 +121,22 @@ def event_rules(
                 "mahadasha_lord", karaka, weight(karaka, 0.5, karaka=True), f"{event_type}_karaka_mahadasha_{karaka}"
             )
         )
+    for house, weight_mult in EVENT_SECONDARY_HOUSES.get(event_type, []):
+        lord = secondary_lords.get(house)
+        if lord is None:
+            continue
+        rules.append(
+            WindowRule(
+                "antardasha_lord", lord, weight(lord, 3.0 * weight_mult, karaka=True),
+                f"{event_type}_secondary_house_{house}_antardasha",
+            )
+        )
+        rules.append(
+            WindowRule(
+                "mahadasha_lord", lord, weight(lord, 1.0 * weight_mult, karaka=True),
+                f"{event_type}_secondary_house_{house}_mahadasha",
+            )
+        )
     return rules
 
 
@@ -94,13 +148,15 @@ def find_event_windows(
     horizon_years: float = 20.0,
     top_n: int = 3,
     strength: dict[PlanetKey, float] | None = None,
+    secondary_lords: dict[int, PlanetKey] | None = None,
 ) -> list[ScoredWindow]:
     """`weigh_dasha_relationship=True` (always on here) additionally scales
     each window by how the Antardasha lord classically relates to its
     Mahadasha lord, same convention as marriage_timing.find_marriage_windows
-    — see app.astro.event_window_scanner.scan_dasha_windows."""
+    — see app.astro.event_window_scanner.scan_dasha_windows. `secondary_lords`
+    is passed straight through to event_rules — see its docstring."""
     scored = scan_dasha_windows(
-        mahadashas, event_rules(event_type, house_lord, strength), from_dt, horizon_years,
+        mahadashas, event_rules(event_type, house_lord, strength, secondary_lords), from_dt, horizon_years,
         weigh_dasha_relationship=True,
     )
     return scored[:top_n]

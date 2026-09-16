@@ -4,9 +4,11 @@ account deletion. Runs against the template (non-LLM) interpreter since no
 ANTHROPIC_API_KEY is set in the test environment — this validates the
 plumbing, not LLM output quality."""
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
+
+from app.astro.event_window_scanner import ScoredWindow
 
 from app.services.interpretation.templates import _LIFE_FRAMING_EN
 
@@ -648,6 +650,269 @@ async def test_life_event_timing_confidence_field_matches_evidence_level(client)
                 assert window["confidence"] == _CONFIDENCE_FOR_EVIDENCE[window["evidence_level"]]
                 if window["evidence_level"] == "backdrop_only":
                     assert window["reason"].startswith("No strong, directly-tied window was found")
+
+
+async def test_life_state_endpoint_round_trips_and_appears_in_profile(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.put(
+        "/api/v1/user/profile/life-state", headers=headers,
+        json={
+            "marital_status": "married", "marriage_date": "2024-11-15", "children_count": 1,
+            "pregnancy_status": "none", "career_state": "employed", "business_state": "none",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    life_state = resp.json()["life_state"]
+    assert life_state == {
+        "marital_status": "married", "marriage_date": "2024-11-15", "children_count": 1,
+        "pregnancy_status": "none", "expected_delivery": None, "career_state": "employed",
+        "business_state": "none", "version": 1,
+    }
+
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    assert profile.json()["life_state"] == life_state
+
+
+async def test_marriage_timing_reframes_reason_when_already_married(client):
+    """v18: a user's own LifeState (married) reframes a FUTURE marriage_timing
+    answer as married-life/relationship development rather than implying a
+    first marriage that already happened. PAST queries are unaffected —
+    "strongest past commitment period" is still a sensible question
+    regardless of current marital status."""
+    headers = await _signup_and_set_birth_data(client)
+    await client.put(
+        "/api/v1/user/profile/life-state", headers=headers,
+        json={"marital_status": "married", "marriage_date": "2024-11-15"},
+    )
+    future = await client.get(
+        "/api/v1/prediction/marriage-timing", headers=headers,
+        params={"language": "en", "direction": "future"},
+    )
+    assert future.status_code == 200, future.text
+    assert future.json()["cached"] is False  # freshly recomputed for the new life state
+    for window in future.json()["windows"]:
+        assert "You're already married as of 2024-11-15" in window["reason"]
+
+    past = await client.get(
+        "/api/v1/prediction/marriage-timing", headers=headers,
+        params={"language": "en", "direction": "past"},
+    )
+    assert past.status_code == 200, past.text
+    for window in past.json()["windows"]:
+        assert "already married" not in window["reason"]
+
+
+async def test_life_event_timing_reframes_reason_when_already_has_children(client):
+    headers = await _signup_and_set_birth_data(client)
+    await client.put(
+        "/api/v1/user/profile/life-state", headers=headers,
+        json={"children_count": 2, "pregnancy_status": "none"},
+    )
+    resp = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers,
+        params={"event_type": "children", "language": "en", "direction": "future"},
+    )
+    assert resp.status_code == 200, resp.text
+    for window in resp.json()["windows"]:
+        assert "You already have children" in window["reason"]
+
+    # A different event type is unaffected by the children-specific note.
+    career = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers,
+        params={"event_type": "career", "language": "en", "direction": "future"},
+    )
+    for window in career.json()["windows"]:
+        assert "You already have children" not in window["reason"]
+
+
+async def test_life_event_timing_anchors_to_expected_delivery_when_expecting(client):
+    """v18: an already-expecting user's FUTURE children query must not run
+    a blind search proposing a brand-new future child — it anchors
+    directly to whichever Antardasha already covers their own
+    expected_delivery date."""
+    headers = await _signup_and_set_birth_data(client)
+    await client.put(
+        "/api/v1/user/profile/life-state", headers=headers,
+        json={"pregnancy_status": "expecting", "expected_delivery": "2026-12-20"},
+    )
+    resp = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers,
+        params={"event_type": "children", "language": "en", "direction": "future"},
+    )
+    assert resp.status_code == 200, resp.text
+    windows = resp.json()["windows"]
+    assert len(windows) == 1
+    window = windows[0]
+    assert window["start_date"] <= "2026-12-20" <= window["end_date"]
+    assert "expected delivery (2026-12-20)" in window["reason"]
+    assert window["peak_window"] is None
+
+    # Career (a different event type) is unaffected by the pregnancy override.
+    career = await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers,
+        params={"event_type": "career", "language": "en", "direction": "future"},
+    )
+    assert len(career.json()["windows"]) > 1
+
+
+async def test_setting_life_state_invalidates_marriage_timing_cache(client):
+    headers = await _signup_and_set_birth_data(client)
+    first = await client.get(
+        "/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"}
+    )
+    assert first.json()["cached"] is False
+    second = await client.get(
+        "/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"}
+    )
+    assert second.json()["cached"] is True  # unchanged life state -> still cached
+
+    await client.put(
+        "/api/v1/user/profile/life-state", headers=headers, json={"marital_status": "married"}
+    )
+    third = await client.get(
+        "/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"}
+    )
+    assert third.json()["cached"] is False  # life-state edit invalidated the cache row
+
+
+async def test_decision_job_change_returns_a_verdict_with_current_period(client):
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get(
+        "/api/v1/prediction/decision", headers=headers, params={"decision_type": "job_change", "language": "en"}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["decision_type"] == "job_change"
+    assert data["verdict"] in ("favorable", "unfavorable", "wait_for_better_window", "neutral")
+    assert data["reasoning"]
+    if data["verdict"] == "favorable":
+        assert data["current_period"] is not None
+        assert data["better_window"] is None
+    if data["verdict"] == "wait_for_better_window":
+        assert data["better_window"] is not None
+
+
+async def test_decision_business_start_is_gated_by_life_state(client):
+    """v20 (Phase 3): business_start reuses business_partnership's 7th-house
+    gate — without a stated business intent, it must not return a verdict
+    indistinguishable from marriage_timing's own signal."""
+    headers = await _signup_and_set_birth_data(client)
+    blocked = await client.get(
+        "/api/v1/prediction/decision", headers=headers, params={"decision_type": "business_start", "language": "en"}
+    )
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()["note"] is not None
+    assert blocked.json()["current_period"] is None
+
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"business_state": "considering"})
+    unblocked = await client.get(
+        "/api/v1/prediction/decision", headers=headers, params={"decision_type": "business_start", "language": "en"}
+    )
+    assert unblocked.status_code == 200, unblocked.text
+    assert unblocked.json()["note"] is None
+
+
+async def test_decision_never_lets_history_override_a_clear_verdict(client, monkeypatch):
+    """Regression guard for the core guardrail of the history-nudge feature:
+    even with two consistent (and opposite-direction) prior verdicts
+    logged, a fresh clear (non-neutral) verdict must never be touched."""
+    from app.services import prediction_service
+
+    headers = await _signup_and_set_birth_data(client)
+
+    # Force a clear "favorable" verdict regardless of the real chart, then
+    # confirm two opposing "unfavorable" priors don't flip it.
+    forced_window = ScoredWindow(
+        start=datetime(2020, 1, 1, tzinfo=timezone.utc), end=datetime(2023, 1, 1, tzinfo=timezone.utc),
+        mahadasha_lord="Sa", antardasha_lord="Sa", score=10.0, reason_keys=["career_promotion_house_lord_antardasha"],
+    )
+    monkeypatch.setattr(prediction_service, "_is_currently_dusthana_afflicted", lambda *a, **kw: False)
+    monkeypatch.setattr(prediction_service, "_current_period_score", lambda *a, **kw: forced_window)
+
+    from app.db.base import AsyncSessionLocal
+    from app.db.models.prediction_query_log import PredictionQueryLog
+    from app.db.models.user import User
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as session:
+        user_id = (await session.execute(select(User.id))).scalar_one()
+        session.add(PredictionQueryLog(
+            user_id=user_id, intent="job_change_decision", direction=None, language="en",
+            result_summary={"verdict": "unfavorable"},
+        ))
+        session.add(PredictionQueryLog(
+            user_id=user_id, intent="job_change_decision", direction=None, language="en",
+            result_summary={"verdict": "unfavorable"},
+        ))
+        await session.commit()
+
+    resp = await client.get(
+        "/api/v1/prediction/decision", headers=headers, params={"decision_type": "job_change", "language": "en"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["verdict"] == "favorable"
+    assert resp.json()["history_nudge"] is None
+
+
+async def test_decision_nudges_a_neutral_verdict_toward_two_consistent_priors(client, monkeypatch):
+    """The positive case: a genuinely borderline ("neutral") fresh reading,
+    with the user's last two checks on this exact question both reading
+    "favorable" — the nudge should fire and the reasoning should name it."""
+    from app.services import prediction_service
+
+    headers = await _signup_and_set_birth_data(client)
+
+    monkeypatch.setattr(prediction_service, "_is_currently_dusthana_afflicted", lambda *a, **kw: False)
+    monkeypatch.setattr(prediction_service, "_current_period_score", lambda *a, **kw: None)
+    monkeypatch.setattr(prediction_service, "find_event_windows", lambda *a, **kw: [])
+
+    from app.db.base import AsyncSessionLocal
+    from app.db.models.prediction_query_log import PredictionQueryLog
+    from app.db.models.user import User
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as session:
+        user_id = (await session.execute(select(User.id))).scalar_one()
+        for _ in range(2):
+            session.add(PredictionQueryLog(
+                user_id=user_id, intent="job_change_decision", direction=None, language="en",
+                result_summary={"verdict": "favorable"},
+            ))
+        await session.commit()
+
+    resp = await client.get(
+        "/api/v1/prediction/decision", headers=headers, params={"decision_type": "job_change", "language": "en"}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["verdict"] == "neutral"
+    assert data["history_nudge"] == "favorable"
+    assert "favorable" in data["reasoning"]
+
+
+async def test_prediction_query_log_accumulates_across_timing_and_decision_calls(client):
+    from app.db.base import AsyncSessionLocal
+    from app.db.models.prediction_query_log import PredictionQueryLog
+    from sqlalchemy import select
+
+    headers = await _signup_and_set_birth_data(client)
+    await client.get("/api/v1/prediction/marriage-timing", headers=headers, params={"language": "en"})
+    await client.get(
+        "/api/v1/prediction/life-event-timing", headers=headers,
+        params={"event_type": "career", "language": "en"},
+    )
+    await client.get(
+        "/api/v1/prediction/decision", headers=headers, params={"decision_type": "job_change", "language": "en"}
+    )
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(PredictionQueryLog))
+        rows = result.scalars().all()
+
+    intents = sorted(row.intent for row in rows)
+    assert intents == ["career", "job_change_decision", "marriage_timing"]
+    for row in rows:
+        assert row.result_summary  # never an empty/missing summary
 
 
 async def test_life_event_timing_reinterprets_a_window_with_no_plausible_age_alternative(client):

@@ -24,7 +24,10 @@ rather than zeroing a window out completely.
 """
 from typing import Literal
 
-EventCategory = Literal["marriage", "career", "wealth", "children", "foreign_travel"]
+EventCategory = Literal[
+    "marriage", "career", "wealth", "children", "foreign_travel",
+    "career_promotion", "business_partnership", "business_expansion",
+]
 
 # (hard_floor, soft_floor, soft_ceiling, hard_ceiling), in years of age at
 # the window's START. Below hard_floor or above hard_ceiling: heavily
@@ -50,6 +53,14 @@ _AGE_BANDS: dict[EventCategory, tuple[float, float, float, float]] = {
     # relocation as a child, work travel as an adult, retirement travel) —
     # a much wider, gentler band than the other four.
     "foreign_travel": (0.0, 3.0, 75.0, 90.0),
+    # Phase 2 sub-intents reuse their closest parent domain's band rather
+    # than inventing new numbers — a promotion's age relevance is career's;
+    # business-partnership timing (adult, formal-commitment-level relevance
+    # via the shared 7th house) is closest to marriage's; business
+    # expansion (financial-gain timing) is closest to wealth's.
+    "career_promotion": (13.0, 17.0, 65.0, 75.0),
+    "business_partnership": (15.0, 19.0, 45.0, 60.0),
+    "business_expansion": (16.0, 19.0, 70.0, 80.0),
 }
 
 _MIN_MULTIPLIER = 0.15
