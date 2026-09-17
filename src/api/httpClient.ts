@@ -51,7 +51,14 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, query, auth = true } = options;
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // Bypasses ngrok's free-tier browser-warning interstitial page, which
+  // otherwise replaces the real JSON response for any request made from an
+  // actual browser (curl/native fetch on-device aren't affected — this only
+  // ever bites the web build while the backend is exposed via ngrok).
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
+  };
   if (auth && authToken) {
     headers.Authorization = `Bearer ${authToken}`;
   }
@@ -76,6 +83,36 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   if (!response.ok) {
     if (response.status === 401 && auth && authToken) {
+      onSessionExpired?.();
+    }
+    const message = payload?.detail ?? response.statusText ?? 'Request failed';
+    throw new ApiError(response.status, typeof message === 'string' ? message : JSON.stringify(message));
+  }
+
+  return payload as T;
+}
+
+// For file uploads (currently just voice-note transcription) — deliberately
+// NOT setting Content-Type: fetch derives the correct multipart boundary
+// from the FormData itself, and setting it manually breaks that.
+export async function apiRequestMultipart<T>(path: string, formData: FormData): Promise<T> {
+  const headers: Record<string, string> = { 'ngrok-skip-browser-warning': 'true' };
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path), { method: 'POST', headers, body: formData });
+  } catch (networkError) {
+    throw new ApiError(0, 'Could not reach the server. Check that the backend is running and your phone is on the same Wi-Fi network.');
+  }
+
+  const isJson = response.headers.get('content-type')?.includes('application/json');
+  const payload = isJson ? await response.json().catch(() => null) : null;
+
+  if (!response.ok) {
+    if (response.status === 401 && authToken) {
       onSessionExpired?.();
     }
     const message = payload?.detail ?? response.statusText ?? 'Request failed';

@@ -81,6 +81,45 @@ async def test_chat_astro_specializes_by_rishi_id_and_scopes_history_per_rishi(c
     assert "Bhrigu" not in resp2.json()["reply"]
 
 
+async def test_chat_astro_decision_category_context_is_json_serializable(client, monkeypatch):
+    """Regression guard for a real bug caught live once the OpenAI interpreter
+    went active: chat.py built job_change_decision/business_start_decision's
+    context via CurrentPeriod/BetterWindow.model_dump() (no mode="json"),
+    which leaves start_date/end_date as raw `date` objects — invisible on the
+    template path (it only ever reads decision["note"]/["reasoning"], never
+    serializes the whole dict) but a hard 500 the moment anything calls
+    json.dumps() on the full context, as any real LLM-backed interpreter
+    does. This exercises the actual endpoint end-to-end and would fail the
+    same way if the mode="json" fix regressed."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "Should I switch my job right now?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["reply"]
+
+    # The underlying schema fix itself: mode="json" must turn `date` fields
+    # into plain JSON-safe strings, not leave them as `date` objects.
+    from datetime import date
+
+    from app.schemas.prediction import CurrentPeriod
+
+    period = CurrentPeriod(
+        start_date=date(2025, 1, 1), end_date=date(2026, 1, 1), mahadasha_lord="Ra",
+        mahadasha_lord_name="Rahu", antardasha_lord="Sa", antardasha_lord_name="Saturn",
+        score=1.5, evidence_level="house_lord_antardasha", dusthana_afflicted=False,
+    )
+    dumped = period.model_dump(mode="json")
+    assert dumped["start_date"] == "2025-01-01"
+    import json
+
+    json.dumps(dumped)  # must not raise
+
+
 async def test_chat_astro_vyasa_answers_every_topic_directly_without_redirecting(client, monkeypatch):
     """Vyasa is the new default generalist persona (see
     templates._RISHI_SPECIALTY, which deliberately excludes it) — it must

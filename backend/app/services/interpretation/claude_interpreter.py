@@ -24,6 +24,14 @@ _LANGUAGE_INSTRUCTION = {
         "Keep widely-understood English words (like career, stress) in English if that "
         "reads more naturally than a stiff Hindi translation."
     ),
+    "hinglish": (
+        "Respond in natural Hinglish, written entirely in Roman/Latin script — never "
+        "Devanagari. This means real code-switched Hindi-English the way urban Indian "
+        "friends actually text each other (e.g. \"isse aapke rishto pe thoda asar pad "
+        "sakta hai\", \"yeh time thoda tough hai but sambhal jaoge\") — not pure English "
+        "with a few Hindi words sprinkled in, and not a stiff transliteration of formal "
+        "Hindi. Keep it warm and casual."
+    ),
 }
 
 _MODE_INSTRUCTION = {

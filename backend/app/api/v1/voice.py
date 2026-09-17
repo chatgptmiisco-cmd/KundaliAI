@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from typing import Literal
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_birth_profile, require_tier
@@ -25,15 +27,15 @@ router = APIRouter(prefix="/voice", tags=["voice"])
 async def transcribe(
     request: Request,
     audio: UploadFile = File(...),
-    language: str = "en",
+    language: Literal["en", "hi", "hinglish"] = Form("en"),
     _user=Depends(require_tier("insight")),
 ):
     provider = get_stt_provider()
     try:
-        text = await provider.transcribe(await audio.read(), language)
+        text = await provider.transcribe(await audio.read(), language, audio.filename or "audio.m4a")
     except NotImplementedError as exc:
         raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, str(exc)) from exc
-    return TranscribeResponse(text=text, language=language, provider=provider.name, stub=True)
+    return TranscribeResponse(text=text, language=language, provider=provider.name, stub=provider.name == "stub")
 
 
 @router.post("/synthesize", response_model=SynthesizeResponse)

@@ -9,7 +9,7 @@ one new class against this interface; nothing else changes.
 from abc import ABC, abstractmethod
 from typing import Any, Literal
 
-Language = Literal["en", "hi"]
+Language = Literal["en", "hi", "hinglish"]
 Mode = Literal["simple", "detailed"]
 
 

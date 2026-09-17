@@ -330,10 +330,72 @@ def _planet_effect(planet: PlanetKey, dignity: str | None) -> tuple[str, str]:
     return (_NEUTRAL_EFFECT_EN[planet], _NEUTRAL_EFFECT_HI[planet])
 
 
+def build_planet_theme_sentences(chart: ChartResult) -> dict[PlanetKey, dict]:
+    """The classical "significations blend" for a planet: whichever house(s)
+    it rules lend their life-area flavor to whichever house it's actually
+    placed in — e.g. a 10th lord (career) sitting in the 4th house (home)
+    means career satisfaction is often tied to environment/stability, not
+    just title or money. This is what makes a sentence about a specific
+    planet (a topic's house-lord, or a dasha lord) read as being about THIS
+    chart instead of reciting the planet's generic tone — which two houses
+    get blended is different for every birth chart, which is the actual
+    source of feeling "known" rather than generic.
+
+    Returns both a ready-made prose sentence (theme_en/hi) AND the raw
+    numbers/sign names behind it (ruled_houses/placed_house/placed_sign) —
+    direct feedback found that naming the actual house numbers and sign
+    names (e.g. "your 10th house is Taurus, ruled by Venus, sitting in your
+    4th house, Scorpio") read as more genuinely personal than the paraphrased
+    prose alone, so the prompt that consumes this can choose to state them
+    explicitly rather than only the softened version.
+
+    Used two ways: per-house in build_house_breakdown below (that house's
+    own lord), and directly by chat's Mahadasha/Antardasha lord facts (a
+    dasha lord isn't necessarily any topic's house-lord, so it needs its own
+    lookup by planet code rather than by house)."""
+    themes: dict[PlanetKey, dict] = {}
+    for planet, placed_house in chart.planet_house.items():
+        ruled_houses = [h for h in range(1, 13) if house_lord(h, chart.lagna_sign_index) == planet]
+        placed_sign_idx = (chart.lagna_sign_index + placed_house - 1) % 12
+        placed_sign_en, placed_sign_hi = SIGN_NAMES_EN[placed_sign_idx], SIGN_NAMES_HI[placed_sign_idx]
+        placed_focus_en, placed_focus_hi = _FOCUS_BY_HOUSE_EN[placed_house], _FOCUS_BY_HOUSE_HI[placed_house]
+        name_en, name_hi = PLANET_NAMES_EN[planet], PLANET_NAMES_HI[planet]
+        if ruled_houses:
+            ruled_focus_en = " and ".join(_FOCUS_BY_HOUSE_EN[h] for h in ruled_houses)
+            ruled_focus_hi = " और ".join(_FOCUS_BY_HOUSE_HI[h] for h in ruled_houses)
+            theme_en = (
+                f"{name_en} rules {ruled_focus_en} in your chart, and sits in the house of "
+                f"{placed_focus_en} — so that side of life tends to play out through "
+                f"{placed_focus_en}, not on its own."
+            )
+            theme_hi = (
+                f"{name_hi} आपकी कुंडली में {ruled_focus_hi} का स्वामी है, और {placed_focus_hi} के भाव में "
+                f"बैठा है — इसलिए यह क्षेत्र अक्सर {placed_focus_hi} के ज़रिए ही सामने आता है।"
+            )
+        else:
+            # Rahu/Ketu own no sign, so they never classically "rule" a house
+            # — placement alone (via its general tone) still carries meaning.
+            tone_en, tone_hi = _TONE_BY_LORD_EN[planet], _TONE_BY_LORD_HI[planet]
+            theme_en = f"{name_en} sits in the house of {placed_focus_en}, bringing a {tone_en} quality to that part of life."
+            theme_hi = f"{name_hi} {placed_focus_hi} के भाव में बैठा है, जिससे उसमें {tone_hi} जैसा भाव जुड़ता है।"
+        themes[planet] = {
+            "name_en": name_en,
+            "name_hi": name_hi,
+            "ruled_houses": ruled_houses,
+            "placed_house": placed_house,
+            "placed_sign_en": placed_sign_en,
+            "placed_sign_hi": placed_sign_hi,
+            "theme_en": theme_en,
+            "theme_hi": theme_hi,
+        }
+    return themes
+
+
 def build_house_breakdown(chart: ChartResult) -> list[dict]:
     names_en, names_hi = PLANET_NAMES_EN, PLANET_NAMES_HI
     focus_en, focus_hi = _FOCUS_BY_HOUSE_EN, _FOCUS_BY_HOUSE_HI
     qualifier_en, qualifier_hi = _DIGNITY_QUALIFIER_EN, _DIGNITY_QUALIFIER_HI
+    planet_themes = build_planet_theme_sentences(chart)
 
     planets_by_house: dict[int, list[PlanetKey]] = {h: [] for h in range(1, 13)}
     for planet, house in chart.planet_house.items():
@@ -423,6 +485,9 @@ def build_house_breakdown(chart: ChartResult) -> list[dict]:
             explanation_hi = f"यह भाव {focus_hi[house]} को दर्शाता है।{conjunction_hi} " + " ".join(sentences_hi)
             verdict_bucket = _dignity_bucket(dignities_here)
 
+        this_house_lord = house_lord(house, chart.lagna_sign_index)
+        lord_theme_en = planet_themes[this_house_lord]["theme_en"]
+        lord_theme_hi = planet_themes[this_house_lord]["theme_hi"]
         breakdown.append(
             {
                 "house": house,
@@ -433,6 +498,9 @@ def build_house_breakdown(chart: ChartResult) -> list[dict]:
                 "explanation_hi": explanation_hi,
                 "verdict_en": f"{_VERDICT_BY_HOUSE_EN[house][verdict_bucket]} {_VERDICT_REASON_EN[verdict_bucket]}",
                 "verdict_hi": f"{_VERDICT_BY_HOUSE_HI[house][verdict_bucket]} {_VERDICT_REASON_HI[verdict_bucket]}",
+                "lord": this_house_lord,
+                "lord_theme_en": lord_theme_en,
+                "lord_theme_hi": lord_theme_hi,
             }
         )
     return breakdown

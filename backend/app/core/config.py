@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     # renders every explanation, and it's what get_interpreter() returns.
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4-5"
+    # OpenAI is preferred over Claude when both keys are set (see
+    # app.services.interpretation.factory.get_interpreter) — gpt-4o-mini is
+    # the default for cost, since chat now makes two small calls per message
+    # (understand the question, then explain the real computed answer)
+    # rather than one big one.
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
     use_ai_interpretation: bool = False
 
     # Every subscription-gated feature (D9/D10 charts, unlimited period
@@ -65,7 +72,12 @@ class Settings(BaseSettings):
     razorpay_webhook_secret: str | None = None
 
     # Voice (STT/TTS). Stub providers ship by default; see app/services/voice.
-    stt_provider: Literal["stub", "google", "azure", "aws"] = "stub"
+    # "openai" reuses openai_api_key above — no separate key needed. The
+    # whisper-1 is the default since it's available on every OpenAI project
+    # without extra enablement — gpt-4o-mini-transcribe is cheaper/newer but
+    # gated behind per-project access, so it's opt-in via STT_MODEL instead.
+    stt_provider: Literal["stub", "openai", "google", "azure", "aws"] = "stub"
+    stt_model: str = "whisper-1"
     tts_provider: Literal["stub", "google", "azure", "aws"] = "stub"
 
     # Free-tier quotas

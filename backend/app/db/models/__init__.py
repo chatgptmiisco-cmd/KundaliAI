@@ -16,6 +16,7 @@ from app.db.models.life_state import LifeState
 from app.db.models.prediction_query_log import PredictionQueryLog
 from app.db.models.subscription import Subscription
 from app.db.models.user import OtpRequest, User
+from app.db.models.user_memory import UserMemoryNote
 
 __all__ = [
     "AuditLog",
@@ -33,4 +34,5 @@ __all__ = [
     "Subscription",
     "OtpRequest",
     "User",
+    "UserMemoryNote",
 ]

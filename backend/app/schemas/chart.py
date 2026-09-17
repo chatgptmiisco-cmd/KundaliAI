@@ -42,6 +42,32 @@ class HouseBreakdown(BaseModel):
     # my chart say about X" answers use this instead of the detailed text.
     verdict_en: str
     verdict_hi: str
+    # The classical planet ruling this house's sign, and a real, chart-
+    # specific sentence blending what THAT planet rules elsewhere with where
+    # it's actually placed (see chart_explanation_service.build_planet_theme_
+    # sentences) — this is what makes a topic answer feel specific to this
+    # one chart instead of reciting the same dasha-lord description used for
+    # every other topic too.
+    lord: str
+    lord_theme_en: str
+    lord_theme_hi: str
+
+
+class PlanetTheme(BaseModel):
+    name_en: str
+    name_hi: str
+    # Raw structured facts (house numbers, sign names) rather than only
+    # pre-written prose — chat's prompt now states these explicitly (e.g.
+    # "your 10th house is Taurus, ruled by Venus, which sits in your 4th
+    # house, Scorpio") instead of paraphrasing them into a generic "home and
+    # family" life-area phrase, per direct feedback that naming the actual
+    # houses/signs read as more genuinely personal, not more confusing.
+    ruled_houses: list[int]
+    placed_house: int
+    placed_sign_en: str
+    placed_sign_hi: str
+    theme_en: str
+    theme_hi: str
 
 
 class YogaFinding(BaseModel):
@@ -71,4 +97,9 @@ class ChartResponse(BaseModel):
     key_points_hi: list[str]
     house_breakdown: list[HouseBreakdown] = []
     yogas: list[YogaFinding] = []
+    # Keyed by planet code (e.g. "Ve", "Ra") — same signification-blend
+    # sentence as each HouseBreakdown's lord_theme_en/hi, but looked up by
+    # planet rather than by house, since a Mahadasha/Antardasha lord isn't
+    # necessarily any topic's house-lord (Rahu/Ketu never are).
+    planet_themes: dict[str, PlanetTheme] = {}
     cached: bool

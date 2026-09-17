@@ -25,7 +25,13 @@
     "plugins": [
       "expo-font",
       "expo-splash-screen",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow KundaliAI to use your microphone so you can ask a Rishi your question out loud."
+        }
+      ]
     ],
     "extra": {
       "eas": {

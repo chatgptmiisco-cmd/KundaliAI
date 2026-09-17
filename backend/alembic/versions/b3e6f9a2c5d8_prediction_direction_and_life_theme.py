@@ -24,9 +24,15 @@ def upgrade() -> None:
         'marriage_timing_cache',
         sa.Column('direction', sa.String(length=8), nullable=False, server_default='future'),
     )
-    op.drop_constraint('marriage_timing_cache_user_id_language_birth_profile_version_key', 'marriage_timing_cache', type_='unique')
+    # Explicit short names throughout this migration — the natural
+    # column-list-derived name Postgres would otherwise auto-generate
+    # exceeds its 63-character identifier limit and gets silently
+    # truncated, which then doesn't match a later DROP that assumes the
+    # untruncated name (SQLite has no such limit, so this only ever
+    # surfaced once a real Postgres database was used).
+    op.drop_constraint('uq_marriage_timing_cache_v1', 'marriage_timing_cache', type_='unique')
     op.create_unique_constraint(
-        'marriage_timing_cache_user_id_direction_language_birth_profile_version_key',
+        'uq_marriage_timing_cache_v2',
         'marriage_timing_cache', ['user_id', 'direction', 'language', 'birth_profile_version'],
     )
 
@@ -34,9 +40,9 @@ def upgrade() -> None:
         'life_event_timing_cache',
         sa.Column('direction', sa.String(length=8), nullable=False, server_default='future'),
     )
-    op.drop_constraint('life_event_timing_cache_user_id_event_type_language_birth_profile_version_key', 'life_event_timing_cache', type_='unique')
+    op.drop_constraint('uq_life_event_timing_cache_v1', 'life_event_timing_cache', type_='unique')
     op.create_unique_constraint(
-        'life_event_timing_cache_user_id_event_type_direction_language_birth_profile_version_key',
+        'uq_life_event_timing_cache_v2',
         'life_event_timing_cache', ['user_id', 'event_type', 'direction', 'language', 'birth_profile_version'],
     )
 
@@ -60,16 +66,16 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_life_theme_cache_user_id'), table_name='life_theme_cache')
     op.drop_table('life_theme_cache')
 
-    op.drop_constraint('life_event_timing_cache_user_id_event_type_direction_language_birth_profile_version_key', 'life_event_timing_cache', type_='unique')
+    op.drop_constraint('uq_life_event_timing_cache_v2', 'life_event_timing_cache', type_='unique')
     op.create_unique_constraint(
-        'life_event_timing_cache_user_id_event_type_language_birth_profile_version_key',
+        'uq_life_event_timing_cache_v1',
         'life_event_timing_cache', ['user_id', 'event_type', 'language', 'birth_profile_version'],
     )
     op.drop_column('life_event_timing_cache', 'direction')
 
-    op.drop_constraint('marriage_timing_cache_user_id_direction_language_birth_profile_version_key', 'marriage_timing_cache', type_='unique')
+    op.drop_constraint('uq_marriage_timing_cache_v2', 'marriage_timing_cache', type_='unique')
     op.create_unique_constraint(
-        'marriage_timing_cache_user_id_language_birth_profile_version_key',
+        'uq_marriage_timing_cache_v1',
         'marriage_timing_cache', ['user_id', 'language', 'birth_profile_version'],
     )
     op.drop_column('marriage_timing_cache', 'direction')

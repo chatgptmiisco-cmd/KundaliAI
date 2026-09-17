@@ -1,6 +1,7 @@
 import { resolveBirthPlace } from '../data/geocoding';
-import { apiRequest, setAuthToken } from './httpClient';
+import { apiRequest, apiRequestMultipart, setAuthToken } from './httpClient';
 import {
+  AppLanguage,
   BirthChart,
   BirthData,
   ChartType,
@@ -834,11 +835,21 @@ export interface ChatReply {
   answeredByRishiId?: string;
 }
 
-export async function postChatMessage(message: string, lang: Language, rishiId: string): Promise<ChatReply> {
+export async function postChatMessage(message: string, lang: AppLanguage, rishiId: string): Promise<ChatReply> {
   const res = await apiRequest<{ reply: string; answered_by_rishi_id: string | null }>('/chat/astro', {
     method: 'POST',
     body: { message, language: lang, rishi_id: rishiId },
   });
   return { reply: res.reply, answeredByRishiId: res.answered_by_rishi_id ?? undefined };
+}
+
+// `uri` is a local file:// path from expo-audio's recorder (see
+// RishiChatScreen's mic button) — a plain m4a recording, uploaded as
+// multipart form data since it's a file, not JSON.
+export async function transcribeAudio(uri: string, lang: AppLanguage): Promise<{ text: string }> {
+  const formData = new FormData();
+  formData.append('audio', { uri, name: 'recording.m4a', type: 'audio/m4a' } as unknown as Blob);
+  formData.append('language', lang);
+  return apiRequestMultipart<{ text: string }>('/voice/transcribe', formData);
 }
 

@@ -5,6 +5,15 @@ import os
 
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_kundaliai.db"
 os.environ["ENVIRONMENT"] = "test"
+# Tests must never depend on (or accidentally use) real AI provider
+# credentials from a developer's local .env — without this, a real
+# OPENAI_API_KEY/ANTHROPIC_API_KEY sitting in .env would make the suite
+# silently start making real network calls (and hang without a network
+# path out) instead of exercising the deterministic template/fallback
+# path every other test here assumes.
+os.environ["USE_AI_INTERPRETATION"] = "false"
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["ANTHROPIC_API_KEY"] = ""
 # The app ships with ALL_FEATURES_FREE=true (paywalls off "for now"), but the
 # tier-gating/quota logic itself still needs real coverage for whenever it's
 # switched back on — so tests run with it explicitly off, and

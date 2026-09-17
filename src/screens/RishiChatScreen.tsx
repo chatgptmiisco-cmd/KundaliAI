@@ -13,14 +13,18 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from 'expo-audio';
 import { useTranslation } from 'react-i18next';
-import { postChatMessage } from '../api/client';
+import { postChatMessage, transcribeAudio } from '../api/client';
 import PremiumModal from '../components/PremiumModal';
 import RishiSwitcher from '../components/RishiSwitcher';
 import { ALL_FEATURES_FREE } from '../config/env';
 import { DEFAULT_RISHI_ID, findRishi, RishiId } from '../constants/rishis';
-import { getRishiReply } from '../data/chatReplies';
-import { VYASA_CATEGORIES, VyasaCategory } from '../data/vyasaGuidedChat';
 import { toContentLanguage } from '../i18n/contentLanguage';
 import { useChatStore } from '../store/useChatStore';
 import { useUserStore } from '../store/useUserStore';
@@ -29,10 +33,6 @@ import { colors, elevation, fontFamily, minTouchTarget, radius, spacing, typogra
 import { showAlert } from '../utils/crossPlatformAlert';
 
 type Phase = 'idle' | 'thinking';
-// Vyasa-only guided flow: tap a category, tap a question, see the answer,
-// then either ask another in the same category or change category. No free
-// text anywhere in this flow — see FlowStage below.
-type FlowStage = 'idle' | 'categories' | 'questions';
 // A chat "session" is considered over after this much inactivity — checked
 // lazily off the last message's timestamp (see checkSessionExpiry) rather
 // than a running timer, so it stays correct across backgrounding/tab
@@ -79,15 +79,8 @@ export default function RishiChatScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [typedInput, setTypedInput] = useState('');
   const [lockVisible, setLockVisible] = useState(false);
-  // Guided flow state — only ever read/rendered when isVyasa (declared
-  // further down); always starts at 'idle' so the welcome screen is the
-  // first thing shown on every fresh mount of this screen.
-  const [flowStage, setFlowStage] = useState<FlowStage>('idle');
-  const [activeCategory, setActiveCategory] = useState<VyasaCategory | null>(null);
-  // Within the 'questions' stage: false shows the question buttons, true
-  // shows the "ask another" / "change category" follow-up instead — set
-  // true right after a question's reply comes back.
-  const [hasAnsweredInCategory, setHasAnsweredInCategory] = useState(false);
+  const [micState, setMicState] = useState<'idle' | 'recording' | 'transcribing'>('idle');
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   // Shown only once earlier messages have scrolled out of view below the
   // current screen — lets the user jump back to the latest reply instead of
   // manually scrolling down. Works the same whether they're reading the
@@ -130,19 +123,25 @@ export default function RishiChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rishi.id]);
 
-  // This screen stays mounted across tab switches (no unmountOnBlur), so
-  // local flowStage state would otherwise sit at whatever it was left at
-  // indefinitely — re-checking on every re-focus is what actually enforces
-  // "end the chat after 30 minutes of no new message": returning to a stale
-  // session drops back to the welcome screen instead of resuming mid-flow.
+  // This screen stays mounted across tab switches (no unmountOnBlur) —
+  // re-checking on every re-focus is what enforces "end the chat session
+  // after 30 minutes of no new message": returning to a stale conversation
+  // gets a short "welcome back" line instead of silently resuming as if no
+  // time had passed.
   useFocusEffect(
     useCallback(() => {
       const last = messages[messages.length - 1];
       const expired = !last || Date.now() - last.createdAt > CHAT_SESSION_TIMEOUT_MS;
-      if (expired) {
-        setFlowStage('idle');
-        setActiveCategory(null);
-        setHasAnsweredInCategory(false);
+      // A real prior conversation (not just the seeded greeting) is what
+      // earns the welcome-back line — reopening a brand-new chat needs no
+      // extra message on top of the greeting already there.
+      if (expired && messages.length > 1) {
+        addMessage(rishi.id, {
+          id: `a-welcome-${Date.now()}`,
+          role: 'assistant',
+          text: t('rishi.welcomeBackMessage'),
+          createdAt: Date.now(),
+        });
       }
     }, [messages]),
   );
@@ -157,8 +156,8 @@ export default function RishiChatScreen() {
     setShowScrollToBottom(false);
 
     // Strategy subscribers get the real Claude-backed astrologer (backend-
-    // gated at /chat/astro); everyone else keeps the local, credit-metered
-    // canned replies for this Rishi's tone. ALL_FEATURES_FREE unlocks the
+    // gated at /chat/astro); everyone else spends a credit for the same real
+    // answer instead of a canned stand-in — ALL_FEATURES_FREE unlocks the
     // real path for everyone while plans aren't live yet.
     const hasStrategyAccess = plan === 'strategy' || ALL_FEATURES_FREE;
     if (!hasStrategyAccess) {
@@ -171,31 +170,61 @@ export default function RishiChatScreen() {
 
     addMessage(rishi.id, { id: `u-${Date.now()}`, role: 'user', text, createdAt: Date.now() });
 
-    let reply: string;
-    let answeredByRishiId: string | undefined;
-    if (hasStrategyAccess) {
-      setPhase('thinking');
-      try {
-        const res = await postChatMessage(text, contentLanguage, rishi.id);
-        reply = res.reply;
-        answeredByRishiId = res.answeredByRishiId;
-      } catch {
-        const assistantIndex = messages.filter((m) => m.role === 'assistant').length;
-        reply = getRishiReply(rishi.tone, assistantIndex, contentLanguage);
-      }
-    } else {
-      const assistantIndex = messages.filter((m) => m.role === 'assistant').length;
-      reply = getRishiReply(rishi.tone, assistantIndex, contentLanguage);
+    setPhase('thinking');
+    try {
+      const res = await postChatMessage(text, language, rishi.id);
+      addMessage(rishi.id, {
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        text: res.reply,
+        createdAt: Date.now(),
+        answeredByRishiId: res.answeredByRishiId,
+      });
+      // No auto-play here — replies stay text-only until the user taps the
+      // listen icon on a specific message (see the message list below).
+    } catch {
+      // Never fabricate a reply when the real chart-backed answer can't be
+      // reached — a fake "reading" that isn't grounded in the user's actual
+      // chart is worse than no reply at all. Surface the failure honestly
+      // instead so the user knows to retry.
+      showAlert(t('voiceChat.sendFailedTitle'), t('voiceChat.sendFailedMessage'));
     }
-
-    addMessage(rishi.id, { id: `a-${Date.now()}`, role: 'assistant', text: reply, createdAt: Date.now(), answeredByRishiId });
     setPhase('idle');
-    // No auto-play here — replies stay text-only until the user taps the
-    // listen icon on a specific message (see the message list below).
   };
 
-  const handleMicPress = () => {
-    showAlert(t('voiceChat.comingSoonTitle'), t('voiceChat.comingSoonMessage'));
+  const handleMicPress = async () => {
+    if (micState === 'recording') {
+      // Second tap stops the recording and sends it off for transcription —
+      // never auto-sent as a chat message, so the user can read/correct the
+      // transcribed text before it goes anywhere.
+      try {
+        await recorder.stop();
+        const uri = recorder.uri;
+        if (!uri) throw new Error('recording produced no file');
+        setMicState('transcribing');
+        const { text } = await transcribeAudio(uri, language);
+        setTypedInput((prev) => (prev ? `${prev} ${text}`.trim() : text));
+      } catch {
+        showAlert(t('voiceChat.transcribeFailedTitle'), t('voiceChat.transcribeFailedMessage'));
+      } finally {
+        setMicState('idle');
+      }
+      return;
+    }
+
+    const { granted } = await requestRecordingPermissionsAsync();
+    if (!granted) {
+      showAlert(t('voiceChat.micPermissionDeniedTitle'), t('voiceChat.micPermissionDeniedMessage'));
+      return;
+    }
+    try {
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setMicState('recording');
+    } catch {
+      showAlert(t('voiceChat.sendFailedTitle'), t('voiceChat.sendFailedMessage'));
+    }
   };
 
   const handleSendTyped = async () => {
@@ -206,50 +235,19 @@ export default function RishiChatScreen() {
   };
 
   const quickPrompts = [t('rishi.promptWeek'), t('rishi.promptDasha'), t('rishi.promptCareer'), t('rishi.promptPast')];
-  const isVyasa = rishi.id === 'vyasa';
-  const micLabel = phase === 'thinking' ? t('voiceChat.thinking') : t('voiceChat.tapToAsk');
-  const micBusy = phase === 'thinking';
-
-  // Vyasa is the generalist persona (answers every topic directly, see
-  // constants/rishis.ts) — the natural home for a guided "ask anything" menu
-  // covering every category the backend can genuinely answer, including
-  // decision support (see data/vyasaGuidedChat.ts). The 5 specialist Rishis
-  // keep their existing free-text chat + 4-prompt row unchanged.
-  const handleStartChat = () => {
-    // The very first-ever Start tap has nothing to add — initConversation's
-    // seeded greeting (messages.length === 1) already serves as the
-    // welcome. Every later tap (a fresh session after 30 min idle, with
-    // real prior conversation) gets a short "welcome back" line instead so
-    // it still reads as a real chat re-opening, not a silent menu swap.
-    if (messages.length > 1) {
-      addMessage(rishi.id, {
-        id: `a-welcome-${Date.now()}`,
-        role: 'assistant',
-        text: t('rishi.welcomeBackMessage'),
-        createdAt: Date.now(),
-      });
-    }
-    setFlowStage('categories');
-  };
-
-  const handleSelectCategory = (category: VyasaCategory) => {
-    setActiveCategory(category);
-    setHasAnsweredInCategory(false);
-    setFlowStage('questions');
-  };
-
-  const handleChangeCategory = () => {
-    setActiveCategory(null);
-    setHasAnsweredInCategory(false);
-    setFlowStage('categories');
-  };
-
-  const handleAskAnotherInCategory = () => setHasAnsweredInCategory(false);
-
-  const handleSelectQuestion = async (question: string) => {
-    await sendToAssistant(question);
-    setHasAnsweredInCategory(true);
-  };
+  const isRecording = micState === 'recording';
+  const isTranscribing = micState === 'transcribing';
+  const micLabel =
+    phase === 'thinking'
+      ? t('voiceChat.thinking')
+      : isRecording
+        ? t('voiceChat.listening')
+        : isTranscribing
+          ? t('voiceChat.transcribing')
+          : t('voiceChat.tapToAsk');
+  // Recording itself stays enabled (tapping again is how you stop it) —
+  // only actually waiting on a network response disables the button.
+  const micBusy = phase === 'thinking' || isTranscribing;
 
   return (
     <View style={styles.screen}>
@@ -324,123 +322,54 @@ export default function RishiChatScreen() {
         )}
       </View>
 
-      {isVyasa ? (
-        <View style={styles.guidedFlowWrap}>
-          {flowStage === 'idle' && (
-            <View style={styles.welcomeCard}>
-              <Text style={styles.welcomeTitle}>{t('rishi.guidedWelcomeTitle')}</Text>
-              <Text style={styles.welcomeSubtitle}>{t('rishi.guidedWelcomeSubtitle')}</Text>
-              <Pressable onPress={handleStartChat} style={({ pressed }) => [styles.startButton, pressed && styles.pressedDim]}>
-                <LinearGradient colors={rishi.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.startButtonGradient}>
-                  <Text style={styles.startButtonText}>{t('rishi.startChatButton')}</Text>
-                </LinearGradient>
-              </Pressable>
-            </View>
-          )}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promptsRow} contentContainerStyle={{ gap: spacing.xs, paddingHorizontal: spacing.md }}>
+        {quickPrompts.map((p) => (
+          <Pressable key={p} onPress={() => sendToAssistant(p)} style={styles.promptChip}>
+            <Text style={styles.promptChipText}>{p}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
 
-          {flowStage === 'categories' && (
-            <ScrollView style={styles.categoriesWrap} nestedScrollEnabled showsVerticalScrollIndicator>
-              <Text style={styles.flowPrompt}>{t('rishi.chooseCategoryPrompt')}</Text>
-              {VYASA_CATEGORIES.map((cat) => (
-                <Pressable key={cat.key} onPress={() => handleSelectCategory(cat)} style={styles.menuRow}>
-                  <Text style={styles.menuRowText}>{t(cat.labelKey)}</Text>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-                </Pressable>
-              ))}
-            </ScrollView>
-          )}
-
-          {flowStage === 'questions' && activeCategory && (
-            <ScrollView style={styles.categoriesWrap} nestedScrollEnabled showsVerticalScrollIndicator>
-              <Pressable onPress={handleChangeCategory} style={styles.backRow} hitSlop={8}>
-                <Ionicons name="chevron-back" size={16} color={colors.primary} />
-                <Text style={styles.backRowText}>{t('rishi.changeCategory')}</Text>
-              </Pressable>
-
-              {!hasAnsweredInCategory ? (
-                <>
-                  <Text style={styles.flowPrompt}>{t('rishi.chooseQuestionPrompt')}</Text>
-                  {activeCategory.questionKeys.map((qKey) => {
-                    const question = t(qKey);
-                    return (
-                      <Pressable
-                        key={qKey}
-                        onPress={() => handleSelectQuestion(question)}
-                        disabled={micBusy}
-                        style={[styles.menuRow, micBusy && styles.menuRowDisabled]}
-                      >
-                        <Text style={styles.menuRowText}>{question}</Text>
-                        {micBusy ? (
-                          <ActivityIndicator size="small" color={colors.primary} />
-                        ) : (
-                          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-                        )}
-                      </Pressable>
-                    );
-                  })}
-                </>
-              ) : (
-                <View style={styles.followUpActions}>
-                  <Pressable onPress={handleAskAnotherInCategory} style={({ pressed }) => [styles.startButton, pressed && styles.pressedDim]}>
-                    <LinearGradient colors={rishi.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.startButtonGradient}>
-                      <Text style={styles.startButtonText}>{t('rishi.askAnotherInCategory')}</Text>
-                    </LinearGradient>
-                  </Pressable>
-                  <Pressable onPress={handleChangeCategory} style={styles.menuRow}>
-                    <Text style={styles.menuRowText}>{t('rishi.changeCategory')}</Text>
-                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-                  </Pressable>
-                </View>
-              )}
-            </ScrollView>
-          )}
-        </View>
-      ) : (
-        <>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promptsRow} contentContainerStyle={{ gap: spacing.xs, paddingHorizontal: spacing.md }}>
-            {quickPrompts.map((p) => (
-              <Pressable key={p} onPress={() => sendToAssistant(p)} style={styles.promptChip}>
-                <Text style={styles.promptChipText}>{p}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
-          <View style={styles.typedRow}>
-            <TextInput
-              value={typedInput}
-              onChangeText={setTypedInput}
-              placeholder={micBusy ? micLabel : (t('voiceChat.typeInsteadPlaceholder') as string)}
-              placeholderTextColor={colors.textSecondary}
-              editable={!micBusy}
-              style={styles.typedInput}
-              onSubmitEditing={handleSendTyped}
-            />
-            {/* One button on the right, like any standard chat composer: mic
-                when the field is empty, send when there's something to send —
-                never two separate buttons competing for the same spot. */}
-            <Pressable
-              onPress={typedInput.trim() ? handleSendTyped : handleMicPress}
-              disabled={micBusy}
-              accessibilityRole="button"
-              accessibilityLabel={typedInput.trim() ? t('rishi.send') : micLabel}
-              style={({ pressed }) => [pressed && styles.pressedDim]}
-            >
-              <LinearGradient
-                colors={rishi.gradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.composerAction, micBusy && styles.micButtonBusy]}
-              >
-                {micBusy ? (
-                  <ActivityIndicator size="small" color={colors.textInverse} />
-                ) : (
-                  <Ionicons name={typedInput.trim() ? 'arrow-up' : 'mic'} size={20} color={colors.textInverse} />
-                )}
-              </LinearGradient>
-            </Pressable>
-          </View>
-        </>
-      )}
+      <View style={styles.typedRow}>
+        <TextInput
+          value={typedInput}
+          onChangeText={setTypedInput}
+          placeholder={micBusy || isRecording ? micLabel : (t('voiceChat.typeInsteadPlaceholder') as string)}
+          placeholderTextColor={colors.textSecondary}
+          editable={!micBusy && !isRecording}
+          style={styles.typedInput}
+          onSubmitEditing={handleSendTyped}
+        />
+        {/* One button on the right, like any standard chat composer: mic
+            when the field is empty, send when there's something to send —
+            never two separate buttons competing for the same spot. While
+            recording, the same button (still mic-shaped, now a stop icon)
+            stops it — tapping mid-recording is the only way to end it. */}
+        <Pressable
+          onPress={typedInput.trim() && !isRecording ? handleSendTyped : handleMicPress}
+          disabled={micBusy}
+          accessibilityRole="button"
+          accessibilityLabel={typedInput.trim() && !isRecording ? t('rishi.send') : micLabel}
+          style={({ pressed }) => [pressed && styles.pressedDim]}
+        >
+          <LinearGradient
+            colors={rishi.gradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.composerAction, micBusy && styles.micButtonBusy, isRecording && styles.micButtonRecording]}
+          >
+            {micBusy ? (
+              <ActivityIndicator size="small" color={colors.textInverse} />
+            ) : (
+              <Ionicons
+                name={typedInput.trim() && !isRecording ? 'arrow-up' : isRecording ? 'stop' : 'mic'}
+                size={20}
+                color={colors.textInverse}
+              />
+            )}
+          </LinearGradient>
+        </Pressable>
+      </View>
 
       <PremiumModal
         visible={lockVisible}
@@ -584,90 +513,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
   },
-  // Vyasa-only guided flow (see data/vyasaGuidedChat.ts) — replaces both the
-  // chip rows and the text-input composer entirely for this persona. Extra
-  // bottom padding clears the tab bar's popped-up center button, same
-  // reason typedRow below needs it.
-  guidedFlowWrap: {
-    backgroundColor: colors.surface,
-    paddingBottom: TAB_BAR_BUTTON_CLEARANCE,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  welcomeCard: {
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  welcomeTitle: {
-    ...typography.sectionTitle,
-    color: colors.textPrimary,
-    textAlign: 'center',
-  },
-  welcomeSubtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  startButton: {
-    alignSelf: 'stretch',
-  },
-  startButtonGradient: {
-    minHeight: minTouchTarget,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  startButtonText: {
-    ...typography.bodyBold,
-    color: colors.textInverse,
-  },
-  categoriesWrap: {
-    maxHeight: 320,
-  },
-  flowPrompt: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xs,
-  },
-  menuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: minTouchTarget,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  menuRowDisabled: {
-    opacity: 0.6,
-  },
-  menuRowText: {
-    ...typography.body,
-    color: colors.textPrimary,
-    flex: 1,
-    marginRight: spacing.sm,
-  },
-  backRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  backRowText: {
-    ...typography.caption,
-    color: colors.primary,
-  },
-  followUpActions: {
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
   promptsRow: {
     flexGrow: 0,
     paddingVertical: spacing.sm,
@@ -692,6 +537,12 @@ const styles = StyleSheet.create({
   },
   micButtonBusy: {
     opacity: 0.6,
+  },
+  // No red/alarm colour (see the app's "no alarm colour" palette philosophy)
+  // — a slight scale-up plus the icon swapping to a stop square is enough to
+  // read as "actively recording, tap to finish".
+  micButtonRecording: {
+    transform: [{ scale: 1.08 }],
   },
   typedRow: {
     flexDirection: 'row',

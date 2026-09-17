@@ -11,10 +11,8 @@ export interface RishiDef {
   id: RishiId;
   name: string; // proper noun, same across all languages
   initial: string;
-  /** Which canned fallback-reply pool this persona draws from when the real
-   * backend chat is unavailable (see data/chatReplies.ts) — the persona
-   * layer itself is UI-only for now; all six currently route to the same
-   * backend /chat/astro call. */
+  /** This persona's conversational flavor — currently just descriptive
+   * metadata; all six route to the same real backend /chat/astro call. */
   tone: RishiTone;
   gradient: [string, string];
   shade: string;

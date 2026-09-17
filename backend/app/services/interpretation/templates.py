@@ -808,6 +808,22 @@ def message_mentions_past_tense(message: str) -> bool:
     return _contains_any_keyword(message.lower(), _PAST_TENSE_KEYWORDS)
 
 
+# Matches ONLY when the entire message is a bare greeting — "hi", "namaste!",
+# "hello ji", repeated letters ("hiii"/"helloo") and all included — so a real
+# question that happens to start with a greeting ("hi, how's my career?")
+# still goes through normal classification and is never short-circuited here.
+_GREETING_RE = re.compile(
+    r"^(hi+|he+llo+|hey+|yo+|namaste+|namaskaram?|namastey|pranam|"
+    r"good\s?(?:morning|afternoon|evening)|gm|ge|salaam|assalam[u]?\s?alaikum|hola)"
+    r"\s*(?:ji)?[\s!.,~]*$",
+    re.IGNORECASE,
+)
+
+
+def message_is_greeting(message: str) -> bool:
+    return bool(_GREETING_RE.match(message.strip()))
+
+
 # Matches a real calendar year anywhere from a plausible birth year (1900)
 # through the current one — deliberately wider than _YEAR_TOKEN_RE above
 # (which only covers 2020-2049, tuned for near-future "how's my year"
@@ -1045,6 +1061,42 @@ _RISHI_DOMAIN_HI = {
     "agastya": "दोष, योग और आंतरिक संतुलन",
     "bhrigu": "करियर और धन",
 }
+
+_GREETING_REPLY_SPECIALIST = {
+    "en": "Namaste! I'm {name} — I focus on {domain}. What would you like to know?",
+    "hi": "नमस्ते! मैं {name} हूं — मैं {domain} पर मार्गदर्शन देता हूं। आप क्या जानना चाहेंगे?",
+    "hinglish": "Namaste! Main {name} hoon — main {domain} mein guide karta hoon. Aap kya jaanna chahenge?",
+}
+_GREETING_REPLY_GENERAL = {
+    "en": (
+        "Namaste! I'm Vyasa — ask me anything about your career, marriage, money, health, "
+        "family, current timing, or today. What's on your mind?"
+    ),
+    "hi": (
+        "नमस्ते! मैं व्यास हूं — करियर, शादी, धन, सेहत, परिवार, मौजूदा समय या आज के बारे में कुछ भी "
+        "पूछिए। आपके मन में क्या है?"
+    ),
+    "hinglish": (
+        "Namaste! Main Vyasa hoon — career, shaadi, paisa, health, family, current timing ya aaj "
+        "ke baare mein kuch bhi puchiye. Aapke mann mein kya hai?"
+    ),
+}
+
+
+def build_greeting_reply(rishi_id: str | None, language: str) -> str:
+    """The very first reply in a brand-new conversation when the user's
+    opening message is itself just a greeting (see message_is_greeting) —
+    a warm hello back, introducing this persona's own specialty when one
+    exists, instead of the generic "here's what you can ask me" fallback
+    every other unclassifiable message gets."""
+    if rishi_id in _RISHI_NAME_EN:
+        name = _RISHI_NAME_HI[rishi_id] if language == "hi" else _RISHI_NAME_EN[rishi_id]
+        domain = _RISHI_DOMAIN_HI[rishi_id] if language == "hi" else _RISHI_DOMAIN_EN[rishi_id]
+        template = _GREETING_REPLY_SPECIALIST.get(language, _GREETING_REPLY_SPECIALIST["en"])
+        return template.format(name=name, domain=domain)
+    return _GREETING_REPLY_GENERAL.get(language, _GREETING_REPLY_GENERAL["en"])
+
+
 # Each Rishi's own personality-flavoured lead-in, spoken before a real
 # chart-grounded answer (house_breakdown/dasha/dosha/yoga/today text) — a
 # rotating choice (see _pick_variant) so asking the same Rishi more than once
@@ -1263,6 +1315,18 @@ _TIMING_SUPPRESSES_TOPIC = {
     "business_partnership_timing": "career",
 }
 _TIMING_CATEGORIES = frozenset(_TIMING_SUPPRESSES_TOPIC)
+# The reverse of the "primary" (non-sub-intent) entries above — used by
+# chat.py to automatically also pull real timing windows alongside a plain
+# topic answer ("what does my chart say about my career") even when the
+# user didn't separately ask "when", so the reply can include a genuine
+# future timeline instead of only the static house-based read.
+_TOPIC_TIMING_COUNTERPART = {
+    "career": "career_timing",
+    "money": "wealth_timing",
+    "marriage": "marriage_timing",
+    "children": "children_timing",
+    "travel": "foreign_travel_timing",
+}
 _MAX_CATEGORIES_PER_REPLY = 2
 
 

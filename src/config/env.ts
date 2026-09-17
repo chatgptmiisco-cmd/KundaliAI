@@ -1,7 +1,9 @@
-// Backend base URL. Update the host if your dev machine's LAN IP changes
-// (check with `ipconfig` on Windows) — the phone and this machine must be on
-// the same Wi-Fi network for Expo Go to reach it.
-export const API_BASE_URL = 'http://192.168.1.59:8000/api/v1';
+// Backend base URL. Currently pointed at a temporary ngrok tunnel so the
+// team can test from anywhere (no shared Wi-Fi needed). The tunnel only
+// lives as long as the ngrok process on the dev machine stays running —
+// swap back to the LAN IP (http://192.168.1.59:8000/api/v1, check with
+// `ipconfig` on Windows) for normal local development.
+export const API_BASE_URL = 'https://5ff0-2401-4900-5f72-cc68-c04b-527a-7f31-c2e2.ngrok-free.app/api/v1';
 
 // Every subscription-gated feature (D9/D10, unlimited period analyses, real
 // AI chat replies, PDF download, voice narration) is unlocked for everyone

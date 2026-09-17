@@ -30,7 +30,7 @@ class ExplainChartRequest(BaseModel):
 
 class ChatMessageIn(BaseModel):
     message: str
-    language: Literal["en", "hi"] = "en"
+    language: Literal["en", "hi", "hinglish"] = "en"
     # Which Rishi persona the user is talking to (see RISHIS in the frontend
     # and _RISHI_SPECIALTY in templates.py) — optional and unvalidated
     # against a fixed enum so an unrecognized/omitted id just falls back to

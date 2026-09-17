@@ -43,7 +43,7 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('user_id', 'language', 'birth_profile_version')
+    sa.UniqueConstraint('user_id', 'language', 'birth_profile_version', name='uq_marriage_timing_cache_v1')
     )
     op.create_index(op.f('ix_marriage_timing_cache_user_id'), 'marriage_timing_cache', ['user_id'], unique=False)
 

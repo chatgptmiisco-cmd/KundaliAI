@@ -28,10 +28,10 @@ from app.astro.natal_insights import is_combust, planet_dignity
 from app.astro.panchang import nakshatra_pada
 from app.db.models.birth_profile import BirthProfile
 from app.db.models.cache import ChartCache
-from app.schemas.chart import ChartResponse, HouseBreakdown, PlanetPlacement, YogaFinding
+from app.schemas.chart import ChartResponse, HouseBreakdown, PlanetPlacement, PlanetTheme, YogaFinding
 from app.schemas.user import BirthDataOut
 from app.services.cache_utils import add_and_commit_or_fetch_existing
-from app.services.chart_explanation_service import build_house_breakdown, detect_yogas
+from app.services.chart_explanation_service import build_house_breakdown, build_planet_theme_sentences, detect_yogas
 from app.services.interpretation.context import build_natal_context
 from app.services.interpretation.factory import get_interpreter
 
@@ -142,16 +142,17 @@ def _dict_to_response(data: dict, cached: bool) -> ChartResponse:
         key_points_hi=data["key_points_hi"],
         house_breakdown=[HouseBreakdown(**h) for h in data.get("house_breakdown", [])],
         yogas=[YogaFinding(**y) for y in data.get("yogas", [])],
+        planet_themes={p: PlanetTheme(**t) for p, t in data.get("planet_themes", {}).items()},
         cached=cached,
     )
 
 
-# Bump this whenever build_house_breakdown/detect_yogas wording or logic
-# changes — otherwise an existing cached row (keyed only on birth_profile
-# version, which doesn't change just because the app's explanation text
-# changed) keeps serving stale text forever. Same pattern as
-# prediction_service._TIMING_ALGO_VERSION.
-_CHART_EXPLANATION_ALGO_VERSION = 6
+# Bump this whenever build_house_breakdown/detect_yogas/build_planet_theme_
+# sentences wording or logic changes — otherwise an existing cached row
+# (keyed only on birth_profile version, which doesn't change just because
+# the app's explanation text changed) keeps serving stale text forever. Same
+# pattern as prediction_service._TIMING_ALGO_VERSION.
+_CHART_EXPLANATION_ALGO_VERSION = 8
 
 
 def _select_stmt(profile: BirthProfile, chart_type: ChartType):
@@ -168,7 +169,7 @@ async def get_chart(db: AsyncSession, profile: BirthProfile, birth: BirthDataOut
     # recomputed (see below), rather than silently serving an empty [] for
     # both forever (the ChartResponse defaults exist for backward-compat
     # deserialization, not to mask genuinely missing data on an old row).
-    _REQUIRED_CACHE_KEYS = ("house_breakdown", "yogas")
+    _REQUIRED_CACHE_KEYS = ("house_breakdown", "yogas", "planet_themes")
 
     result = await db.execute(_select_stmt(profile, chart_type))
     cached_row = result.scalar_one_or_none()
@@ -194,6 +195,7 @@ async def get_chart(db: AsyncSession, profile: BirthProfile, birth: BirthDataOut
     data["key_points_hi"] = hi_text["key_points"]
 
     data["house_breakdown"] = build_house_breakdown(chart_result)
+    data["planet_themes"] = build_planet_theme_sentences(chart_result)
     # Yoga/dosha detection (Gajakesari, Panch Mahapurusha, Raj Yoga, Manglik,
     # Kaal Sarp, Kemadruma) was classically devised for D1 charts, but the
     # detection rules themselves (mutual Kendra, dignity, house placement)
