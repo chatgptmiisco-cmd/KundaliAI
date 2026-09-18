@@ -70,7 +70,7 @@ export default function PlanetLoader({ size = 72, dark = false, message }: Props
 
   const ringColor = dark ? 'rgba(255,255,255,0.16)' : 'rgba(122,59,46,0.14)';
   const coreBg = dark ? 'rgba(255,255,255,0.1)' : colors.primaryLight;
-  const glyphColor = dark ? colors.textInverse : colors.primary;
+  const glyphColor = dark ? colors.textInverse : colors.textOnPrimary; // light variant's core is primaryLight now, primary text was too light
 
   const dotSize = Math.max(5, size * 0.07);
 

@@ -29,7 +29,9 @@ import { toContentLanguage } from '../i18n/contentLanguage';
 import { useChatStore } from '../store/useChatStore';
 import { useUserStore } from '../store/useUserStore';
 import { useVoiceStore } from '../store/useVoiceStore';
-import { colors, elevation, fontFamily, minTouchTarget, radius, spacing, typography } from '../theme/theme';
+import { colors, elevation, fontFamily, glass, minTouchTarget, radius, spacing, typography } from '../theme/theme';
+import CosmicBackground from '../components/CosmicBackground';
+import GlassSurface from '../components/GlassSurface';
 import { showAlert } from '../utils/crossPlatformAlert';
 
 type Phase = 'idle' | 'thinking';
@@ -250,7 +252,7 @@ export default function RishiChatScreen() {
   const micBusy = phase === 'thinking' || isTranscribing;
 
   return (
-    <View style={styles.screen}>
+    <CosmicBackground style={styles.screen}>
       <View style={styles.rishiHeader}>
         <RishiSwitcher activeId={rishi.id} onSelect={setActiveRishiId} />
         <View style={styles.creditsPill}>
@@ -274,7 +276,7 @@ export default function RishiChatScreen() {
             m.role === 'user' ? (
               <LinearGradient
                 key={m.id}
-                colors={[colors.primary, colors.primaryDark]}
+                colors={[colors.accent, colors.accentDark]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={[styles.bubble, styles.bubbleUser]}
@@ -381,7 +383,7 @@ export default function RishiChatScreen() {
         message={t('rishi.outOfCreditsMessage') as string}
         icon="mic"
       />
-    </View>
+    </CosmicBackground>
   );
 }
 
@@ -395,7 +397,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     padding: spacing.md,
-    backgroundColor: colors.surface,
+    backgroundColor: glass.fillStrong,
+    borderBottomWidth: 1,
+    borderBottomColor: glass.borderSoft,
     // A soft cast shadow instead of a hard 1px line reads as a deliberate
     // elevated panel rather than a wireframe divider.
     shadowColor: elevation.card.shadowColor,
@@ -461,7 +465,13 @@ const styles = StyleSheet.create({
     // A soft "tail" corner (matches the small-radius convention every chat
     // app uses to show which side is speaking) plus a real card shadow
     // instead of a flat 1px border — the single biggest thing that made
-    // these bubbles read as unfinished.
+    // these bubbles read as unfinished. A solid surface (not a real
+    // BlurView) deliberately — a chat transcript can grow to dozens of
+    // messages, and rendering that many live blurs is a real perf risk;
+    // the glass-tinted border keeps it visually consistent with the rest
+    // of the "Astrolabe Glass" language without that cost.
+    borderWidth: 1,
+    borderColor: glass.borderSoft,
     borderBottomLeftRadius: radius.sm,
     shadowColor: elevation.card.shadowColor,
     shadowOffset: { width: 0, height: 2 },
@@ -485,7 +495,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   bubbleTextUser: {
-    color: colors.textInverse,
+    color: colors.textPrimary,
   },
   assistantFooter: {
     flexDirection: 'row',
@@ -554,9 +564,9 @@ const styles = StyleSheet.create({
     // (see TAB_BAR_BUTTON_CLEARANCE) — without it this bar sits flush
     // against the screen edge, right where that button protrudes into it.
     paddingBottom: spacing.sm + TAB_BAR_BUTTON_CLEARANCE,
-    backgroundColor: colors.surface,
+    backgroundColor: glass.fillStrong,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: glass.borderSoft,
     // A floating-bar shadow cast upward, same convention as
     // VoicePlayerBar's bottom-docked bar — reads as a deliberate composer
     // bar rather than content that just happens to end at the bottom.

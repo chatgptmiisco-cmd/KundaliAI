@@ -32,7 +32,7 @@ export function setSessionExpiredHandler(handler: () => void) {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   query?: Record<string, string | number | undefined>;
   auth?: boolean; // defaults to true

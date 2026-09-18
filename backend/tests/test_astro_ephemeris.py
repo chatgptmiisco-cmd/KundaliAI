@@ -5,10 +5,12 @@ import pytest
 
 from app.astro.charts import compute_chart
 from app.astro.ephemeris import (
+    all_outer_planet_positions,
     ascendant_sidereal,
     declination,
     get_ayanamsa,
     julian_day_ut,
+    outer_planet_position,
     planet_position,
     sunrise_utc,
     sunset_utc,
@@ -124,6 +126,39 @@ def test_sunrise_and_sunset_searched_from_a_known_local_morning_bracket_the_same
     assert anchor < set_ < next_rise
     # A June night in Delhi runs roughly 10-11 hours, not some wildly wrong span.
     assert 0.4 < (next_rise - set_) < 0.48
+
+
+def test_outer_planet_positions_match_an_independently_computed_reference_chart():
+    # 5 Oct 1990, 14:30 IST, Pune (18.5204N, 73.8567E) — cross-checked
+    # against an independently generated sidereal Lahiri chart for this
+    # exact birth data: Uranus Sagittarius 12deg03', Neptune Sagittarius
+    # 18deg06', Pluto Libra 22deg35'. Sagittarius=sign 8 (0-based), Libra=6.
+    jd = julian_day_ut(datetime(1990, 10, 5, 9, 0, tzinfo=timezone.utc))  # 14:30 IST - 5:30
+
+    uranus = outer_planet_position(jd, "Ur")
+    neptune = outer_planet_position(jd, "Ne")
+    pluto = outer_planet_position(jd, "Pl")
+
+    assert uranus.longitude // 30 == 8 and uranus.longitude % 30 == pytest.approx(12.05, abs=0.05)
+    assert neptune.longitude // 30 == 8 and neptune.longitude % 30 == pytest.approx(18.1, abs=0.05)
+    assert pluto.longitude // 30 == 6 and pluto.longitude % 30 == pytest.approx(22.58, abs=0.05)
+
+    all_outer = all_outer_planet_positions(jd)
+    assert set(all_outer) == {"Ur", "Ne", "Pl"}
+    assert all_outer["Ur"].longitude == uranus.longitude
+
+
+def test_compute_chart_places_outer_planets_separately_from_the_nine_grahas():
+    jd = julian_day_ut(datetime(1990, 10, 5, 9, 0, tzinfo=timezone.utc))
+    chart = compute_chart(jd, latitude=18.5204, longitude=73.8567, division="D1")
+
+    assert set(chart.outer_planet_sign_index) == {"Ur", "Ne", "Pl"}
+    # Never leaks into the classical 9-graha fields.
+    assert not set(chart.outer_planet_sign_index) & set(chart.planet_sign_index)
+    # House numbers follow the same whole-sign-from-Lagna rule as the main
+    # planets — Pluto sits in Libra, which for this chart's Capricorn Lagna
+    # is house 10 (see the corresponding chart_service/ephemeris test above).
+    assert chart.outer_planet_house["Pl"] == 10
 
 
 def test_sunrise_and_sunset_land_on_plausible_local_clock_times_for_a_known_city():

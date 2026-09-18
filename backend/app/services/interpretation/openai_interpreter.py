@@ -266,7 +266,8 @@ class OpenAIInterpreter(Interpreter):
         fallback = await self._fallback.chat_reply(history, context, language)
         rishi_domain: str | None = context.get("rishi_domain")
         out_of_domain: dict[str, str] = context.get("out_of_domain_redirects", {})
-        user_memory: list[str] = context.get("user_memory", [])
+        life_context: dict = context.get("life_context", {})
+        open_decisions: list = context.get("open_decisions", [])
         in_domain_facts, out_of_domain_facts = _chat_facts(context, set(out_of_domain))
 
         persona_line = (
@@ -285,12 +286,21 @@ class OpenAIInterpreter(Interpreter):
             "actually talking WITH you, not reading FROM a document at you."
         )
         memory_line = (
-            f"Known about this user from past conversations: {json.dumps(user_memory, ensure_ascii=False)}. "
-            "Weave in whatever's actually relevant to ground your answer in THEIR real situation, the way "
-            "someone who actually remembers you would — but never invent a NEW astrological fact from it, "
-            "and never announce that you're using it (no \"since you told me...\", no \"as you mentioned "
-            "earlier\" — just naturally speak as someone who already knows this about you)."
-            if user_memory
+            f"Known about this user's real life, from past conversations (grouped by domain; each fact "
+            f"carries its own confidence/source): {json.dumps(life_context, ensure_ascii=False)}. "
+            + (f"Open decisions they're actively weighing: {json.dumps(open_decisions, ensure_ascii=False)}. "
+               if open_decisions else "")
+            + "Use this to make your reasoning genuinely specific to THEIR situation — not just to "
+            "name-drop a fact, but because it actually changes what the honest answer is (e.g. a planned "
+            "child next year raises the real-world stakes of a risky career move; a spouse's stated view is "
+            "a real factor in a decision, not trivia). Treat confidence=\"high\"/source=\"user_stated\" facts "
+            "as solid; treat confidence=\"low\" or source=\"inferred\" facts as a tentative impression you "
+            "can lean on lightly but should not assert back as settled fact. Never invent a NEW astrological "
+            "fact from any of this, and never announce that you're using it (no \"since you told me...\", no "
+            "\"as you mentioned earlier\" — just naturally speak as someone who already knows this about you). "
+            "If an open decision exists and this message continues that thread, acknowledge where things "
+            "stood before rather than starting over from zero."
+            if (life_context or open_decisions)
             else ""
         )
         # Whether there's any real in-domain content at all beyond the

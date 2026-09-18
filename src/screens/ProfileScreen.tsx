@@ -127,6 +127,16 @@ export default function ProfileScreen() {
       </Card>
 
       <Card>
+        <Text style={styles.cardTitle}>{t('lifeTwin.screenTitle')}</Text>
+        <Text style={styles.lifeTwinHint}>{t('lifeTwin.profileHint')}</Text>
+        <PrimaryButton
+          label={t('lifeTwin.viewButton')}
+          variant="outline"
+          onPress={() => navigation.navigate('MyLifeTwin')}
+        />
+      </Card>
+
+      <Card>
         <Text style={styles.cardTitle}>{t('profile.languageLabel')}</Text>
         <LanguageToggle />
       </Card>
@@ -201,6 +211,11 @@ const styles = StyleSheet.create({
   planValue: {
     ...typography.title,
     color: colors.primary,
+    marginBottom: spacing.md,
+  },
+  lifeTwinHint: {
+    ...typography.body,
+    color: colors.textSecondary,
     marginBottom: spacing.md,
   },
   creditsRow: {

@@ -1,33 +1,66 @@
-// Calm, senior-friendly theme. No alarm-red anywhere in the palette —
-// Manglik / attention states use amber-orange instead of red.
+// "Astrolabe Glass" — a night-sky, glassmorphism theme (approved design
+// direction, see the "Astrolabe Glass" mockup). Every token below keeps its
+// ORIGINAL NAME from the old warm-cream theme, just repointed to dark-theme
+// values — every screen already reads color through these names (not
+// hardcoded hex), so this one file is what actually reskins the whole app.
+// Still no alarm-red anywhere — Manglik/attention states stay amber-gold.
 export const colors = {
-  background: '#FBF7F1',
-  surface: '#FFFFFF',
-  surfaceMuted: '#F3ECE0',
+  background: '#120B22', // deep indigo night sky, not flat black
+  surface: '#1C1233', // panels that aren't glass (rare — most surfaces are glass now, see `glass` below)
+  surfaceMuted: '#241A3D',
 
-  textPrimary: '#2B241C',
-  textSecondary: '#5B5044',
+  textPrimary: '#F4EEE2', // warm off-white, not clinical pure white
+  textSecondary: '#C9BEDD', // soft lavender-grey
+  // Light text for content sitting on a medium/dark colored surface (a
+  // per-Rishi gradient portrait, the rose accent, an icon on a dark header)
+  // — kept white/light exactly like the old theme, since every one of
+  // those surfaces is still medium-to-dark. The ONE new exception is text
+  // sitting directly on the gold `primary` color itself, which is light —
+  // see `textOnPrimary` below, used only there.
   textInverse: '#FFFFFF',
+  // Dark ink — for text/icons placed directly on the gold `primary` color
+  // (buttons, active tab pills, chips), which is light and would swallow
+  // white text. Nowhere else: every other colored surface in this app is
+  // still medium-to-dark and wants `textInverse` instead.
+  textOnPrimary: '#241608',
 
-  primary: '#7A3B2E', // deep maroon — auspicious, warm, not aggressive
-  primaryDark: '#5C2C22',
-  primaryLight: '#F1DED7',
+  primary: '#D8A85C', // brass/gold — the astrolabe accent, replaces maroon as the lead color
+  primaryDark: '#9C7C48',
+  primaryLight: '#F0D9A8',
 
-  accent: '#C9750A', // amber-orange for attention (never red)
-  accentLight: '#FCEACB',
-  accentDark: '#8C5107',
+  accent: '#C97361', // warm rose (the old maroon primary, lightened for dark bg) — secondary accent, user-message bubbles
+  // Transparent rose tint (not a solid color) — same "sits over whatever
+  // background is behind it" pattern as successLight/premiumLight below.
+  // An earlier solid dark-plum value here paired badly with accentDark
+  // text (dark-on-dark, same family of bug as the primaryLight fixes).
+  accentLight: 'rgba(201,115,97,0.16)',
+  accentDark: '#8C4A3E',
 
-  success: '#3E7A4C',
-  successLight: '#E4F2E6',
+  success: '#7FAE8A',
+  successLight: 'rgba(127,174,138,0.14)',
 
-  border: '#E4D9C8',
+  border: 'rgba(244,238,226,0.14)',
 
-  premium: '#8A5A00',
-  premiumLight: '#FBEBCE',
+  premium: '#D8A85C',
+  premiumLight: 'rgba(216,168,92,0.16)',
 
-  disabled: '#C9C2B6',
+  disabled: '#584C74',
 
-  shadow: '#3A2A1E',
+  shadow: '#05030B',
+};
+
+// Frosted-glass surface tokens — every card/sheet/composer bar in the new
+// design is real glass (see components/GlassSurface.tsx), not a flat
+// colored rectangle. `fill`/`fillStrong` are meant to sit OVER a BlurView,
+// which is what actually produces the blur; these alone are just a tinted
+// see-through layer (Android's fallback when real blur isn't wired up for
+// a given spot — see GlassSurface's doc comment).
+export const glass = {
+  fill: 'rgba(244,238,226,0.06)',
+  fillStrong: 'rgba(244,238,226,0.10)',
+  border: 'rgba(216,168,92,0.32)',
+  borderSoft: 'rgba(244,238,226,0.14)',
+  blurIntensity: 40,
 };
 
 export const spacing = {
@@ -96,5 +129,5 @@ export const typography = {
 
 export const minTouchTarget = 48;
 
-export const theme = { colors, spacing, radius, elevation, fontFamily, typography, minTouchTarget };
+export const theme = { colors, glass, spacing, radius, elevation, fontFamily, typography, minTouchTarget };
 export type Theme = typeof theme;

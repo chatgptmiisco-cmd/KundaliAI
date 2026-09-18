@@ -81,7 +81,7 @@ export default function MainTabs() {
         options={{
           headerShown: false,
           tabBarLabel: () => null,
-          tabBarIcon: ({ color }) => <Ionicons name="chatbubbles" size={30} color={colors.textInverse ?? color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="chatbubbles" size={30} color={colors.textOnPrimary ?? color} />,
           tabBarButton: (props) => <CenterMicButton {...props} />,
         }}
       />

@@ -1,7 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { PLANET_COLORS } from '../constants/astro';
+import { OUTER_PLANET_COLORS, PLANET_COLORS } from '../constants/astro';
 import { BirthChart, Language } from '../types/kundali';
 import { colors, fontFamily, radius } from '../theme/theme';
 
@@ -18,21 +18,29 @@ interface Props {
  * where signs are fixed and houses rotate). Derived from the chart's
  * geometry: the outer square's two diagonals plus the diamond connecting
  * its edge-midpoints together carve it into 4 "tip" quadrilaterals (houses
- * 1/4/7/10, the Kendras, sitting at the top/right/bottom/left points) and 8
- * corner triangles (the remaining houses, two flanking each tip). */
+ * 1/4/7/10, the Kendras, sitting at the top/left/bottom/right points) and 8
+ * corner triangles (the remaining houses, two flanking each tip).
+ *
+ * House 1 is always the top tip, and from there the real convention reads
+ * COUNTER-CLOCKWISE, not clockwise (verified against Wikipedia's Kuṇḍali
+ * article: "the other bhāva-s follow it, counter-clockwise, in the sequence
+ * of the zodiac" — an earlier version of this array went clockwise instead,
+ * which put every Kendra house except 1/7 on the wrong side and read as a
+ * mirror-image chart next to any standard reference). House 4 therefore
+ * sits at the LEFT tip and house 10 at the RIGHT tip, not the reverse. */
 const HOUSE_CENTROID: [number, number][] = [
   [0.5, 0.25], // 1 - top tip (Kendra)
-  [0.75, 0.083], // 2
-  [0.917, 0.25], // 3
-  [0.75, 0.5], // 4 - right tip (Kendra)
-  [0.917, 0.75], // 5
-  [0.75, 0.917], // 6
+  [0.25, 0.083], // 2
+  [0.083, 0.25], // 3
+  [0.25, 0.5], // 4 - left tip (Kendra)
+  [0.083, 0.75], // 5
+  [0.25, 0.917], // 6
   [0.5, 0.75], // 7 - bottom tip (Kendra)
-  [0.25, 0.917], // 8
-  [0.083, 0.75], // 9
-  [0.25, 0.5], // 10 - left tip (Kendra)
-  [0.083, 0.25], // 11
-  [0.25, 0.083], // 12
+  [0.75, 0.917], // 8
+  [0.917, 0.75], // 9
+  [0.75, 0.5], // 10 - right tip (Kendra)
+  [0.917, 0.25], // 11
+  [0.75, 0.083], // 12
 ];
 const KENDRA_HOUSES = new Set([1, 4, 7, 10]);
 
@@ -58,10 +66,26 @@ const ELEMENT_COLOR_BY_SIGN = [
   colors.accent, '#6B8E4E', '#7C8FBE', '#4D7C8A', // Sagittarius..Pisces
 ];
 
+/** One chip's worth of render data — unifies the 9 classical grahas (from
+ * houseBreakdown) with the 3 display-only outer planets (from
+ * chart.outerPlanets) into one shape, since visually they're drawn exactly
+ * the same way; only the color table and retrograde lookup differ. */
+interface ChipData {
+  code: string;
+  color: string;
+  retrograde: boolean;
+}
+
 export default function NorthIndianChart({ chart, language, size = 300 }: Props) {
   const houseSignIndex = (house: number) => (chart.lagnaSignIndex + house - 1) % 12;
-  const planetsInHouse = (house: number) =>
-    chart.houseBreakdown.find((h) => h.house === house)?.planets ?? [];
+  const chipsInHouse = (house: number): ChipData[] => {
+    const grahas = chart.houseBreakdown.find((h) => h.house === house)?.planets ?? [];
+    const outer = chart.outerPlanets.filter((p) => p.house === house);
+    return [
+      ...grahas.map((p) => ({ code: p, color: PLANET_COLORS[p], retrograde: !!chart.planetRetrograde[p] })),
+      ...outer.map((p) => ({ code: p.planet, color: OUTER_PLANET_COLORS[p.planet], retrograde: p.retrograde })),
+    ];
+  };
 
   return (
     <View style={[styles.frame, { width: size + 16, height: size + 16 }]}>
@@ -125,7 +149,7 @@ export default function NorthIndianChart({ chart, language, size = 300 }: Props)
         {HOUSE_CENTROID.map(([fx, fy], idx) => {
           const house = idx + 1;
           const signIndex = houseSignIndex(house);
-          const planets = planetsInHouse(house);
+          const chips = chipsInHouse(house);
           const isLagna = house === 1;
           return (
             <View
@@ -143,23 +167,29 @@ export default function NorthIndianChart({ chart, language, size = 300 }: Props)
                   <Text style={styles.ascBadgeText}>ASC</Text>
                 </View>
               )}
-              <View style={styles.houseNumberBadge}>
-                <Text style={styles.houseNumberText}>{house}</Text>
-              </View>
-              {/* The sign's real number (1=Aries..12=Pisces) — the actual
-                  convention real North Indian charts print, and far more
-                  reliably rendered across devices than a Unicode zodiac
-                  glyph (which shows as a blank box on plenty of Android
-                  fonts). */}
-              <Text style={[styles.signNumber, { color: ELEMENT_COLOR_BY_SIGN[signIndex] }]}>
-                {signIndex + 1}
-              </Text>
+              {/* Deliberately only ONE number per cell — the sign's real
+                  number (1=Aries..12=Pisces), the actual convention real
+                  North Indian charts print (and far more reliably rendered
+                  across devices than a Unicode zodiac glyph, which shows as
+                  a blank box on plenty of Android fonts). An earlier version
+                  also showed a house-number-from-Lagna badge here, which
+                  made every cell carry two different 1-12 numbers at once —
+                  correct individually, but read as "everything's scattered"
+                  next to any reference chart (which shows only the sign
+                  number) since there was no way to tell which number was
+                  which at a glance. */}
+              {/* High-contrast off-white rather than the muted per-element
+                  tint below (which stays on the Kendra jewel glow only) —
+                  the tint read as too low-contrast against the dark
+                  background to scan at a glance, which was the other half
+                  of the "signs aren't clearly visible" report. */}
+              <Text style={styles.signNumber}>{signIndex + 1}</Text>
               <View style={styles.planetsRow}>
-                {planets.map((p) => (
-                  <View key={p} style={[styles.planetChip, { backgroundColor: `${PLANET_COLORS[p]}1F` }]}>
-                    <Text style={[styles.planetName, { color: PLANET_COLORS[p] }]}>
-                      {p}
-                      {chart.planetRetrograde[p] ? 'ᴿ' : ''}
+                {chips.map((chip) => (
+                  <View key={chip.code} style={[styles.planetChip, { backgroundColor: `${chip.color}1F` }]}>
+                    <Text style={[styles.planetName, { color: chip.color }]}>
+                      {chip.code}
+                      {chip.retrograde ? 'ᴿ' : ''}
                     </Text>
                   </View>
                 ))}
@@ -218,26 +248,11 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.bold,
     color: colors.textInverse,
   },
-  houseNumberBadge: {
-    position: 'absolute',
-    top: 0,
-    left: 2,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  houseNumberText: {
-    fontSize: 8,
-    fontFamily: fontFamily.bold,
-    color: colors.textSecondary,
-  },
   signNumber: {
-    fontSize: 17,
+    fontSize: 19,
     fontFamily: fontFamily.displayBold,
     marginTop: 6,
+    color: colors.textPrimary,
   },
   planetsRow: {
     flexDirection: 'row',

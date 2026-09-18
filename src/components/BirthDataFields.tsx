@@ -9,6 +9,13 @@ import { colors, radius, spacing, typography } from '../theme/theme';
 interface Props {
   value: BirthData;
   onChange: (data: BirthData) => void;
+  // Skips the Naam field entirely — for the post-signup onboarding screen,
+  // where the account holder already typed their name once on the signup
+  // form (see useUserStore.hydrateAccountName) and re-asking read as a
+  // broken/redundant flow. ProfileScreen (editing later) and GunaMilanScreen
+  // (a second person's details, for compatibility matching) both leave this
+  // unset since a name genuinely needs asking there.
+  hideNameField?: boolean;
 }
 
 // No birth is in the future, and nobody using this app was born before 1900
@@ -16,16 +23,18 @@ interface Props {
 const MIN_BIRTH_DATE = new Date(1900, 0, 1);
 const MAX_BIRTH_DATE = new Date();
 
-export default function BirthDataFields({ value, onChange }: Props) {
+export default function BirthDataFields({ value, onChange, hideNameField }: Props) {
   const { t } = useTranslation();
 
   return (
     <View>
-      <Field
-        label={t('profile.nameLabel')}
-        value={value.name}
-        onChangeText={(v) => onChange({ ...value, name: v })}
-      />
+      {!hideNameField && (
+        <Field
+          label={t('profile.nameLabel')}
+          value={value.name}
+          onChangeText={(v) => onChange({ ...value, name: v })}
+        />
+      )}
 
       <View style={styles.field}>
         <DateTimeField

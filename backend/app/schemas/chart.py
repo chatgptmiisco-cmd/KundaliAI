@@ -1,4 +1,21 @@
-from pydantic import BaseModel
+from datetime import date
+
+from pydantic import BaseModel, Field
+
+
+class AdhocChartIn(BaseModel):
+    """Product ask: 'let me check someone else's chart without overwriting
+    my own profile.' Deliberately minimal — no name/place text, no
+    time_uncertain flag — since only what compute_chart actually needs
+    (date/time/timezone/lat/long) is required; the caller resolves the
+    place name to coordinates client-side (same geocoding already used for
+    the user's own birth-data form) before calling this."""
+    date_of_birth: date
+    time_of_birth: str = Field(pattern=r"^\d{2}:\d{2}$", description="HH:MM, 24-hour, local time")
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    timezone_offset_hours: float = Field(ge=-12, le=14)
+    chart_type: str = "D1"
 
 
 class PlanetPlacement(BaseModel):
@@ -97,6 +114,14 @@ class ChartResponse(BaseModel):
     key_points_hi: list[str]
     house_breakdown: list[HouseBreakdown] = []
     yogas: list[YogaFinding] = []
+    # Uranus/Neptune/Pluto — display-only placements shown on the chart for
+    # visual parity with common reference charts. Reuses PlanetPlacement's
+    # shape but dignity/combust/nakshatra are always None: those are
+    # classical-Jyotish concepts that don't apply to these three (see
+    # app.astro.ephemeris's outer-planet docstring). Never appears in
+    # house_breakdown/yogas/planet_themes above, and never affects dasha or
+    # any interpretation — purely decorative chart placements.
+    outer_planets: list[PlanetPlacement] = []
     # Keyed by planet code (e.g. "Ve", "Ra") — same signification-blend
     # sentence as each HouseBreakdown's lord_theme_en/hi, but looked up by
     # planet rather than by house, since a Mahadasha/Antardasha lord isn't

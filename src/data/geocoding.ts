@@ -143,6 +143,12 @@ export async function searchPlaces(query: string): Promise<GeocodeResult[]> {
     headers: {
       'User-Agent': 'KundaliAI/1.0 (astrology app birth-place lookup)',
       Accept: 'application/json',
+      // Without this, Nominatim picks a response language on its own
+      // (observed: Japanese/Chinese transliterations for an Indian town,
+      // e.g. "アリーガル" instead of "Aligarh") — forcing English keeps
+      // results readable regardless of the device's own locale, since
+      // coordinate accuracy (not translation) is what this lookup is for.
+      'Accept-Language': 'en',
     },
   });
   if (!res.ok) {

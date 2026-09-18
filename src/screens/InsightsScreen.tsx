@@ -9,7 +9,7 @@ import { colors, radius, spacing, typography } from '../theme/theme';
 
 const TONE_STYLES: Record<InsightTone, { bg: string; fg: string; icon: keyof typeof Ionicons.glyphMap }> = {
   good: { bg: colors.successLight, fg: colors.success, icon: 'checkmark-circle' },
-  average: { bg: colors.primaryLight, fg: colors.primary, icon: 'remove-circle-outline' },
+  average: { bg: colors.primaryLight, fg: colors.textOnPrimary, icon: 'remove-circle-outline' },
   watch: { bg: colors.accentLight, fg: colors.accentDark, icon: 'eye-outline' },
 };
 

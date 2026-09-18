@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -24,4 +24,11 @@ class ChatMessage(Base):
     # have no persona recorded; those just don't surface in any one Rishi's
     # history rather than bleeding into all of them.
     rishi_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # True on an assistant reply that had non-empty structured Life Context
+    # (or an open decision) available when it was composed — the raw input
+    # to the "Context Utilization" metric (see app.services.metrics_service):
+    # not just that personalization *could* apply, but that real personal
+    # facts were actually on the table for that specific answer. Always
+    # False on user-role rows.
+    used_personalization: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

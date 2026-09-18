@@ -177,8 +177,13 @@ export default function HomeDashboardScreen() {
 
   return (
     <View style={styles.screen}>
+      {/* Cosmic violet-to-indigo, not the gold accent color — the hero's
+          white text/icons throughout (wordmark, panchang row, notification
+          and profile icons) need a dark-enough background to read against,
+          which the gold family no longer is now that primary/primaryDark
+          are both light-to-medium gold instead of dark maroon. */}
       <LinearGradient
-        colors={[colors.primary, colors.primaryDark]}
+        colors={['#3A2456', colors.background]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.hero, { paddingTop: insets.top + spacing.sm }]}
@@ -263,7 +268,7 @@ export default function HomeDashboardScreen() {
                 accessibilityState={{ selected: i === activeTab }}
                 style={[styles.tabChip, i === activeTab && styles.tabChipActive]}
               >
-                <Ionicons name={tab.icon} size={15} color={i === activeTab ? colors.textInverse : colors.textSecondary} />
+                <Ionicons name={tab.icon} size={15} color={i === activeTab ? colors.textOnPrimary : colors.textSecondary} />
                 <Text style={[styles.tabChipText, i === activeTab && styles.tabChipTextActive]}>{tab.label}</Text>
               </Pressable>
             ))}
@@ -488,7 +493,7 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.bold,
   },
   tabChipTextActive: {
-    color: colors.textInverse,
+    color: colors.textOnPrimary, // active chip bg is now light gold, textInverse would wash out
   },
   content: {
     padding: spacing.md,
@@ -571,11 +576,11 @@ const styles = StyleSheet.create({
   },
   horoscopeHeaderTitle: {
     ...typography.sectionTitle,
-    color: colors.primaryDark,
+    color: colors.textOnPrimary, // sits on primaryLight card bg, now light-on-light with primaryDark
   },
   horoscopeHeaderRashi: {
     ...typography.title,
-    color: colors.primary,
+    color: colors.textOnPrimary, // same primaryLight card bg — primary text is now too light too
     marginTop: spacing.xs,
     fontFamily: fontFamily.displayBold,
   },

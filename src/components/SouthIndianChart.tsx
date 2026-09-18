@@ -2,6 +2,8 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
   houseNumberForSign,
+  OUTER_PLANET_COLORS,
+  OUTER_PLANET_GLYPHS,
   PLANET_COLORS,
   PLANET_GLYPHS,
   RING_CELL,
@@ -18,16 +20,40 @@ interface Props {
   size?: number;
 }
 
+/** Unifies the 9 classical grahas with the 3 display-only outer planets
+ * into one render shape — see NorthIndianChart's identical ChipData for
+ * why (same reasoning, same split source data, different chart geometry). */
+interface ChipData {
+  key: string;
+  glyph: string;
+  color: string;
+  retrograde: boolean;
+}
+
 export default function SouthIndianChart({ chart, language, size = 320 }: Props) {
   const cellSize = size / 4;
   const signNames = SIGN_NAMES[language];
   const lagnaSignName = signNames[chart.lagnaSignIndex];
 
-  const planetsBySign: Record<number, PlanetKey[]> = {};
+  const chipsBySign: Record<number, ChipData[]> = {};
   (Object.keys(chart.planetSignIndex) as PlanetKey[]).forEach((planet) => {
     const signIndex = chart.planetSignIndex[planet];
-    if (!planetsBySign[signIndex]) planetsBySign[signIndex] = [];
-    planetsBySign[signIndex].push(planet);
+    if (!chipsBySign[signIndex]) chipsBySign[signIndex] = [];
+    chipsBySign[signIndex].push({
+      key: planet,
+      glyph: PLANET_GLYPHS[planet],
+      color: PLANET_COLORS[planet],
+      retrograde: !!chart.planetRetrograde[planet],
+    });
+  });
+  chart.outerPlanets.forEach((p) => {
+    if (!chipsBySign[p.signIndex]) chipsBySign[p.signIndex] = [];
+    chipsBySign[p.signIndex].push({
+      key: p.planet,
+      glyph: OUTER_PLANET_GLYPHS[p.planet],
+      color: OUTER_PLANET_COLORS[p.planet],
+      retrograde: p.retrograde,
+    });
   });
 
   return (
@@ -36,7 +62,7 @@ export default function SouthIndianChart({ chart, language, size = 320 }: Props)
         const [row, col] = RING_CELL[ringPos];
         const houseNumber = houseNumberForSign(signIndex, chart.lagnaSignIndex);
         const isLagna = houseNumber === 1;
-        const planets = planetsBySign[signIndex] ?? [];
+        const chips = chipsBySign[signIndex] ?? [];
 
         return (
           <View
@@ -67,14 +93,12 @@ export default function SouthIndianChart({ chart, language, size = 320 }: Props)
               {SIGN_GLYPHS[signIndex]} {signNames[signIndex]}
             </Text>
 
-            {planets.length > 0 && (
+            {chips.length > 0 && (
               <View style={styles.planetRow}>
-                {planets.map((planet) => (
-                  <View key={planet} style={[styles.planetChip, { borderColor: PLANET_COLORS[planet] }]}>
-                    <Text style={[styles.planetGlyph, { color: PLANET_COLORS[planet] }]}>
-                      {PLANET_GLYPHS[planet]}
-                    </Text>
-                    {chart.planetRetrograde[planet] && <Text style={styles.retrogradeMark}>℞</Text>}
+                {chips.map((chip) => (
+                  <View key={chip.key} style={[styles.planetChip, { borderColor: chip.color }]}>
+                    <Text style={[styles.planetGlyph, { color: chip.color }]}>{chip.glyph}</Text>
+                    {chip.retrograde && <Text style={styles.retrogradeMark}>℞</Text>}
                   </View>
                 ))}
               </View>

@@ -10,11 +10,11 @@ classical rule and a worked verification.
 House numbers are whole-sign: house N = the sign N positions after the
 Lagna's sign, wrapping at 12.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from app.astro.constants import PlanetKey, SIGN_MODALITY
-from app.astro.ephemeris import all_planet_positions, ascendant_sidereal
+from app.astro.ephemeris import all_outer_planet_positions, all_planet_positions, ascendant_sidereal
 
 ChartType = Literal["D1", "D9", "D10"]
 
@@ -85,6 +85,17 @@ class ChartResult:
     # degree/nakshatra/pada) is inherently a D1 concept: a divisional chart's
     # sign is a computed bucket, not a position with its own independent degree.
     planet_longitude: dict[PlanetKey, float]
+    # Uranus/Neptune/Pluto — display-only placements (see ephemeris.
+    # all_outer_planet_positions' docstring for why these are kept
+    # completely separate from every PlanetKey-keyed field above: no
+    # classical dasha/lordship/dignity/aspect rule anywhere in this codebase
+    # applies to them, so they must never flow into build_house_breakdown,
+    # detect_yogas, or any dasha/dignity/aspect computation — only into the
+    # chart's own visual placement display).
+    outer_planet_sign_index: dict[str, int] = field(default_factory=dict)
+    outer_planet_house: dict[str, int] = field(default_factory=dict)
+    outer_planet_retrograde: dict[str, bool] = field(default_factory=dict)
+    outer_planet_longitude: dict[str, float] = field(default_factory=dict)
 
 
 def compute_chart(jd_ut: float, latitude: float, longitude: float, division: ChartType) -> ChartResult:
@@ -107,6 +118,18 @@ def compute_chart(jd_ut: float, latitude: float, longitude: float, division: Cha
         planet_retrograde[planet] = pos.speed < 0
         planet_longitude[planet] = pos.longitude
 
+    outer_positions = all_outer_planet_positions(jd_ut)
+    outer_sign: dict[str, int] = {}
+    outer_house: dict[str, int] = {}
+    outer_retrograde: dict[str, bool] = {}
+    outer_longitude: dict[str, float] = {}
+    for planet, pos in outer_positions.items():
+        s = _divisional_sign(pos.longitude, division)
+        outer_sign[planet] = s
+        outer_house[planet] = house_number(s, lagna_sign)
+        outer_retrograde[planet] = pos.speed < 0
+        outer_longitude[planet] = pos.longitude
+
     return ChartResult(
         chart_type=division,
         lagna_sign_index=lagna_sign,
@@ -115,4 +138,8 @@ def compute_chart(jd_ut: float, latitude: float, longitude: float, division: Cha
         planet_house=planet_house,
         planet_retrograde=planet_retrograde,
         planet_longitude=planet_longitude,
+        outer_planet_sign_index=outer_sign,
+        outer_planet_house=outer_house,
+        outer_planet_retrograde=outer_retrograde,
+        outer_planet_longitude=outer_longitude,
     )

@@ -1,82 +1,94 @@
-import { useNavigation } from '@react-navigation/native';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { getCurrentDasha, getDailyReading } from '../api/client';
-import BulletList from '../components/BulletList';
+import { lookupChart } from '../api/client';
+import BirthDataFields from '../components/BirthDataFields';
 import Card from '../components/Card';
-import { HouseBreakdownList, YogaFindingsList } from '../components/ChartExplanation';
 import ErrorState from '../components/ErrorState';
-import IdentityBasics from '../components/IdentityBasics';
 import LoadingState from '../components/LoadingState';
+import NorthIndianChart from '../components/NorthIndianChart';
 import PlanetPositionsTable from '../components/PlanetPositionsTable';
 import PremiumLockNotice from '../components/PremiumLockNotice';
 import PrimaryButton from '../components/PrimaryButton';
-import PurusharthaBreakdown from '../components/PurusharthaBreakdown';
-import SectionHeader from '../components/SectionHeader';
-import NorthIndianChart from '../components/NorthIndianChart';
 import SouthIndianChart from '../components/SouthIndianChart';
-import TimeEngine from '../components/TimeEngine';
 import { CHART_LABELS } from '../constants/astro';
 import { toContentLanguage } from '../i18n/contentLanguage';
-import { useKundaliStore } from '../store/useKundaliStore';
 import { useUserStore } from '../store/useUserStore';
-import { ChartType, CurrentDasha, DailyReading } from '../types/kundali';
+import { BirthChart, BirthData, ChartType } from '../types/kundali';
 import { colors, radius, spacing, typography } from '../theme/theme';
 
+const emptyPerson: BirthData = { name: '', dateOfBirth: '', timeOfBirth: '', placeOfBirth: '' };
 const CHART_TYPES: ChartType[] = ['D1', 'D9', 'D10'];
 const PREMIUM_CHARTS: ChartType[] = ['D9', 'D10'];
 
-export default function ChartsScreen() {
+/** Product ask: "let me check someone else's chart" (a family member's,
+ * say) without overwriting the signed-in user's own saved birth profile —
+ * see api/client.ts's lookupChart for why this is a stateless, uncached
+ * backend call. Deliberately its own screen rather than a mode inside
+ * ChartsScreen: that screen's data all comes from useKundaliStore (keyed
+ * to the user's own saved profile), and this one needs to hold an
+ * arbitrary, throwaway BirthChart instead. */
+export default function ChartLookupScreen() {
   const { t } = useTranslation();
-  const navigation = useNavigation<any>();
   const language = toContentLanguage(useUserStore((s) => s.language));
   const isPremium = useUserStore((s) => s.isPremium);
   const chartStyle = useUserStore((s) => s.chartStyle);
   const setChartStyle = useUserStore((s) => s.setChartStyle);
-  const [selected, setSelected] = useState<ChartType>('D1');
 
-  const chart = useKundaliStore((s) => s.charts[selected]?.[language]);
-  const loading = useKundaliStore((s) => s.chartLoading);
-  const error = useKundaliStore((s) => s.chartError);
-  const fetchChart = useKundaliStore((s) => s.fetchChart);
+  const [person, setPerson] = useState<BirthData>(emptyPerson);
+  const [selectedType, setSelectedType] = useState<ChartType>('D1');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const [chart, setChart] = useState<BirthChart | null>(null);
 
-  const identity = useKundaliStore((s) => s.identity);
-  const fetchIdentity = useKundaliStore((s) => s.fetchIdentity);
+  const canSubmit = person.dateOfBirth.trim() && person.timeOfBirth.trim() && person.placeOfBirth.trim();
+  const isLocked = PREMIUM_CHARTS.includes(selectedType) && !isPremium;
 
-  // Layer 3 (Time Engine) needs the current dasha stack + today's reading —
-  // both cheap, already-built endpoints, fetched locally the same way
-  // PeriodAnalysisScreen already does rather than adding more global store
-  // state for data only this section uses.
-  const [currentDasha, setCurrentDasha] = useState<CurrentDasha | null>(null);
-  const [dailyReading, setDailyReading] = useState<DailyReading | null>(null);
+  const runLookup = async (type: ChartType) => {
+    setLoading(true);
+    setError(false);
+    try {
+      setChart(await lookupChart(person, type, language));
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const isLocked = PREMIUM_CHARTS.includes(selected) && !isPremium;
+  const handleView = () => {
+    setSelectedType('D1');
+    runLookup('D1');
+  };
 
-  useEffect(() => {
-    if (!isLocked) fetchChart(selected, language);
-  }, [selected, language, isLocked]);
+  const handleSelectType = (type: ChartType) => {
+    setSelectedType(type);
+    if (!PREMIUM_CHARTS.includes(type) || isPremium) runLookup(type);
+  };
 
-  useEffect(() => {
-    fetchIdentity();
-  }, []);
-
-  useEffect(() => {
-    getCurrentDasha().then(setCurrentDasha).catch(() => setCurrentDasha(null));
-    getDailyReading(language).then(setDailyReading).catch(() => setDailyReading(null));
-  }, [language]);
+  if (!chart) {
+    return (
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.subtitle}>{t('chartLookup.formSubtitle')}</Text>
+        <Card>
+          <BirthDataFields value={person} onChange={setPerson} />
+        </Card>
+        <PrimaryButton label={t('chartLookup.viewButton')} onPress={handleView} disabled={!canSubmit} />
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
-      {identity && <IdentityBasics identity={identity} language={language} />}
+      {!!person.name.trim() && <Text style={styles.personName}>{person.name}</Text>}
 
       <View style={styles.tabs}>
         {CHART_TYPES.map((type) => {
-          const active = type === selected;
+          const active = type === selectedType;
           return (
             <Pressable
               key={type}
-              onPress={() => setSelected(type)}
+              onPress={() => handleSelectType(type)}
               accessibilityRole="button"
               accessibilityLabel={CHART_LABELS[language][type]}
               accessibilityState={{ selected: active }}
@@ -88,14 +100,6 @@ export default function ChartsScreen() {
         })}
       </View>
 
-      <Text style={styles.chartTitle}>{CHART_LABELS[language][selected]}</Text>
-
-      <PrimaryButton
-        label={t('chartLookup.entryPoint')}
-        variant="outline"
-        onPress={() => navigation.navigate('ChartLookup')}
-      />
-
       {isLocked && (
         <PremiumLockNotice message={t('charts.lockedMessage')} unlockLabel={t('charts.unlockButton')} />
       )}
@@ -106,11 +110,11 @@ export default function ChartsScreen() {
         <ErrorState
           title={t('kundali.errorTitle')}
           message={t('kundali.errorMessage')}
-          onRetry={() => fetchChart(selected, language)}
+          onRetry={() => runLookup(selectedType)}
         />
       )}
 
-      {!isLocked && !loading && !error && chart && (
+      {!isLocked && !loading && !error && (
         <>
           <Card style={styles.chartCard}>
             <View style={styles.styleToggle}>
@@ -141,43 +145,12 @@ export default function ChartsScreen() {
           </Card>
 
           <Card>
-            <SectionHeader
-              title={CHART_LABELS[language][selected]}
-              voiceText={`${chart.summary} ${chart.keyPoints.join(' ')}`}
-              voiceLabel={t('charts.listenToThisChart')}
-              analyticsSource="kundali"
-            />
-            <Text style={styles.summary}>{chart.summary}</Text>
-            <Text style={styles.keyPointsLabel}>{t('charts.keyPointsLabel')}</Text>
-            <BulletList items={chart.keyPoints} />
-          </Card>
-
-          <Card>
-            <SectionHeader title={t('kundali.planetaryPositionsTitle')} />
             <PlanetPositionsTable chart={chart} language={language} />
           </Card>
-
-          <Card>
-            <SectionHeader title={t('charts.yogasTitle')} />
-            <Text style={styles.yogasSubtitle}>{t('charts.yogasSubtitle')}</Text>
-            <YogaFindingsList chart={chart} language={language} />
-          </Card>
-
-          {selected === 'D1' ? (
-            <PurusharthaBreakdown chart={chart} language={language} />
-          ) : (
-            <Card>
-              <SectionHeader title={t('charts.houseByHouseTitle')} />
-              <Text style={styles.yogasSubtitle}>{t('charts.houseByHouseSubtitle')}</Text>
-              <HouseBreakdownList chart={chart} language={language} />
-            </Card>
-          )}
-
-          {currentDasha && dailyReading && (
-            <TimeEngine currentDasha={currentDasha} dailyReading={dailyReading} language={language} />
-          )}
         </>
       )}
+
+      <PrimaryButton label={t('chartLookup.checkAnother')} variant="outline" onPress={() => setChart(null)} />
     </ScrollView>
   );
 }
@@ -186,13 +159,22 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.md,
     paddingBottom: spacing.xxl,
+    gap: spacing.md,
+  },
+  subtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  personName: {
+    ...typography.sectionTitle,
+    color: colors.textPrimary,
   },
   tabs: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceMuted,
     borderRadius: radius.md,
     padding: spacing.xs,
-    marginBottom: spacing.md,
   },
   tab: {
     flex: 1,
@@ -210,11 +192,6 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: colors.textOnPrimary,
-  },
-  chartTitle: {
-    ...typography.sectionTitle,
-    color: colors.textPrimary,
-    marginBottom: spacing.md,
   },
   chartCard: {
     alignItems: 'center',
@@ -245,19 +222,5 @@ const styles = StyleSheet.create({
   },
   chartWrap: {
     paddingVertical: spacing.sm,
-  },
-  summary: {
-    ...typography.body,
-    color: colors.textPrimary,
-  },
-  keyPointsLabel: {
-    ...typography.bodyBold,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
-  },
-  yogasSubtitle: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.sm,
   },
 });

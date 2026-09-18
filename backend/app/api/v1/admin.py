@@ -13,6 +13,7 @@ from app.db.base import get_db
 from app.db.models.cache import ChartCache, DashaCache, HoroscopeCache, PeriodAnalysisCache
 from app.db.models.user import User
 from app.schemas.admin import AdminRegenerateRequest, AdminUserDetail, AdminUserListItem
+from app.services import metrics_service
 from app.services.payments.subscription_service import get_or_create_subscription
 from app.services.user_service import get_birth_profile
 
@@ -83,3 +84,12 @@ async def regenerate(
     if "analysis" in body.targets:
         await db.execute(delete(PeriodAnalysisCache).where(PeriodAnalysisCache.user_id == body.user_id))
     await db.commit()
+
+
+@router.get("/metrics")
+async def get_metrics(_admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    """Life Intelligence health metrics (product spec §20) — whether the
+    Life Context Engine is actually becoming valuable, not just whether the
+    app is being used. See app.services.metrics_service for each metric's
+    exact definition."""
+    return await metrics_service.all_metrics(db)

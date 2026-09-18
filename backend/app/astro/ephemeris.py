@@ -134,6 +134,30 @@ def all_planet_positions(jd_ut: float) -> dict[PlanetKey, PlanetPosition]:
     return {k: planet_position(jd_ut, k) for k in keys}
 
 
+# Uranus/Neptune/Pluto are NOT part of classical Jyotish (no Vimshottari
+# dasha period, no house lordship, no classical dignity/friendship/aspect
+# rules apply to them — PlanetKey deliberately excludes them for exactly
+# this reason). Kept as a fully separate str-keyed lookup, computed the
+# same way (sidereal, Lahiri) purely so the chart can display where they
+# sit, matching what most modern chart-drawing software (and the reference
+# apps users compare against) shows alongside the 9 grahas.
+_OUTER_BODY_CODES: dict[str, int] = {
+    "Ur": swe.URANUS,
+    "Ne": swe.NEPTUNE,
+    "Pl": swe.PLUTO,
+}
+
+
+def outer_planet_position(jd_ut: float, planet: str) -> PlanetPosition:
+    _ensure_lahiri_sidereal_mode()
+    pos, _ = swe.calc_ut(jd_ut, _OUTER_BODY_CODES[planet], _CALC_FLAGS)
+    return PlanetPosition(longitude=pos[0] % 360, speed=pos[3])
+
+
+def all_outer_planet_positions(jd_ut: float) -> dict[str, PlanetPosition]:
+    return {k: outer_planet_position(jd_ut, k) for k in _OUTER_BODY_CODES}
+
+
 def ascendant_sidereal(jd_ut: float, latitude: float, longitude: float) -> float:
     """Sidereal longitude of the Ascendant (Lagna), degrees [0, 360)."""
     _ensure_lahiri_sidereal_mode()

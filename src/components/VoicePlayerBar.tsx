@@ -24,7 +24,7 @@ export default function VoicePlayerBar() {
           accessibilityLabel={playing ? t('common.pause') : t('common.play')}
           style={styles.playButton}
         >
-          <Ionicons name={playing ? 'pause' : 'play'} size={24} color={colors.textInverse} />
+          <Ionicons name={playing ? 'pause' : 'play'} size={24} color={colors.textOnPrimary} />
         </Pressable>
 
         <View style={styles.middle}>

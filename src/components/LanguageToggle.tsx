@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
   },
   labelActive: {
-    color: colors.textInverse,
+    color: colors.textOnPrimary,
   },
   labelActiveInverse: {
     color: colors.textInverse,

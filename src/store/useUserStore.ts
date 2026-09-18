@@ -39,6 +39,7 @@ interface UserState {
   setChartStyle: (style: ChartStyle) => void;
   setBirthData: (data: BirthData) => Promise<void>;
   hydrateBirthData: (data: BirthData) => void;
+  hydrateAccountName: (name: string) => void;
   setPreferences: (prefs: PreferenceKey[]) => Promise<void>;
   hydratePreferences: (prefs: PreferenceKey[]) => void;
   setAccuracyScore: (score: number) => void;
@@ -89,6 +90,13 @@ export const useUserStore = create<UserState>()(
       // so it doesn't needlessly bump birth_profile_version and invalidate
       // every chart/reading cache that's already correctly computed.
       hydrateBirthData: (birthData) => set({ birthData }),
+
+      // The account holder's name was just typed on the signup form —
+      // carrying it into the (still-empty) birthData draft here means the
+      // very next screen (BirthDataScreen) doesn't have to ask for it a
+      // second time. Only touches `name`; dateOfBirth/timeOfBirth/
+      // placeOfBirth stay whatever they already were (empty, pre-onboarding).
+      hydrateAccountName: (name) => set((state) => ({ birthData: { ...state.birthData, name } })),
 
       setPreferences: async (preferences) => {
         set({ preferences });

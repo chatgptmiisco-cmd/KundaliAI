@@ -17,6 +17,8 @@ export type RootStackParamList = {
   AppInfo: undefined;
   Auth: undefined;
   BirthData: undefined;
+  TopicSelection: undefined;
+  TopicFollowUp: { topic: import('../data/onboardingTopics').OnboardingTopic };
   AiProcessing: undefined;
   Validation: undefined;
   Preferences: undefined;
@@ -29,4 +31,7 @@ export type RootStackParamList = {
   Payment: { passId: string };
   PeriodAnalysis: undefined;
   GunaMilan: undefined;
+  MyLifeTwin: undefined;
+  LifeTimeline: undefined;
+  ChartLookup: undefined;
 };

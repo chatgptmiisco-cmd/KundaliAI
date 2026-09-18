@@ -157,7 +157,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tabTextActive: {
-    color: colors.textInverse,
+    color: colors.textOnPrimary, // active tab bg is now light gold, textInverse would wash out
   },
   categorySubtitle: {
     ...typography.caption,
@@ -185,7 +185,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   modeTextActive: {
-    color: colors.primary,
+    color: colors.textOnPrimary, // sits on primaryLight bg, primary text is now too light too
   },
   glossaryRow: {
     flexDirection: 'row',

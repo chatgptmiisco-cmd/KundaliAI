@@ -1,4 +1,4 @@
-import { ChartType, Language, PlanetKey } from '../types/kundali';
+import { ChartType, Language, OuterPlanetKey, PlanetKey } from '../types/kundali';
 
 // Fixed zodiac order, index 0 = Aries ... 11 = Pisces.
 export const SIGN_NAMES: Record<Language, string[]> = {
@@ -72,6 +72,22 @@ export const PLANET_NAMES: Record<Language, Record<PlanetKey, string>> = {
     Ra: 'राहु',
     Ke: 'केतु',
   },
+};
+
+// Uranus/Neptune/Pluto — display-only chart placements, kept in their own
+// tables rather than folded into PLANET_GLYPHS/COLORS/NAMES above (see
+// OuterPlanetKey's docstring for why they're a separate type entirely).
+export const OUTER_PLANET_GLYPHS: Record<OuterPlanetKey, string> = {
+  Ur: '⛢', Ne: '♆', Pl: '♇',
+};
+
+export const OUTER_PLANET_COLORS: Record<OuterPlanetKey, string> = {
+  Ur: '#6B8E9E', Ne: '#5B6BA8', Pl: '#8B5E6B',
+};
+
+export const OUTER_PLANET_NAMES: Record<Language, Record<OuterPlanetKey, string>> = {
+  en: { Ur: 'Uranus', Ne: 'Neptune', Pl: 'Pluto' },
+  hi: { Ur: 'यूरेनस', Ne: 'नेपच्यून', Pl: 'प्लूटो' },
 };
 
 export const CHART_LABELS: Record<Language, Record<ChartType, string>> = {

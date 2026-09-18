@@ -26,6 +26,7 @@ export default function AuthScreen() {
   const language = useUserStore((s) => s.language);
   const setAuthSession = useUserStore((s) => s.setAuthSession);
   const hydrateBirthData = useUserStore((s) => s.hydrateBirthData);
+  const hydrateAccountName = useUserStore((s) => s.hydrateAccountName);
   const hydratePreferences = useUserStore((s) => s.hydratePreferences);
   const finishOnboarding = useUserStore((s) => s.finishOnboarding);
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
@@ -96,6 +97,7 @@ export default function AuthScreen() {
           ? await signup(email.trim(), password, name.trim(), contentLanguage)
           : await login(email.trim(), password);
       setAuthSession(result.accessToken, email.trim());
+      if (mode === 'signup') hydrateAccountName(name.trim());
       await resumeExistingAccountOrGoToBirthData();
     } catch (err: any) {
       if (mode === 'signup' && err?.status === 409) {
@@ -505,7 +507,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   tabTextActive: {
-    color: colors.textInverse,
+    color: colors.textOnPrimary,
   },
   methodTabs: {
     flexDirection: 'row',

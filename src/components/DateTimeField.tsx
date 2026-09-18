@@ -163,6 +163,6 @@ const styles = StyleSheet.create({
   },
   doneButtonText: {
     ...typography.button,
-    color: colors.textInverse,
+    color: colors.textOnPrimary,
   },
 });

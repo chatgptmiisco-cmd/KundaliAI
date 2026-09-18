@@ -186,6 +186,66 @@ async def test_d1_chart_includes_house_breakdown_and_yoga_detection(client):
     assert len(d9.json()["house_breakdown"]) == 12
 
 
+async def test_d1_chart_includes_outer_planets_separately_from_the_main_nine(client):
+    headers = await _signup_and_set_birth_data(client)
+    d1 = await client.get("/api/v1/chart/d1", headers=headers)
+    assert d1.status_code == 200, d1.text
+    body = d1.json()
+
+    outer_codes = {p["planet"] for p in body["outer_planets"]}
+    assert outer_codes == {"Ur", "Ne", "Pl"}
+    # Display-only: never mixed into the classical 9-graha list, and never
+    # carries classical-Jyotish fields that don't apply to them.
+    assert outer_codes.isdisjoint({p["planet"] for p in body["planets"]})
+    for p in body["outer_planets"]:
+        assert p["dignity"] is None
+        assert p["combust"] is None
+        assert 1 <= p["house"] <= 12
+        assert p["sign_name_en"]
+
+
+async def test_chart_lookup_does_not_touch_the_signed_in_users_own_profile(client):
+    headers = await _signup_and_set_birth_data(client)
+    own_before = await client.get("/api/v1/chart/d1", headers=headers)
+
+    lookup = await client.post(
+        "/api/v1/chart/lookup",
+        headers=headers,
+        json={
+            "date_of_birth": "2005-03-30", "time_of_birth": "03:50",
+            "latitude": 26.2183, "longitude": 78.1828, "timezone_offset_hours": 5.5, "chart_type": "D1",
+        },
+    )
+    assert lookup.status_code == 200, lookup.text
+    looked_up = lookup.json()
+    assert looked_up["lagna_sign_name_en"] == "Capricorn"
+    # No summary/key points generated for a quick lookup (no LLM dependency).
+    assert looked_up["summary_en"] == ""
+    assert looked_up["key_points_en"] == []
+    # Still real, rule-based house data and outer planets, not empty stubs.
+    assert len(looked_up["house_breakdown"]) == 12
+    assert {p["planet"] for p in looked_up["outer_planets"]} == {"Ur", "Ne", "Pl"}
+
+    own_after = await client.get("/api/v1/chart/d1", headers=headers)
+    assert own_after.json()["lagna_sign_name_en"] == own_before.json()["lagna_sign_name_en"]
+
+
+async def test_chart_lookup_d9_d10_require_insight_tier(client):
+    headers = await _signup_and_set_birth_data(client)
+    body = {
+        "date_of_birth": "2005-03-30", "time_of_birth": "03:50",
+        "latitude": 26.2183, "longitude": 78.1828, "timezone_offset_hours": 5.5, "chart_type": "D9",
+    }
+    resp = await client.post("/api/v1/chart/lookup", headers=headers, json=body)
+    assert resp.status_code == 403
+
+    await client.post(
+        "/api/v1/subscription/checkout", headers=headers, json={"tier": "insight", "billing_cycle": "monthly"}
+    )
+    resp = await client.post("/api/v1/chart/lookup", headers=headers, json=body)
+    assert resp.status_code == 200
+
+
 async def test_d9_and_d10_require_insight_tier(client):
     headers = await _signup_and_set_birth_data(client)
     for path in ("/api/v1/chart/d9", "/api/v1/chart/d10"):

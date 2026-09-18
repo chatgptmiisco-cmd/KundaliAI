@@ -48,7 +48,7 @@ export default function PreferencesScreen() {
               <Ionicons
                 name={opt.icon}
                 size={22}
-                color={active ? colors.textInverse : colors.primary}
+                color={active ? colors.textOnPrimary : colors.primary}
               />
               <Text style={[styles.chipText, active && styles.chipTextActive]}>
                 {t(`preferences.${opt.key}`)}
@@ -106,7 +106,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   chipTextActive: {
-    color: colors.textInverse,
+    color: colors.textOnPrimary,
   },
   hint: {
     ...typography.caption,

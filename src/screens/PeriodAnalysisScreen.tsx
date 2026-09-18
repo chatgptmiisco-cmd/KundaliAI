@@ -212,13 +212,13 @@ const styles = StyleSheet.create({
   },
   rightNowLabel: {
     ...typography.caption,
-    color: colors.primaryDark,
+    color: colors.textOnPrimary,
     fontFamily: fontFamily.bold,
     marginBottom: spacing.xs,
   },
   rightNowStack: {
     ...typography.bodyBold,
-    color: colors.primaryDark,
+    color: colors.textOnPrimary,
   },
   quotaText: {
     ...typography.caption,

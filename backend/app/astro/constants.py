@@ -137,6 +137,14 @@ PLANET_NAMES_HI: dict[PlanetKey, str] = {
     "Ve": "शुक्र", "Sa": "शनि", "Ra": "राहु", "Ke": "केतु",
 }
 
+# Uranus/Neptune/Pluto display names — deliberately plain `dict[str, str]`,
+# not `dict[PlanetKey, str]`, since these three are outside the classical
+# graha set PlanetKey represents (see app.astro.ephemeris's outer-planet
+# docstring): shown on the chart for visual parity with common reference
+# charts, never used in dasha/lordship/dignity/aspect logic.
+OUTER_PLANET_NAMES_EN: dict[str, str] = {"Ur": "Uranus", "Ne": "Neptune", "Pl": "Pluto"}
+OUTER_PLANET_NAMES_HI: dict[str, str] = {"Ur": "यूरेनस", "Ne": "नेपच्यून", "Pl": "प्लूटो"}
+
 # Classical Vedic/Chaldean numerology number per planet (1-9, Rahu/Ketu take
 # the traditional 4/7 substitutes) — standard reference table, same category
 # as the name tables above. Used for "today's number" (the weekday lord's

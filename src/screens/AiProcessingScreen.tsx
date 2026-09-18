@@ -48,8 +48,11 @@ export default function AiProcessingScreen() {
   }, []);
 
   return (
+    // Dark cosmic gradient throughout (no gold end) — with primary/
+    // primaryDark now light-to-medium gold instead of dark maroon, the old
+    // gradient's far end no longer contrasted with the white step text.
     <LinearGradient
-      colors={['#241d3d', colors.primaryDark, colors.primary]}
+      colors={['#241d3d', '#3A2456', colors.background]}
       start={{ x: 0.1, y: 0 }}
       end={{ x: 0.9, y: 1 }}
       style={styles.wrap}

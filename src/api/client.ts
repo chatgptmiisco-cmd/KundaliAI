@@ -17,6 +17,7 @@ import {
   KundaliSummary,
   Language,
   ManglikStatus,
+  OuterPlanetKey,
   PeriodAnalysis,
   PlanetDetail,
   PlanetKey,
@@ -439,11 +440,10 @@ interface ChartApi {
   key_points_hi: string[];
   house_breakdown: HouseBreakdownApi[];
   yogas: YogaFindingApi[];
+  outer_planets: PlanetPlacementApi[];
 }
 
-export async function getChart(type: ChartType, lang: Language): Promise<BirthChart> {
-  const path = { D1: '/chart/d1', D9: '/chart/d9', D10: '/chart/d10' }[type];
-  const data = await apiRequest<ChartApi>(path);
+function chartApiToBirthChart(type: ChartType, lang: Language, data: ChartApi): BirthChart {
   const planetSignIndex = Object.fromEntries(
     data.planets.map((p) => [p.planet, p.sign_index]),
   ) as Record<PlanetKey, number>;
@@ -492,7 +492,48 @@ export async function getChart(type: ChartType, lang: Language): Promise<BirthCh
       descriptionEn: y.description_en,
       descriptionHi: y.description_hi,
     })),
+    outerPlanets: data.outer_planets.map((p) => ({
+      planet: p.planet as OuterPlanetKey,
+      signIndex: p.sign_index,
+      house: p.house,
+      retrograde: p.retrograde,
+      degreeDisplay: p.degree_display,
+    })),
   };
+}
+
+export async function getChart(type: ChartType, lang: Language): Promise<BirthChart> {
+  const path = { D1: '/chart/d1', D9: '/chart/d9', D10: '/chart/d10' }[type];
+  const data = await apiRequest<ChartApi>(path);
+  return chartApiToBirthChart(type, lang, data);
+}
+
+/** "Check someone else's chart" (product ask: a family member's, without
+ * overwriting your own saved birth profile) — POSTs raw birth data
+ * straight to a stateless backend endpoint; nothing here is persisted
+ * server-side, and no summary/keyPoints/yogas prose is generated (the
+ * lookup endpoint skips the LLM call entirely — see chart_service.
+ * compute_adhoc_chart), so those come back empty. The chart drawing itself
+ * (planets/houses/outerPlanets) is real and complete. Same
+ * geocoded-suggestion-preferred-over-offline-table fallback as
+ * getGunaMilan above. */
+export async function lookupChart(person: BirthData, type: ChartType, lang: Language): Promise<BirthChart> {
+  const coords =
+    person.latitude !== undefined && person.longitude !== undefined && person.timezoneOffsetHours !== undefined
+      ? { latitude: person.latitude, longitude: person.longitude, timezoneOffsetHours: person.timezoneOffsetHours }
+      : resolveBirthPlace(person.placeOfBirth);
+  const data = await apiRequest<ChartApi>('/chart/lookup', {
+    method: 'POST',
+    body: {
+      date_of_birth: person.dateOfBirth,
+      time_of_birth: person.timeOfBirth,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      timezone_offset_hours: coords.timezoneOffsetHours,
+      chart_type: type,
+    },
+  });
+  return chartApiToBirthChart(type, lang, data);
 }
 
 // ---------------------------------------------------------------------------
@@ -851,5 +892,107 @@ export async function transcribeAudio(uri: string, lang: AppLanguage): Promise<{
   formData.append('audio', { uri, name: 'recording.m4a', type: 'audio/m4a' } as unknown as Blob);
   formData.append('language', lang);
   return apiRequestMultipart<{ text: string }>('/voice/transcribe', formData);
+}
+
+// ---------------------------------------------------------------------------
+// Life Context ("My Life Twin" — see backend app/services/life_context_service)
+// ---------------------------------------------------------------------------
+
+export interface OnboardingQA {
+  question: string;
+  answer: string;
+}
+
+export async function submitOnboardingContext(topic: string, qaPairs: OnboardingQA[], lang: AppLanguage): Promise<void> {
+  await apiRequest('/user/onboarding-context', {
+    method: 'POST',
+    body: { topic, qa_pairs: qaPairs, language: lang },
+  });
+}
+
+export interface LifeContextFact {
+  id: number;
+  domain: string;
+  key: string;
+  value: string;
+  confidence: 'high' | 'medium' | 'low';
+  source: 'user_stated' | 'user_confirmed' | 'inferred';
+  lastConfirmedAt: string | null;
+}
+
+export interface LifeDecisionItem {
+  id: number;
+  decisionType: string;
+  context: string | null;
+  status: 'exploring' | 'decided' | 'abandoned';
+  finalChoice: string | null;
+  outcome: string | null;
+  createdAt: string;
+}
+
+export interface MyLifeTwin {
+  facts: Record<string, LifeContextFact[]>;
+  decisions: LifeDecisionItem[];
+}
+
+interface LifeContextFactApi {
+  id: number;
+  domain: string;
+  key: string;
+  value: string;
+  confidence: 'high' | 'medium' | 'low';
+  source: 'user_stated' | 'user_confirmed' | 'inferred';
+  last_confirmed_at: string | null;
+}
+
+interface LifeDecisionApi {
+  id: number;
+  decision_type: string;
+  context: string | null;
+  status: 'exploring' | 'decided' | 'abandoned';
+  final_choice: string | null;
+  outcome: string | null;
+  created_at: string;
+}
+
+function fromFactApi(f: LifeContextFactApi): LifeContextFact {
+  return { id: f.id, domain: f.domain, key: f.key, value: f.value, confidence: f.confidence, source: f.source, lastConfirmedAt: f.last_confirmed_at };
+}
+
+export async function getMyLifeTwin(): Promise<MyLifeTwin> {
+  const data = await apiRequest<{ facts: Record<string, LifeContextFactApi[]>; decisions: LifeDecisionApi[] }>('/user/life-context');
+  const facts: Record<string, LifeContextFact[]> = {};
+  for (const [domain, items] of Object.entries(data.facts)) {
+    facts[domain] = items.map(fromFactApi);
+  }
+  return {
+    facts,
+    decisions: data.decisions.map((d) => ({
+      id: d.id, decisionType: d.decision_type, context: d.context, status: d.status,
+      finalChoice: d.final_choice, outcome: d.outcome, createdAt: d.created_at,
+    })),
+  };
+}
+
+export async function correctLifeContextFact(id: number, value: string): Promise<LifeContextFact> {
+  const data = await apiRequest<LifeContextFactApi>(`/user/life-context/${id}`, { method: 'PATCH', body: { value } });
+  return fromFactApi(data);
+}
+
+export async function deleteLifeContextFact(id: number): Promise<void> {
+  await apiRequest(`/user/life-context/${id}`, { method: 'DELETE' });
+}
+
+export interface LifeTimelineEntry {
+  id: number;
+  eventType: string;
+  description: string;
+  year: number;
+  month: number | null;
+}
+
+export async function getLifeTimeline(): Promise<LifeTimelineEntry[]> {
+  const data = await apiRequest<{ id: number; event_type: string; description: string; year: number; month: number | null }[]>('/user/life-timeline');
+  return data.map((e) => ({ id: e.id, eventType: e.event_type, description: e.description, year: e.year, month: e.month }));
 }
 

@@ -110,6 +110,14 @@ export type ChartType = 'D1' | 'D9' | 'D10';
 
 export type PlanetKey = 'Su' | 'Mo' | 'Ma' | 'Me' | 'Ju' | 'Ve' | 'Sa' | 'Ra' | 'Ke';
 
+/** Uranus/Neptune/Pluto — deliberately kept OUT of PlanetKey. They're not
+ * part of classical Jyotish (no dasha period, no house lordship, no
+ * dignity/friendship/aspect rules), so every `Record<PlanetKey, ...>` in
+ * this app (dasha, lordship, glyphs/colors/names) can stay exhaustive
+ * without meaningless entries for them. Shown on the chart purely for
+ * visual parity with common reference charts. */
+export type OuterPlanetKey = 'Ur' | 'Ne' | 'Pl';
+
 export type Dignity = 'exalted' | 'debilitated' | 'own_sign' | 'neutral';
 
 /** "Grah Spashta" precision detail for one planet — real computed values,
@@ -149,6 +157,17 @@ export interface YogaFinding {
   descriptionHi: string;
 }
 
+/** A Uranus/Neptune/Pluto placement — the same shape a PlanetDetail would
+ * need for chart drawing (sign/house/retrograde), minus the classical-only
+ * fields (dignity, combustion, nakshatra) that don't apply to them. */
+export interface OuterPlanetPlacement {
+  planet: OuterPlanetKey;
+  signIndex: number;
+  house: number;
+  retrograde: boolean;
+  degreeDisplay: string | null;
+}
+
 export interface BirthChart {
   type: ChartType;
   lagnaSignIndex: number; // 0 = Aries ... 11 = Pisces
@@ -160,6 +179,9 @@ export interface BirthChart {
   keyPoints: string[];
   houseBreakdown: HouseBreakdown[];
   yogas: YogaFinding[];
+  // Display-only — never used for dasha/lordship/dosha logic, see
+  // OuterPlanetKey's docstring above.
+  outerPlanets: OuterPlanetPlacement[];
 }
 
 export interface DashaSubPeriod {

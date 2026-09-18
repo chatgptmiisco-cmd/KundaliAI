@@ -56,6 +56,57 @@
       "Aapka dashboard taiyaar ho raha hai..."
     ]
   },
+  "onboardingTopics": {
+    "title": "Ek chhoti si baat",
+    "subtitle": "Abhi aap kis baare mein sabse zyada clarity chahenge?",
+    "career": "Career",
+    "business": "Business",
+    "relationships": "Rishte",
+    "marriage": "Shaadi",
+    "money": "Paisa",
+    "family": "Family",
+    "personalDirection": "Life direction",
+    "other": "Kuch aur",
+    "answerPlaceholder": "Apna jawaab likhein...",
+    "next": "Aage",
+    "finish": "Continue karein",
+    "skipQuestion": "Yeh sawaal skip karein",
+    "q": {
+      "career": [
+        "Aap abhi kya karte hain?",
+        "Aap wahan kitne time se hain?",
+        "Abhi aapko apne career ke baare mein kya sochne par majboor kar raha hai?"
+      ],
+      "business": [
+        "Aapka business kya hai, ya aap kaunsa shuru karne ki soch rahe hain?",
+        "Aap isme kitne time se hain?",
+        "Abhi iske baare mein aapke mann mein kya chal raha hai?"
+      ],
+      "relationships": [
+        "Kya aap abhi kisi relationship mein hain?",
+        "Abhi iske baare mein aapke mann mein kya chal raha hai?"
+      ],
+      "marriage": [
+        "Kya aap shaadi-shuda hain, ya shaadi ke baare mein soch rahe hain?",
+        "Abhi iske baare mein aapke mann mein kya chal raha hai?"
+      ],
+      "money": [
+        "Abhi financially aapke mann mein kya chal raha hai?",
+        "Kya iske peeche koi khaas goal ya faisla hai?"
+      ],
+      "family": [
+        "Abhi aapke family mein kya chal raha hai?",
+        "Kya koi khaas baat hai jispar aap clarity chahenge?"
+      ],
+      "personalDirection": [
+        "Aapki life direction ko lekar aapke mann mein kya chal raha hai?",
+        "Kya iske peeche koi khaas faisla hai?"
+      ],
+      "other": [
+        "Aap kis baare mein baat karna chahenge?"
+      ]
+    }
+  },
   "appInfo": {
     "skip": "Skip",
     "continueButton": "Aage Badhein",
@@ -159,6 +210,7 @@
     "back": "Wapas",
     "edit": "Edit",
     "save": "Save",
+    "delete": "Delete",
     "current": "Current",
     "locked": "Locked"
   },
@@ -333,6 +385,13 @@
       "noMajorTransit": "Abhi aapki Moon rashi par Shani ya Guru ka koi bada effect nahi hai — yeh genuinely ek calm period hai, na extra pressure hai na extra opportunity. Steady rehne ka accha time hai."
     }
   },
+  "chartLookup": {
+    "entryPoint": "Kisi aur ki chart check karein",
+    "screenTitle": "Doosri Chart Check Karein",
+    "formSubtitle": "Apni birth details badle bina kisi family member ya friend ki chart dekhein — yahan kuch bhi save nahi hota.",
+    "viewButton": "Chart Dekhein",
+    "checkAnother": "Ek Aur Chart Check Karein"
+  },
   "gunaMilan": {
     "screenTitle": "Guna Milan",
     "formSubtitle": "Apni kundali se Ashtakoot (Guna Milan) compatibility check karne ke liye partner ki birth details daalein.",
@@ -385,6 +444,43 @@
     "restartOnboardingConfirmTitle": "Onboarding restart karein?",
     "restartOnboardingConfirmMessage": "Isse aapki birth details, preferences aur reports clear ho jayengi taaki aap dobara onboarding se guzar sakein.",
     "placeSearchError": "Abhi places search nahi ho paaye — apna connection check karein, ya poora place name type karte rahein."
+  },
+  "lifeTwin": {
+    "screenTitle": "Mera Life Twin",
+    "subtitle": "Yeh wahi hai jo app ne aapki conversations se samjha hai. Kisi bhi baat ko correct karne ke liye usse tap karein, ya jo bhulwana chahein use hata dein.",
+    "viewTimeline": "Meri life timeline dekhein",
+    "loadError": "Abhi aapka Life Twin load nahi ho paaya.",
+    "empty": "Abhi tak kuch yaad nahi hai — jitni baat karenge, utna yeh fill hota jayega.",
+    "deleteConfirmTitle": "Ise bhula dein?",
+    "deleteConfirmMessage": "\"{{value}}\" hata diya jayega aur ab isse aapke jawaabon ko personalize karne ke liye use nahi kiya jayega.",
+    "inferredTag": "conversation se guess kiya gaya",
+    "outcomeLabel": "Kaisa raha",
+    "profileHint": "Dekhein ki app aapki life ke baare mein kya yaad rakhta hai, aur kisi bhi baat ko correct ya delete karein.",
+    "viewButton": "Mera Life Twin dekhein",
+    "domain": {
+      "identity": "Pehchaan",
+      "career": "Career",
+      "business": "Business",
+      "money": "Paisa",
+      "relationships": "Rishte",
+      "family": "Family",
+      "goals": "Goals",
+      "preferences": "Preferences"
+    },
+    "decisionType": {
+      "job_change": "Job change consider kar rahe hain",
+      "business_start": "Business start karne ka soch rahe hain"
+    },
+    "decisionStatus": {
+      "exploring": "Abhi soch rahe hain",
+      "decided": "Decide ho gaya",
+      "abandoned": "Filhaal taal diya"
+    }
+  },
+  "lifeTimeline": {
+    "screenTitle": "Meri Life Timeline",
+    "loadError": "Abhi aapki timeline load nahi ho paayi.",
+    "empty": "Abhi timeline mein kuch nahi hai — chat mein batayi gayi zaroori baatein (nayi job, shifting, koi bada faisla) yahan dikhengi."
   },
   "rishi": {
     "unlimitedMessages": "Unlimited messages",

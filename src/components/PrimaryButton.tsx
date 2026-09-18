@@ -22,6 +22,11 @@ export default function PrimaryButton({
   accessibilityHint,
 }: Props) {
   const isDisabled = disabled || loading;
+  // `primary`'s background is the light gold accent (needs dark ink text);
+  // `secondary` (rose) and the disabled state are medium/dark and need the
+  // usual light `textInverse`; `outline` has no fill, so its own color reads.
+  const foregroundColor =
+    variant === 'outline' ? colors.primary : variant === 'primary' && !isDisabled ? colors.textOnPrimary : colors.textInverse;
   return (
     <Pressable
       onPress={onPress}
@@ -41,17 +46,11 @@ export default function PrimaryButton({
     >
       <View style={styles.content}>
         {loading ? (
-          <ActivityIndicator color={variant === 'outline' ? colors.primary : colors.textInverse} />
+          <ActivityIndicator color={foregroundColor} />
         ) : (
           <>
             {icon}
-            <Text
-              style={[
-                styles.label,
-                variant === 'outline' && { color: colors.primary },
-              ]}
-              numberOfLines={2}
-            >
+            <Text style={[styles.label, { color: foregroundColor }]} numberOfLines={2}>
               {label}
             </Text>
           </>

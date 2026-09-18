@@ -56,6 +56,57 @@
       "Preparing your dashboard..."
     ]
   },
+  "onboardingTopics": {
+    "title": "One quick thing",
+    "subtitle": "What would you most like clarity about right now?",
+    "career": "Career",
+    "business": "Business",
+    "relationships": "Relationships",
+    "marriage": "Marriage",
+    "money": "Money",
+    "family": "Family",
+    "personalDirection": "Personal direction",
+    "other": "Something else",
+    "answerPlaceholder": "Type your answer...",
+    "next": "Next",
+    "finish": "Continue",
+    "skipQuestion": "Skip this question",
+    "q": {
+      "career": [
+        "What do you currently do?",
+        "How long have you been there?",
+        "What's making you think about your career right now?"
+      ],
+      "business": [
+        "What's your business, or the one you're thinking about starting?",
+        "How long have you been at it?",
+        "What's on your mind about it right now?"
+      ],
+      "relationships": [
+        "Are you currently in a relationship?",
+        "What's on your mind about it right now?"
+      ],
+      "marriage": [
+        "Are you married, or thinking about marriage?",
+        "What's on your mind about it right now?"
+      ],
+      "money": [
+        "What's on your mind financially right now?",
+        "Is there a specific goal or decision behind it?"
+      ],
+      "family": [
+        "What's going on with your family right now?",
+        "Is there something specific you'd like clarity on?"
+      ],
+      "personalDirection": [
+        "What's been on your mind about your direction in life?",
+        "Is there a specific decision behind it?"
+      ],
+      "other": [
+        "What would you like to talk about?"
+      ]
+    }
+  },
   "appInfo": {
     "skip": "Skip",
     "continueButton": "Continue",
@@ -159,6 +210,7 @@
     "back": "Back",
     "edit": "Edit",
     "save": "Save",
+    "delete": "Delete",
     "current": "Current",
     "locked": "Locked"
   },
@@ -333,6 +385,13 @@
       "noMajorTransit": "No major Saturn or Jupiter activation on your Moon sign right now — a genuinely calm stretch, without the extra pressure or the extra opening either. A good window to just keep steady."
     }
   },
+  "chartLookup": {
+    "entryPoint": "Check someone else's chart",
+    "screenTitle": "Check Another Chart",
+    "formSubtitle": "See a family member's or friend's chart without changing your own saved birth details — nothing here is saved.",
+    "viewButton": "View Chart",
+    "checkAnother": "Check Another Chart"
+  },
   "gunaMilan": {
     "screenTitle": "Guna Milan",
     "formSubtitle": "Enter your partner's birth details to check Ashtakoot (Guna Milan) compatibility with your own chart.",
@@ -385,6 +444,43 @@
     "restartOnboardingConfirmTitle": "Restart onboarding?",
     "restartOnboardingConfirmMessage": "This clears your birth details, preferences and reports so you can go through onboarding again.",
     "placeSearchError": "Couldn't search places right now — check your connection, or keep typing the full place name."
+  },
+  "lifeTwin": {
+    "screenTitle": "My Life Twin",
+    "subtitle": "This is what the app has picked up from your conversations. Tap any fact to correct it, or remove anything you'd rather it forget.",
+    "viewTimeline": "View my life timeline",
+    "loadError": "Couldn't load your Life Twin right now.",
+    "empty": "Nothing remembered yet — the more you chat, the more this fills in.",
+    "deleteConfirmTitle": "Forget this?",
+    "deleteConfirmMessage": "\"{{value}}\" will be removed and won't be used to personalize your answers anymore.",
+    "inferredTag": "guessed from conversation",
+    "outcomeLabel": "How it went",
+    "profileHint": "See everything the app remembers about your life, and correct or remove anything.",
+    "viewButton": "View my Life Twin",
+    "domain": {
+      "identity": "Identity",
+      "career": "Career",
+      "business": "Business",
+      "money": "Money",
+      "relationships": "Relationships",
+      "family": "Family",
+      "goals": "Goals",
+      "preferences": "Preferences"
+    },
+    "decisionType": {
+      "job_change": "Considering a job change",
+      "business_start": "Considering starting a business"
+    },
+    "decisionStatus": {
+      "exploring": "Still exploring",
+      "decided": "Decided",
+      "abandoned": "Set aside"
+    }
+  },
+  "lifeTimeline": {
+    "screenTitle": "My Life Timeline",
+    "loadError": "Couldn't load your timeline right now.",
+    "empty": "Nothing on your timeline yet — meaningful events you mention in chat (a new job, a move, a big decision) will show up here."
   },
   "rishi": {
     "unlimitedMessages": "Unlimited messages",

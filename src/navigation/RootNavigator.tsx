@@ -6,15 +6,20 @@ import AiProcessingScreen from '../screens/AiProcessingScreen';
 import AppInfoScreen from '../screens/AppInfoScreen';
 import AuthScreen from '../screens/AuthScreen';
 import BirthDataScreen from '../screens/BirthDataScreen';
+import ChartLookupScreen from '../screens/ChartLookupScreen';
 import GunaMilanScreen from '../screens/GunaMilanScreen';
 import HoroscopeDetailScreen from '../screens/HoroscopeDetailScreen';
 import InsightsScreen from '../screens/InsightsScreen';
+import LifeTimelineScreen from '../screens/LifeTimelineScreen';
 import ManglikAnalysisScreen from '../screens/ManglikAnalysisScreen';
+import MyLifeTwinScreen from '../screens/MyLifeTwinScreen';
 import PassStoreScreen from '../screens/PassStoreScreen';
 import PaymentScreen from '../screens/PaymentScreen';
 import PeriodAnalysisScreen from '../screens/PeriodAnalysisScreen';
 import PreferencesScreen from '../screens/PreferencesScreen';
 import SplashScreen from '../screens/SplashScreen';
+import TopicFollowUpScreen from '../screens/TopicFollowUpScreen';
+import TopicSelectionScreen from '../screens/TopicSelectionScreen';
 import UpgradePlansScreen from '../screens/UpgradePlansScreen';
 import ValidationScreen from '../screens/ValidationScreen';
 import WelcomeScreen from '../screens/WelcomeScreen';
@@ -77,6 +82,16 @@ export default function RootNavigator() {
             options={{ title: t('onboarding.birthDataTitle') }}
           />
           <Stack.Screen
+            name="TopicSelection"
+            component={TopicSelectionScreen}
+            options={{ title: t('onboardingTopics.title'), headerBackVisible: false, gestureEnabled: false }}
+          />
+          <Stack.Screen
+            name="TopicFollowUp"
+            component={TopicFollowUpScreen}
+            options={{ title: t('onboardingTopics.title') }}
+          />
+          <Stack.Screen
             name="AiProcessing"
             component={AiProcessingScreen}
             options={{ headerShown: false, gestureEnabled: false }}
@@ -134,6 +149,21 @@ export default function RootNavigator() {
             name="Insights"
             component={InsightsScreen}
             options={{ title: t('insights.screenTitle') }}
+          />
+          <Stack.Screen
+            name="MyLifeTwin"
+            component={MyLifeTwinScreen}
+            options={{ title: t('lifeTwin.screenTitle') }}
+          />
+          <Stack.Screen
+            name="LifeTimeline"
+            component={LifeTimelineScreen}
+            options={{ title: t('lifeTimeline.screenTitle') }}
+          />
+          <Stack.Screen
+            name="ChartLookup"
+            component={ChartLookupScreen}
+            options={{ title: t('chartLookup.screenTitle') }}
           />
         </>
       )}

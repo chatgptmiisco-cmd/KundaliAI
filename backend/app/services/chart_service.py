@@ -18,6 +18,8 @@ from app.astro.constants import (
     NAKSHATRA_NAMES_EN,
     NAKSHATRA_NAMES_HI,
     NAKSHATRA_SPAN_DEG,
+    OUTER_PLANET_NAMES_EN,
+    OUTER_PLANET_NAMES_HI,
     PLANET_NAMES_EN,
     PLANET_NAMES_HI,
     SIGN_NAMES_EN,
@@ -28,7 +30,7 @@ from app.astro.natal_insights import is_combust, planet_dignity
 from app.astro.panchang import nakshatra_pada
 from app.db.models.birth_profile import BirthProfile
 from app.db.models.cache import ChartCache
-from app.schemas.chart import ChartResponse, HouseBreakdown, PlanetPlacement, PlanetTheme, YogaFinding
+from app.schemas.chart import AdhocChartIn, ChartResponse, HouseBreakdown, PlanetPlacement, PlanetTheme, YogaFinding
 from app.schemas.user import BirthDataOut
 from app.services.cache_utils import add_and_commit_or_fetch_existing
 from app.services.chart_explanation_service import build_house_breakdown, build_planet_theme_sentences, detect_yogas
@@ -36,7 +38,7 @@ from app.services.interpretation.context import build_natal_context
 from app.services.interpretation.factory import get_interpreter
 
 
-def birth_datetime_utc(birth: BirthDataOut) -> datetime:
+def birth_datetime_utc(birth: BirthDataOut | AdhocChartIn) -> datetime:
     hour, minute = (int(x) for x in birth.time_of_birth.split(":"))
     local_dt = datetime(
         birth.date_of_birth.year, birth.date_of_birth.month, birth.date_of_birth.day, hour, minute
@@ -66,6 +68,10 @@ def _chart_result_to_dict(result: ChartResult) -> dict:
         "planet_house": dict(result.planet_house),
         "planet_retrograde": dict(result.planet_retrograde),
         "planet_longitude": dict(result.planet_longitude),
+        "outer_planet_sign_index": dict(result.outer_planet_sign_index),
+        "outer_planet_house": dict(result.outer_planet_house),
+        "outer_planet_retrograde": dict(result.outer_planet_retrograde),
+        "outer_planet_longitude": dict(result.outer_planet_longitude),
     }
 
 
@@ -125,6 +131,29 @@ def _dict_to_response(data: dict, cached: bool) -> ChartResponse:
                 combust=combust,
             )
         )
+    outer_planets = []
+    for planet, sign in data.get("outer_planet_sign_index", {}).items():
+        longitude = data.get("outer_planet_longitude", {}).get(planet)
+        degree_display = None
+        degree = None
+        if longitude is not None and chart_type == "D1":
+            degree = degree_in_sign(longitude)
+            degree_display = _format_degree(degree)
+        outer_planets.append(
+            PlanetPlacement(
+                planet=planet,
+                planet_name_en=OUTER_PLANET_NAMES_EN[planet],
+                planet_name_hi=OUTER_PLANET_NAMES_HI[planet],
+                sign_index=sign,
+                sign_name_en=SIGN_NAMES_EN[sign],
+                sign_name_hi=SIGN_NAMES_HI[sign],
+                house=data["outer_planet_house"][planet],
+                retrograde=data["outer_planet_retrograde"][planet],
+                degree_in_sign=degree,
+                degree_display=degree_display,
+            )
+        )
+
     lagna_sign = data["lagna_sign_index"]
     lagna_longitude = data.get("lagna_longitude")
     lagna_degree = degree_in_sign(lagna_longitude) if lagna_longitude is not None and chart_type == "D1" else None
@@ -143,6 +172,7 @@ def _dict_to_response(data: dict, cached: bool) -> ChartResponse:
         house_breakdown=[HouseBreakdown(**h) for h in data.get("house_breakdown", [])],
         yogas=[YogaFinding(**y) for y in data.get("yogas", [])],
         planet_themes={p: PlanetTheme(**t) for p, t in data.get("planet_themes", {}).items()},
+        outer_planets=outer_planets,
         cached=cached,
     )
 
@@ -169,7 +199,7 @@ async def get_chart(db: AsyncSession, profile: BirthProfile, birth: BirthDataOut
     # recomputed (see below), rather than silently serving an empty [] for
     # both forever (the ChartResponse defaults exist for backward-compat
     # deserialization, not to mask genuinely missing data on an old row).
-    _REQUIRED_CACHE_KEYS = ("house_breakdown", "yogas", "planet_themes")
+    _REQUIRED_CACHE_KEYS = ("house_breakdown", "yogas", "planet_themes", "outer_planet_sign_index")
 
     result = await db.execute(_select_stmt(profile, chart_type))
     cached_row = result.scalar_one_or_none()
@@ -215,3 +245,30 @@ async def get_chart(db: AsyncSession, profile: BirthProfile, birth: BirthDataOut
     data, was_race = await add_and_commit_or_fetch_existing(db, row, _select_stmt(profile, chart_type))
 
     return _dict_to_response(data, cached=was_race)
+
+
+async def compute_adhoc_chart(birth: AdhocChartIn) -> ChartResponse:
+    """"Check someone else's chart" (e.g. a family member's) without
+    touching the signed-in user's own saved birth profile. Deliberately NOT
+    cached and NOT persisted anywhere — every call recomputes fresh from
+    the raw birth data passed in, and nothing about a third party's birth
+    details is written to the database. Also skips the LLM chart_summary/
+    key_points entirely (this is a quick lookup, not a personalized
+    reading, and shouldn't depend on OpenAI being configured to work) —
+    house_breakdown/planet_themes/yogas are still real and complete since
+    those are pure, rule-based functions (see chart_explanation_service),
+    not LLM calls."""
+    chart_type: ChartType = birth.chart_type if birth.chart_type in ("D1", "D9", "D10") else "D1"
+    jd_ut = julian_day_ut(birth_datetime_utc(birth))
+    chart_result = await anyio.to_thread.run_sync(
+        compute_chart, jd_ut, birth.latitude, birth.longitude, chart_type
+    )
+    data = _chart_result_to_dict(chart_result)
+    data["summary_en"] = ""
+    data["summary_hi"] = ""
+    data["key_points_en"] = []
+    data["key_points_hi"] = []
+    data["house_breakdown"] = build_house_breakdown(chart_result)
+    data["planet_themes"] = build_planet_theme_sentences(chart_result)
+    data["yogas"] = detect_yogas(chart_result)
+    return _dict_to_response(data, cached=False)

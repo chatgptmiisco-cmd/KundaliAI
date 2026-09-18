@@ -49,8 +49,12 @@ export default function IdentityBasics({ identity, language }: Props) {
       realEffect: hi ? identity.moonSign.realEffectHi : identity.moonSign.realEffectEn,
       meaning: hi ? identity.moonSign.meaningHi : identity.moonSign.meaningEn,
       icon: 'moon-outline' as const,
-      accent: '#4D7C8A',
-      accentLight: '#E3EEF0',
+      accent: '#7FB4C4',
+      // Transparent tint (not the old solid near-white card) — matches
+      // colors.accentLight/successLight/premiumLight's pattern so this
+      // card sits in the dark theme instead of reading as a leftover
+      // light-mode card.
+      accentLight: 'rgba(127,180,196,0.14)',
     },
     {
       label: t('charts.identity.sunLabel'),

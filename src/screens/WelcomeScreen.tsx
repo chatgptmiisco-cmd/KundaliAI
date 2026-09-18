@@ -16,8 +16,12 @@ export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
 
   return (
+    // Dark cosmic gradient throughout (no gold end) — same fix as
+    // AiProcessingScreen: primary/primaryDark are now light-to-medium gold
+    // instead of dark maroon, so the old gradient's far end no longer
+    // contrasted with the white wordmark/title text.
     <LinearGradient
-      colors={['#241d3d', colors.primaryDark, colors.primary]}
+      colors={['#241d3d', '#3A2456', colors.background]}
       start={{ x: 0.1, y: 0 }}
       end={{ x: 0.9, y: 1 }}
       style={styles.screen}

@@ -1,22 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import CosmicBackground from '../components/CosmicBackground';
 import { colors, typography } from '../theme/theme';
 
 export default function SplashScreen() {
   const { t } = useTranslation();
   return (
-    <LinearGradient
-      colors={[colors.primary, colors.primaryDark]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.wrap}
-    >
-      <Ionicons name="sparkles" size={40} color={colors.textInverse} />
+    <CosmicBackground style={styles.wrap}>
+      {/* Gold on the night-sky background (not a solid gold banner) — the
+          old gold-to-gold gradient here left white text with nowhere
+          readable to sit, and read as a different app than the rest of the
+          "Astrolabe Glass" direction anyway. */}
+      <Ionicons name="sparkles" size={40} color={colors.primary} />
       <Text style={styles.wordmark}>{t('common.appName')}</Text>
-    </LinearGradient>
+    </CosmicBackground>
   );
 }
 

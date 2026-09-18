@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
   },
   colorChipText: {
     ...typography.bodyBold,
-    color: colors.primaryDark,
+    color: colors.textOnPrimary,
   },
   reasonText: {
     ...typography.body,
@@ -184,13 +184,13 @@ const styles = StyleSheet.create({
   },
   brutalTruthLabel: {
     ...typography.caption,
-    color: colors.primaryDark,
+    color: colors.textOnPrimary,
     fontFamily: fontFamily.bold,
     marginBottom: spacing.xs,
   },
   brutalTruthText: {
     ...typography.bodyBold,
-    color: colors.primaryDark,
+    color: colors.textOnPrimary,
   },
   infoRow: {
     marginBottom: spacing.sm,

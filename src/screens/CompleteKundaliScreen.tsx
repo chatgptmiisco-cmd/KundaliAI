@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   styleToggleTextActive: {
-    color: colors.textInverse,
+    color: colors.textOnPrimary,
   },
   chartWrap: {
     paddingVertical: spacing.sm,
@@ -295,13 +295,17 @@ const styles = StyleSheet.create({
   },
   brutalTruthLabel: {
     ...typography.caption,
-    color: colors.primaryDark,
+    // primaryDark (muted brass) reads too close in value to the new pale-
+    // gold primaryLight background to stay legible — textOnPrimary (dark
+    // ink) is the same "text on a light gold surface" pairing used for the
+    // primary button.
+    color: colors.textOnPrimary,
     fontFamily: fontFamily.bold,
     marginBottom: spacing.xs,
   },
   brutalTruthText: {
     ...typography.bodyBold,
-    color: colors.primaryDark,
+    color: colors.textOnPrimary,
   },
   footerActions: {
     gap: spacing.sm,

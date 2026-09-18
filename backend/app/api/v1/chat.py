@@ -11,9 +11,9 @@ from app.db.models.birth_profile import BirthProfile
 from app.db.models.chat import ChatMessage
 from app.db.models.user import User
 from app.schemas.voice import ChatMessageIn, ChatMessageOut
-from app.services import prediction_service, user_memory_service, user_service
+from app.services import life_context_service, prediction_service, user_service
 from app.services.chart_service import get_chart
-from app.services.chat_understanding import classify_message, compute_out_of_domain_redirects
+from app.services.chat_understanding import classify_message, compute_out_of_domain_redirects, relevant_domains
 from app.services.daily_reading_service import get_daily_reading
 from app.services.dasha_service import get_current_dasha
 from app.services.interpretation.factory import get_interpreter
@@ -52,6 +52,43 @@ _DECISION_CHECKS = (
 # never separately asked "when", so the reply can include a genuine future
 # timeline alongside the static house-based read.
 _TIMING_TO_TOPIC = {v: k for k, v in _TOPIC_TIMING_COUNTERPART.items()}
+
+
+_DECISION_LABEL_EN = {"job_change": "leaving your job", "business_start": "starting your business"}
+_DECISION_LABEL_HI = {"job_change": "नौकरी छोड़ने", "business_start": "अपना व्यवसाय शुरू करने"}
+
+
+def _build_outcome_checkin_question(decision, language: str) -> str:
+    """Product spec §12 — Outcome Follow-Ups: deterministic (not LLM-
+    written) so chat_understanding can reliably recognize its own question
+    later just by it being the most recent assistant turn in history, and
+    so it never accidentally invents details about a decision it's asking
+    about. See life_context_service.get_decisions_due_for_outcome_checkin
+    for when this actually fires."""
+    if language == "hi":
+        label = _DECISION_LABEL_HI.get(decision.decision_type, "इस फ़ैसले")
+        return f"वैसे, कुछ समय पहले आप {label} पर विचार कर रहे थे। अब तक कैसा रहा — जैसा सोचा था उससे बेहतर, बुरा, या करीब-करीब वैसा ही?"
+    label = _DECISION_LABEL_EN.get(decision.decision_type, "that decision")
+    prefix = "Waise, " if language == "hinglish" else "By the way — "
+    return (
+        f"{prefix}a while back you were weighing {label}. How's it gone so far — better, "
+        "worse, or about what you expected?"
+    )
+
+
+def _build_reconfirm_question(item, language: str) -> str:
+    """Product spec §13 — Context Decay: deterministic (not LLM-written),
+    same reasoning as _build_outcome_checkin_question above — this exact
+    text becomes the most recent assistant turn in history, so
+    chat_understanding can reliably recognize a reply to it as answering
+    this specific fact rather than starting a new topic."""
+    if language == "hi":
+        return (
+            f"बस एक छोटी जांच — आपने कुछ समय पहले बताया था: \"{item.value}\"। "
+            "क्या यह अब भी वैसा ही है, या कुछ बदल गया है?"
+        )
+    prefix = "Ek chhota check — " if language == "hinglish" else "Quick check-in — "
+    return f"{prefix}you'd mentioned this a while back: \"{item.value}\". Still the case, or has it changed?"
 
 
 def _planet_technical(chart, planet_code: str, hi: bool) -> dict:
@@ -188,6 +225,35 @@ async def chat_astro(
     )
     history_rows = list(reversed(result.scalars().all()))
 
+    # Product spec §12 (Outcome Follow-Ups) — a decision the user actually
+    # settled a while ago and never reported back on takes priority over
+    # even a greeting at the start of a brand-new conversation: it's
+    # time-sensitive (the whole point is asking while it's still a fresh
+    # memory) and this is the natural, low-friction moment to ask, the way
+    # a person who remembers you would lead with "hey, how did that go?"
+    pending_checkins = await life_context_service.get_decisions_due_for_outcome_checkin(db, user.id)
+    if not history_rows and pending_checkins:
+        reply = _build_outcome_checkin_question(pending_checkins[0], body.language)
+        db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
+        db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id, used_personalization=True))
+        await db.commit()
+        return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=None)
+
+    # Product spec §13 (Context Decay) — a material fact (career/business/
+    # relationships/money — see life_context_service._RECONFIRM_DOMAINS)
+    # that's gone stale enough to no longer be safely trusted gets a quick,
+    # low-friction "is this still true?" check, same "pull on next fresh
+    # conversation" pattern as the outcome check-in above — second priority
+    # to it, since an unreported decision outcome is more time-sensitive
+    # than a routine staleness check.
+    stale_facts = await life_context_service.get_facts_due_for_reconfirmation(db, user.id)
+    if not history_rows and not pending_checkins and stale_facts:
+        reply = _build_reconfirm_question(stale_facts[0], body.language)
+        db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
+        db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id, used_personalization=True))
+        await db.commit()
+        return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=None)
+
     # A brand-new conversation opened with nothing but a greeting ("hi",
     # "namaste") gets a warm hello back introducing this persona, instead of
     # being run through classification/engine calls it was never actually
@@ -203,12 +269,40 @@ async def chat_astro(
     history = [{"role": row.role, "content": row.content} for row in history_rows]
     history.append({"role": "user", "content": body.message})
 
+    open_decision_objs = await life_context_service.get_open_decisions(db, user.id)
+    open_decisions_for_prompt = [
+        {"category": life_context_service.CATEGORY_BY_DECISION_TYPE.get(d.decision_type), "context": d.context}
+        for d in open_decision_objs
+    ]
+    # Product spec §7 — Decision-critical gap-filling has to work the FIRST
+    # time a decision is ever raised, not only once it's already tracked as
+    # "open" from an earlier conversation (that tracking, above, only
+    # happens once the engine's decision call runs later in this same
+    # function) — so known facts are fetched for both fixed decision
+    # categories unconditionally, independent of whether either is
+    # currently open.
+    decision_known_facts_for_prompt = {
+        category: await life_context_service.get_active_context(db, user.id, relevant_domains([category]))
+        for category in life_context_service.CATEGORY_BY_DECISION_TYPE.values()
+    }
+    pending_checkins_for_prompt = [
+        {"decision_type": d.decision_type, "context": d.context} for d in pending_checkins
+    ]
+    pending_reconfirmation_for_prompt = (
+        {"domain": stale_facts[0].domain, "key": stale_facts[0].key, "value": stale_facts[0].value}
+        if stale_facts else None
+    )
+
     # Decides which real-life categories this message touches — an OpenAI
     # call when configured (see app.services.chat_understanding), otherwise
     # today's exact keyword-matching behaviour. Either way, this is the ONLY
     # thing that decides what to fetch below; the actual facts always come
     # from the real Prediction Engine calls that follow, never from the LLM.
-    understanding = await classify_message(history, body.rishi_id, birth.date_of_birth.year, body.language)
+    understanding = await classify_message(
+        history, body.rishi_id, birth.date_of_birth.year, body.language,
+        open_decisions_for_prompt, pending_checkins_for_prompt, pending_reconfirmation_for_prompt,
+        decision_known_facts_for_prompt,
+    )
 
     if understanding.needs_clarification and understanding.clarifying_question:
         # Too vague to answer honestly — ask instead of guessing. No engine
@@ -219,9 +313,58 @@ async def chat_astro(
         await db.commit()
         return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=None)
 
+    # Product spec §7 — Decision-critical gap-filling: the message clearly
+    # touches a decision (first time raised or already tracked — see
+    # decision_known_facts_for_prompt above, fetched unconditionally for
+    # both), but classify_message flagged that one fact materially needed
+    # to give real advice isn't known yet — ask for exactly that, same
+    # skip-the-engine-calls treatment as needs_clarification above, just a
+    # narrower and more specific reason for asking instead of answering.
+    if understanding.decision_gap_question and any(
+        c in decision_known_facts_for_prompt for c in understanding.categories
+    ):
+        reply = understanding.decision_gap_question
+        db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
+        db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id))
+        await db.commit()
+        return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=None)
+
     categories = understanding.categories
-    if understanding.user_note:
-        await user_memory_service.add_note(db, user.id, understanding.user_note)
+    # Every extracted fact gets recorded as structured Life Context (see
+    # app.services.life_context_service) — never as a bare "confirmed"
+    # fact when the model only inferred it; confidence/source travel with
+    # each one so a later verification can promote it, per the product
+    # spec's "never treat AI inference as fact" principle.
+    for update in understanding.context_updates:
+        await life_context_service.upsert_fact(
+            db, user.id, update.domain, update.key, update.value, update.confidence, update.source
+        )
+    # Life Timeline entries (product spec §10) — things that already
+    # happened, at a real point in time, as opposed to the current-state
+    # facts above.
+    for event in understanding.events:
+        await life_context_service.add_event(db, user.id, event.event_type, event.description, event.year, event.month)
+    # The user reporting they've actually settled one of their open
+    # decisions ("I accepted the new job") — starts that decision's Outcome
+    # Follow-Up clock (see life_context_service.mark_decision).
+    if understanding.decision_update:
+        await life_context_service.mark_decision(
+            db, user.id, understanding.decision_update.category,
+            understanding.decision_update.status, understanding.decision_update.final_choice,
+        )
+    # Closing the loop on a check-in this endpoint itself asked earlier
+    # (see the pending_checkins early-return above) — always against the
+    # first decision that was actually offered to the model this turn.
+    if understanding.outcome_report and pending_checkins:
+        await life_context_service.record_outcome(db, user.id, pending_checkins[0].id, understanding.outcome_report)
+    # Closing the loop on a Context Decay reconfirmation this endpoint asked
+    # earlier (see the stale_facts early-return above) — same value, just a
+    # refreshed last_confirmed_at (see upsert_fact's unchanged-value branch);
+    # a fact reported as CHANGED never reaches here, it flows through
+    # context_updates above instead so it correctly supersedes the old row.
+    if understanding.reconfirmed and stale_facts:
+        fact = stale_facts[0]
+        await life_context_service.upsert_fact(db, user.id, fact.domain, fact.key, fact.value, "high", "user_confirmed")
 
     # A past-tense question ("why did my marriage get delayed", "was there a
     # good period for X") searches backward (birth-to-now) instead of
@@ -295,6 +438,11 @@ async def chat_astro(
                 "history_nudge": decision.history_nudge,
                 "note": decision.note,
             }
+            # Life Context's Decision Memory (see life_context_service) —
+            # a separate, persistent object from the astrological verdict
+            # above, so a LATER conversation can reference "last time you
+            # were exploring this" instead of re-deriving it from scratch.
+            await life_context_service.upsert_decision(db, user.id, category, body.message)
 
     # The general "what was going on then" reflection — only fires when a
     # past reference actually resolves to a real date (never guessed).
@@ -331,10 +479,22 @@ async def chat_astro(
     context["detected_categories"] = categories
     context["out_of_domain_redirects"] = out_of_domain_redirects
     context["rishi_domain"] = (_RISHI_DOMAIN_HI if hi else _RISHI_DOMAIN_EN).get(body.rishi_id)
-    # Short facts remembered about this user from earlier conversations
-    # (any Rishi) — see app.services.user_memory_service — for
-    # personalization; never treated as ground truth for the chart itself.
-    context["user_memory"] = await user_memory_service.get_recent_notes(db, user.id)
+    # Structured facts remembered about this user from earlier conversations
+    # (any Rishi) — see app.services.life_context_service — scoped to just
+    # the domains relevant to what was actually asked (never the user's
+    # entire life context on every turn), for personalization; never
+    # treated as ground truth for the chart itself, and each fact still
+    # carries its own confidence/source so the model can tell a stated fact
+    # from its own earlier guess.
+    context["life_context"] = await life_context_service.get_active_context(db, user.id, relevant_domains(categories))
+    # Reuses the same open_decision_objs fetched earlier (for the classifier
+    # prompt) rather than querying again — this list is small (at most one
+    # per decision type) so no pagination/limit concern either way.
+    context["open_decisions"] = [
+        {"decision_type": d.decision_type, "context": d.context, "created_at": d.created_at.isoformat()}
+        for d in open_decision_objs
+        if d.decision_type in {dt for dt, cat in _DECISION_CHECKS if cat in categories}
+    ]
 
     interpreter = get_interpreter()
     reply = await interpreter.chat_reply(history, context, body.language)
@@ -343,9 +503,17 @@ async def chat_astro(
     # detect_answering_rishi), so it's a stable attribution label even when
     # the generalist "vyasa" persona is the one chatting.
     answered_by_rishi_id = detect_answering_rishi(body.message, birth.date_of_birth.year)
+    # Context Utilization metric (product spec §20, see
+    # app.services.metrics_service) — did real personal facts actually sit
+    # on the table for THIS answer, not just "does personalization exist
+    # anywhere in the system."
+    used_personalization = bool(context["life_context"] or context["open_decisions"])
 
     db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
-    db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id))
+    db.add(ChatMessage(
+        user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id,
+        used_personalization=used_personalization,
+    ))
     await db.commit()
 
     return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=answered_by_rishi_id)
