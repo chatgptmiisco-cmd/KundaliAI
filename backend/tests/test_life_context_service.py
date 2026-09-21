@@ -125,6 +125,25 @@ async def test_upsert_decision_returns_none_for_a_non_decision_category(client):
         assert await life_context_service.upsert_decision(db, user_id, "career", "some note") is None
 
 
+async def test_upsert_decision_supports_relocation_the_same_generic_way(client):
+    """Phase 3 — relocation_decision has no get_decision verdict engine
+    behind it (see _DECISION_TYPE_BY_CATEGORY's comment in
+    life_context_service.py), but Decision Memory tracking itself is
+    generic off that same dict, so it works identically to the two
+    get_decision-backed types with zero decision_type-specific code."""
+    user_id = await _real_user_id(client)
+    async with AsyncSessionLocal() as db:
+        decision = await life_context_service.upsert_decision(db, user_id, "relocation_decision", "job offer abroad")
+        assert decision is not None
+        assert decision.decision_type == "relocation"
+        assert decision.status == "exploring"
+
+        marked = await life_context_service.mark_decision(db, user_id, "relocation_decision", "decided", "moved")
+        assert marked.id == decision.id
+        assert marked.status == "decided"
+        assert await life_context_service.get_open_decisions(db, user_id) == []
+
+
 async def test_correct_fact_records_as_user_confirmed_high_confidence(client):
     user_id = await _real_user_id(client)
     async with AsyncSessionLocal() as db:

@@ -201,6 +201,7 @@
     "upgrade": "Upgrade plan",
     "cancel": "Cancel",
     "tryAgain": "Try again",
+    "thanks": "Thanks!",
     "contactSupport": "Contact support",
     "loading": "Loading…",
     "seeFullKundali": "See full kundali",
@@ -234,7 +235,8 @@
     "profileButtonLabel": "Profile & birth details",
     "focusMeaningLabel": "What this means",
     "focusAvoidLabel": "Avoid today",
-    "focusDoLabel": "Lean into today"
+    "focusDoLabel": "Lean into today",
+    "followUpCardTitle": "Got a minute? Tell us more about your {{topic}}"
   },
   "kundali": {
     "screenTitle": "Complete Kundali",
@@ -433,6 +435,7 @@
     "planLabel": "Current plan",
     "savedMessage": "Saved. Your kundali will be freshly prepared with these details.",
     "languageLabel": "App language",
+    "personalizationScoreLabel": "{{score}}% personalized to you",
     "creditsLabel": "chat credits",
     "unlimitedCredits": "Unlimited chat credits",
     "buyCredits": "Buy more credits",
@@ -481,6 +484,10 @@
     "screenTitle": "My Life Timeline",
     "loadError": "Couldn't load your timeline right now.",
     "empty": "Nothing on your timeline yet — meaningful events you mention in chat (a new job, a move, a big decision) will show up here."
+  },
+  "followUp": {
+    "screenTitle": "Quick follow-up",
+    "thanksMessage": "Thanks — this helps make your readings more personal."
   },
   "rishi": {
     "unlimitedMessages": "Unlimited messages",

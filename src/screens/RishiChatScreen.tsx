@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { postChatMessage, transcribeAudio } from '../api/client';
 import PremiumModal from '../components/PremiumModal';
 import RishiSwitcher from '../components/RishiSwitcher';
+import TypingIndicator from '../components/TypingIndicator';
 import { ALL_FEATURES_FREE } from '../config/env';
 import { DEFAULT_RISHI_ID, findRishi, RishiId } from '../constants/rishis';
 import { toContentLanguage } from '../i18n/contentLanguage';
@@ -308,6 +309,7 @@ export default function RishiChatScreen() {
               </View>
             )
           )}
+          {phase === 'thinking' && <TypingIndicator />}
         </ScrollView>
 
         {showScrollToBottom && (

@@ -726,11 +726,27 @@ async def test_life_state_endpoint_round_trips_and_appears_in_profile(client):
     assert life_state == {
         "marital_status": "married", "marriage_date": "2024-11-15", "children_count": 1,
         "pregnancy_status": "none", "expected_delivery": None, "career_state": "employed",
-        "business_state": "none", "version": 1,
+        "business_state": "none", "housing_status": None, "planning_property_purchase": False,
+        "has_home_loan": False, "version": 1,
     }
 
     profile = await client.get("/api/v1/user/profile", headers=headers)
     assert profile.json()["life_state"] == life_state
+
+
+async def test_life_state_accepts_dating_and_engaged_marital_status(client):
+    """Widened for chat-driven capture (see chat_understanding.
+    LifeStateUpdate) — a user who says "I'm engaged" is meaningfully past
+    "single" but not yet "married"; prediction_service's already_married
+    check only ever matches the literal "married" value, so neither of
+    these new values changes any existing marriage_timing behavior."""
+    headers = await _signup_and_set_birth_data(client)
+    for status in ("dating", "engaged"):
+        resp = await client.put(
+            "/api/v1/user/profile/life-state", headers=headers, json={"marital_status": status}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["life_state"]["marital_status"] == status
 
 
 async def test_marriage_timing_reframes_reason_when_already_married(client):
@@ -870,6 +886,83 @@ async def test_decision_business_start_is_gated_by_life_state(client):
     )
     assert unblocked.status_code == 200, unblocked.text
     assert unblocked.json()["note"] is None
+
+
+async def test_career_promotion_timing_is_gated_by_career_state(client):
+    """A promotion presupposes an existing job — without knowing career_state
+    is "employed", career_promotion timing must not return the same 10th-
+    house reading it would for someone with a real job, silently assuming a
+    premise (that they're employed) nobody ever confirmed. Same
+    business_partnership_blocked precedent as
+    test_decision_business_start_is_gated_by_life_state above."""
+    headers = await _signup_and_set_birth_data(client)
+    blocked = await client.get(
+        "/api/v1/prediction/life-event-timing",
+        headers=headers, params={"event_type": "career_promotion", "language": "en"},
+    )
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()["windows"] == []
+    assert blocked.json()["note"] is not None
+
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
+    unblocked = await client.get(
+        "/api/v1/prediction/life-event-timing",
+        headers=headers, params={"event_type": "career_promotion", "language": "en"},
+    )
+    assert unblocked.status_code == 200, unblocked.text
+    assert unblocked.json()["windows"] != []
+    assert unblocked.json()["note"] is None
+
+
+async def test_decision_house_purchase_returns_a_verdict_with_current_period(client):
+    """Phase 5 — house_purchase_decision is fully generic in get_decision
+    (new EventType="property", house 4 — see app.astro.life_event_timing/
+    event_karakas), the same shape already covering job_change/
+    business_start above."""
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get(
+        "/api/v1/prediction/decision", headers=headers, params={"decision_type": "house_purchase", "language": "en"}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["decision_type"] == "house_purchase"
+    assert data["verdict"] in ("favorable", "unfavorable", "wait_for_better_window", "neutral")
+    assert data["reasoning"]
+    if data["verdict"] == "favorable":
+        assert data["current_period"] is not None
+        assert data["better_window"] is None
+    if data["verdict"] == "wait_for_better_window":
+        assert data["better_window"] is not None
+
+
+async def test_decision_marriage_returns_a_verdict(client):
+    """Phase 5 — marriage_decision deliberately does NOT go through
+    get_decision's generic engine (see get_marriage_decision's docstring):
+    it's a thin translation of get_marriage_timing's own already-computed
+    windows/stage, so this exercises that real, separate code path."""
+    headers = await _signup_and_set_birth_data(client)
+    resp = await client.get(
+        "/api/v1/prediction/decision", headers=headers, params={"decision_type": "marriage", "language": "en"}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["decision_type"] == "marriage"
+    assert data["verdict"] in ("favorable", "unfavorable", "wait_for_better_window", "neutral")
+    assert data["reasoning"]
+    assert data["note"] is None
+
+
+async def test_decision_marriage_is_blocked_when_already_married(client):
+    headers = await _signup_and_set_birth_data(client)
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"marital_status": "married"})
+    resp = await client.get(
+        "/api/v1/prediction/decision", headers=headers, params={"decision_type": "marriage", "language": "en"}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["note"] is not None
+    assert data["current_period"] is None
+    assert data["better_window"] is None
 
 
 async def test_decision_never_lets_history_override_a_clear_verdict(client, monkeypatch):
@@ -1403,3 +1496,63 @@ async def test_otp_flow(client):
     right = await client.post("/api/v1/auth/otp/verify", json={"phone": "+919999999999", "code": code})
     assert right.status_code == 200
     assert right.json()["access_token"]
+
+
+async def test_personalization_score_rises_as_signals_are_added(client):
+    """Phase 6 — a fresh signup starts at a low score; adding a real fact
+    (via life-context) and a life-state field each visibly raise it,
+    confirmed through the real GET /user/personalization-score endpoint."""
+    headers = await _signup_and_set_birth_data(client)
+
+    cold = await client.get("/api/v1/user/personalization-score", headers=headers)
+    assert cold.status_code == 200, cold.text
+    assert cold.json()["score"] == 0
+
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
+    after_life_state = await client.get("/api/v1/user/personalization-score", headers=headers)
+    assert after_life_state.json()["score"] > cold.json()["score"]
+    assert after_life_state.json()["life_state_fields_set"] == 1
+
+
+async def test_next_onboarding_topic_life_event_trigger_then_clears_after_answering(client, monkeypatch):
+    """Phase 7 — a fresh signup with a real reported life event gets a
+    life_event-reason suggestion; answering it via the EXISTING (unchanged)
+    /user/onboarding-context endpoint covers the domain and clears it.
+    extract_onboarding_context itself needs a real OpenAI call the test
+    environment deliberately disables (see conftest.py) — monkeypatched
+    here to a crafted ContextUpdate, same technique used throughout for
+    LLM-dependent wiring tests, so this exercises chat.py's real endpoint
+    code, not a re-implementation of it."""
+    from app.api.v1 import user as user_module
+    from app.services.chat_understanding import ContextUpdate
+
+    async def _fake_extract(topic, qa_pairs):
+        return [ContextUpdate(domain="career", key="occupation", value="engineer", confidence="high", source="user_stated")]
+
+    monkeypatch.setattr(user_module, "extract_onboarding_context", _fake_extract)
+
+    headers = await _signup_and_set_birth_data(client)
+
+    cold = await client.get("/api/v1/user/next-onboarding-topic", headers=headers)
+    assert cold.status_code == 200, cold.text
+    assert cold.json() == {"topic": None, "reason": None}
+
+    from app.db.base import AsyncSessionLocal
+    from app.services import life_context_service
+
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    user_id = profile.json()["id"]
+    async with AsyncSessionLocal() as db:
+        await life_context_service.add_event(db, user_id, "new_job", "started at Acme", 2020)
+
+    triggered = await client.get("/api/v1/user/next-onboarding-topic", headers=headers)
+    assert triggered.json() == {"topic": "career", "reason": "life_event"}
+
+    submit = await client.post(
+        "/api/v1/user/onboarding-context", headers=headers,
+        json={"topic": "career", "qa_pairs": [{"question": "What do you do?", "answer": "I'm an engineer"}], "language": "en"},
+    )
+    assert submit.status_code == 204, submit.text
+
+    cleared = await client.get("/api/v1/user/next-onboarding-topic", headers=headers)
+    assert cleared.json() == {"topic": None, "reason": None}

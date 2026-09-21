@@ -1,11 +1,12 @@
 from fastapi import APIRouter
 
-from app.api.v1 import admin, analysis, auth, chart, chat, dasha, horoscope, kundali, prediction, subscription, user, voice
+from app.api.v1 import admin, analysis, auth, chart, chat, dasha, geocode, horoscope, kundali, prediction, subscription, user, voice
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(user.router)
 api_router.include_router(chart.router)
+api_router.include_router(geocode.router)
 api_router.include_router(dasha.router)
 api_router.include_router(horoscope.router)
 api_router.include_router(analysis.router)

@@ -37,6 +37,18 @@ _logger = get_logger("openai_interpreter")
 # asked about, so this is what keeps chat_reply's token usage minimal.
 _ALWAYS_INCLUDE = (
     "lagna_sign", "mahadasha_lord", "antardasha_lord", "mahadasha_lord_technical", "antardasha_lord_technical",
+    # Product spec §21 — Astrological Fingerprint: ambient, not gated behind
+    # any one category, same reasoning as lagna_sign above. blind_spot_* is
+    # simply absent from context (see chat.py) when the chart has no real
+    # affliction to report, so `if k in context` above already handles it.
+    "strongest_planet", "weakest_planet", "decision_style", "blind_spot_planet", "blind_spot_reason",
+    # Phase 5: stress_house/stress_planet, same "absent when nothing genuine
+    # to report" handling as blind_spot_* — see chat.py's severity check.
+    "stress_house", "stress_planet",
+    # Phase 10: only present on the exact turn a pending prediction-feedback
+    # question just got resolved (see chat.py) — same "absent = nothing to
+    # report" convention as everything else in this tuple.
+    "resolved_prediction_feedback",
 )
 _CATEGORY_CONTEXT_KEYS: dict[str, tuple[str, ...]] = {
     "today": ("daily_reading",),
@@ -44,9 +56,14 @@ _CATEGORY_CONTEXT_KEYS: dict[str, tuple[str, ...]] = {
     "dasha": ("mahadasha_lord", "antardasha_lord", "antardasha_lord_code"),
     "dosha": ("yogas",),
     "yoga": ("yogas",),
-    "life_theme": ("life_theme",),
+    "life_theme": ("life_theme", "past_event_candidate"),
     "job_change_decision": ("job_change_decision",),
     "business_start_decision": ("business_start_decision",),
+    "house_purchase_decision": ("house_purchase_decision", "property_purchase_analysis"),
+    "marriage_decision": ("marriage_decision",),
+    "property_sale_intent": ("property_sale_intent", "property_sale_intent_full"),
+    "property_inheritance_intent": ("property_inheritance_intent", "property_inheritance_intent_full"),
+    "property_relocation_intent": ("property_relocation_intent", "property_relocation_intent_full"),
 }
 
 
@@ -67,8 +84,16 @@ def _chat_facts(context: dict[str, Any], out_of_domain_categories: set[str]) -> 
         for key in _CATEGORY_CONTEXT_KEYS.get(category, ()):
             if key in context:
                 target[key] = context[key]
-        # Timing categories: {category}_windows / {category}_direction / {category}_note
-        for suffix in ("_windows", "_direction", "_note"):
+        # Timing categories: {category}_windows / {category}_direction /
+        # {category}_note / {category}_long_term_peak — each window in
+        # "_windows" already carries evidence_level/confidence/
+        # literal_event_plausible/peak_window (see chat.py's _window_context),
+        # so no extra filtering is needed here to surface those.
+        # "_personal_pattern" (Phase 4): a recurring-dasha-lord correlation
+        # across the user's OWN confirmed past events in this category's
+        # life area — see life_pattern_service and chat.py's
+        # _PATTERN_DOMAIN_BY_CATEGORY.
+        for suffix in ("_windows", "_direction", "_note", "_long_term_peak", "_personal_pattern"):
             key = f"{category}{suffix}"
             if key in context:
                 target[key] = context[key]
@@ -96,7 +121,7 @@ def _chat_facts(context: dict[str, Any], out_of_domain_categories: set[str]) -> 
         # itself was the one detected.
         timing_counterpart = _TOPIC_TIMING_COUNTERPART.get(category)
         if timing_counterpart:
-            for suffix in ("_windows", "_direction", "_note"):
+            for suffix in ("_windows", "_direction", "_note", "_long_term_peak", "_personal_pattern"):
                 key = f"{timing_counterpart}{suffix}"
                 if key in context:
                     target[key] = context[key]
@@ -296,8 +321,13 @@ class OpenAIInterpreter(Interpreter):
             "a real factor in a decision, not trivia). Treat confidence=\"high\"/source=\"user_stated\" facts "
             "as solid; treat confidence=\"low\" or source=\"inferred\" facts as a tentative impression you "
             "can lean on lightly but should not assert back as settled fact. Never invent a NEW astrological "
-            "fact from any of this, and never announce that you're using it (no \"since you told me...\", no "
-            "\"as you mentioned earlier\" — just naturally speak as someone who already knows this about you). "
+            "fact from any of this. When it fits naturally, acknowledge what you already know with a warm, "
+            "human callback — \"since you mentioned...\", \"you'd told me...\", \"last time we talked about "
+            "this...\" — this is what makes the conversation feel remembered, not just personalized; don't "
+            "silently weave every fact in as if it came from nowhere. What you must never do is expose the "
+            "underlying data shape itself — no domain/key names, no confidence/source labels, nothing that "
+            "reads like a database field (e.g. never say something like \"business.considering_start = "
+            "true\") — always put it in plain, natural language about their actual life. "
             "If an open decision exists and this message continues that thread, acknowledge where things "
             "stood before rather than starting over from zero."
             if (life_context or open_decisions)
@@ -363,7 +393,92 @@ class OpenAIInterpreter(Interpreter):
             "feel like it's actually about this one person's chart, not generic astrology talk. "
             "When real timing windows are given (any *_windows fact), turn their actual start/end "
             "dates into a real timeline of what's likely in each period — never invent a window "
-            "that isn't in the given data, and never state a year range not backed by one.\n\n"
+            "that isn't in the given data, and never state a year range not backed by one. Each "
+            "window also carries real evidence_level/confidence/literal_event_plausible/peak_window "
+            "facts — use them, don't just skim past them: hedge more openly (\"this is a weaker, "
+            "background-level signal\" rather than stating it flatly) when evidence_level is "
+            "\"backdrop_only\" or confidence is \"low\"; when literal_event_plausible is false, don't "
+            "state the literal event as the answer (e.g. a literal childbirth window at 60) — instead "
+            "say what kind of life-activation this period plausibly represents at this age. When a "
+            "window has its own peak_window, mention that narrower sub-range as when it's most "
+            "concentrated. When a *_long_term_peak fact is present, only bring it up if the user's "
+            "actual question calls for a longer horizon than the near-term windows already answer — "
+            "never append it as a reflexive extra fact nobody asked for.\n\n"
+            "When a *_personal_pattern fact is given (shared_mahadasha_lord/shared_mahadasha_count "
+            "and/or shared_antardasha_lord/shared_antardasha_count — the *_count is exactly how many "
+            "of the user's OWN confirmed past events in this life area actually shared that lord, "
+            "never assume it means every event on record did), mention it as a real, specific "
+            "personal correlation about their own history using that exact count (e.g. \"interestingly, "
+            "2 of your past career shifts happened during a Saturn-led period\") — never phrase it as "
+            "a general astrological rule that would apply to anyone, since it's a fact about this one "
+            "person's own recorded history, not a classical principle.\n\n"
+            "When a past_event_candidate fact is given (a genuinely open-ended \"what happened in my "
+            "past\" question with no specific date given), NEVER state it as something that "
+            "definitely happened — phrase it as a specific, falsifiable question instead, e.g. "
+            "\"there's a concentrated career-transition period around [start]-[end] — did you change "
+            "roles, enter a new field, or make some other real shift around then?\" using the real "
+            "dates and domain given, not invented ones. When its domains list has more than one "
+            "entry, name the combined theme instead of picking just one — e.g. \"a career shift "
+            "alongside a relationship change around [start]-[end]\" — since both were genuinely "
+            "active in the same period, not two unrelated guesses. If they confirm or add detail, "
+            "that's now a real validated event for future conversations.\n\n"
+            "When a resolved_prediction_feedback fact is given, the LATEST message just resolved a "
+            "past-event question this app itself asked earlier (question_asked/domain given). If "
+            "verdict is \"correct\"/\"partial\", acknowledge it naturally and move on. If verdict is "
+            "\"incorrect\", do NOT defend the earlier reading or invent a reason it didn't happen — "
+            "say plainly that it didn't match (e.g. \"then that one didn't pan out — thanks for "
+            "letting me know\") and treat what they just told you as the real, current fact going "
+            "forward. If verdict is \"not_sure\", just acknowledge that and move on to the rest of "
+            "their message — don't press for a firmer answer.\n\n"
+            "For job_change_decision, business_start_decision, relocation_decision, house_purchase_"
+            "decision, or marriage_decision facts: state "
+            "the real current-period astrological character plainly (favorable/challenging, and why, "
+            "from the actual verdict/reasoning or windows given) — then explicitly hand off to the "
+            "practical comparison using whatever concrete facts are known about their specific "
+            "situation or options (an income plan, funding source, job/family/lifestyle reason, "
+            "options they've named). Never phrase the chart as picking a winner between two external "
+            "options it has no way to evaluate (e.g. two named job offers, or two cities) — the chart "
+            "can only say when change is favorable, not which specific offer or place is better; that "
+            "comparison is the user's own practical call, informed by what they've told you. When the "
+            "message names two specific options being weighed, refer to the actual differentiator "
+            "between them if it's known (pay, growth, stability, location) instead of a generic "
+            "leave-or-stay framing. For marriage_decision specifically: if the message names a "
+            "specific partner, state plainly that the chart can only speak to general timing/"
+            "readiness for commitment, never that specific person's compatibility — Guna Milan (a "
+            "separate matching feature, using both people's charts) is what a real compatibility "
+            "question needs, never guessed here from one chart alone.\n\n"
+            "When a property_purchase_analysis/property_sale_intent_full/property_inheritance_"
+            "intent_full/property_relocation_intent_full fact is given (house_purchase_decision, "
+            "property_sale_intent, property_inheritance_intent, or property_relocation_intent), "
+            "structure the answer as: WHAT (property acquisition/sale/inheritance-related activation/"
+            "change of residence, matching whichever of the 4 was actually asked about — never invent "
+            "a specific property type like \"land\" or \"an apartment\" unless the message itself named "
+            "one), WHEN (the real current_period/next_relevant_window dates given — never a different "
+            "or more precise date than what's actually there, and only mention medium_term_window/"
+            "long_term_peak if the question genuinely calls for that longer horizon), and WHY IT'S "
+            "RELEVANT (using the user's own stated housing_status/planning_property_purchase context "
+            "when known). Cite the reasoning honestly: property_promise.status is a NATAL reading "
+            "(independent of timing) — \"supported\"/\"mixed\"/\"weak\", never \"guaranteed\"; astro_"
+            "strength/event_confidence describe how strong the CURRENT signal is, not certainty that "
+            "the event will happen. The evidence list's classical entries (source/chapter/verses, e.g. "
+            "Brihat Parashara Hora Shastra Ch.48) may be cited briefly if genuinely useful, but never "
+            "presented as if the engine's own derived scoring (entries with type=\"derived\") were "
+            "itself a classical verse — this specifically includes the PROPERTY_INTENT_REFRAME_* "
+            "entries on the sale/inheritance/relocation intents, which exist precisely to disclose "
+            "that the SAME acquisition-framed classical signal is being reused for a different "
+            "question, not a separate citation for that specific event type. Never explain planetary "
+            "mechanics unless the user actually asks how the reading was reached.\n\n"
+            "You also always know this person's astrological fingerprint: strongest_planet/"
+            "weakest_planet (by classical dignity), decision_style (fast_and_decisive/steady_and_"
+            "persistent/adaptive_and_scattered/impulsive_and_reactive), and — only when given, meaning "
+            "a genuine affliction actually exists, never invented when absent — a blind_spot_planet/"
+            "blind_spot_reason and/or a stress_house/stress_planet (whichever of the 6th/8th/12th "
+            "houses is genuinely most afflicted). Let these subtly color your tone and framing (e.g. a "
+            "fast_and_decisive person needs less hand-wringing before a recommendation, a blind_spot "
+            "or stress point tied to a relevant life area might mean gently flagging that pattern when "
+            "genuinely relevant) — never recite them as a "
+            "checklist, never in every single reply, and never as the main point of an answer that was "
+            "actually asked about something else.\n\n"
             "For a quick factual question (am I Manglik, do I have X dosha, a simple current-dasha "
             "check) keep it short and direct instead — this fuller structure is for a genuine "
             "'what does my chart say about X' or timing question, not everything you're asked.\n\n"

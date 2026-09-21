@@ -3,7 +3,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { getSubscription } from '../api/client';
+import { getPersonalizationScore, getSubscription } from '../api/client';
 import BirthDataFields from '../components/BirthDataFields';
 import Card from '../components/Card';
 import LanguageToggle from '../components/LanguageToggle';
@@ -28,6 +28,7 @@ export default function ProfileScreen() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<BirthData>(birthData);
+  const [personalizationScore, setPersonalizationScore] = useState<number | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -35,6 +36,11 @@ export default function ProfileScreen() {
         .then((sub) => setPlan(sub.tier))
         .catch(() => {
           // Silent — Profile still shows the last-known plan if the server is unreachable.
+        });
+      getPersonalizationScore()
+        .then((s) => setPersonalizationScore(s.score))
+        .catch(() => {
+          // Silent — the card just doesn't render if the server is unreachable.
         });
     }, []),
   );
@@ -101,6 +107,17 @@ export default function ProfileScreen() {
           </View>
         )}
       </Card>
+
+      {personalizationScore !== null && (
+        <Card>
+          <View style={styles.creditsRow}>
+            <Ionicons name="sparkles-outline" size={22} color={colors.primary} />
+            <Text style={styles.creditsText}>
+              {t('profile.personalizationScoreLabel', { score: personalizationScore })}
+            </Text>
+          </View>
+        </Card>
+      )}
 
       <Card>
         <Text style={styles.cardTitle}>{t('profile.planLabel')}</Text>

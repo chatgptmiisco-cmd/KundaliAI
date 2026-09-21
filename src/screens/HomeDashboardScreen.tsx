@@ -14,12 +14,13 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getDailyReading, getFocusReadings } from '../api/client';
+import { getDailyReading, getFocusReadings, getNextOnboardingTopic } from '../api/client';
 import Card from '../components/Card';
 import DailyReadingSections from '../components/DailyReadingSections';
 import ErrorState from '../components/ErrorState';
 import LanguageToggle from '../components/LanguageToggle';
 import LoadingState from '../components/LoadingState';
+import { ONBOARDING_TOPICS, OnboardingTopic, TOPIC_SLUG } from '../data/onboardingTopics';
 import { toContentLanguage } from '../i18n/contentLanguage';
 import { useInsightsStore } from '../store/useInsightsStore';
 import { useKundaliStore } from '../store/useKundaliStore';
@@ -92,6 +93,23 @@ export default function HomeDashboardScreen() {
   const [activeTab, setActiveTab] = useState(0);
   const pagerRef = useRef<ScrollView>(null);
   const now = useLiveClock();
+
+  // Phase 7 — adaptive multi-session onboarding: null unless the backend
+  // has something worth asking about right now (see onboarding_followup_
+  // service). Fetched once per Home mount, same "silent on failure, card
+  // just doesn't render" convention as everything else fetched here.
+  const [nextOnboardingTopic, setNextOnboardingTopic] = useState<OnboardingTopic | null>(null);
+  useEffect(() => {
+    getNextOnboardingTopic()
+      .then((result) => {
+        if (!result.topic) return;
+        const match = ONBOARDING_TOPICS.find((tp) => TOPIC_SLUG[tp.key] === result.topic);
+        if (match) setNextOnboardingTopic(match.key);
+      })
+      .catch(() => {
+        // Silent — no card if the server is unreachable.
+      });
+  }, []);
 
   useEffect(() => {
     fetchSummary(language);
@@ -321,6 +339,19 @@ export default function HomeDashboardScreen() {
               </Pressable>
             ))}
           </View>
+
+          {nextOnboardingTopic && (
+            <Pressable onPress={() => navigation.navigate('FollowUpQuestions', { topic: nextOnboardingTopic })}>
+              <Card style={styles.followUpCard}>
+                <View style={styles.followUpRow}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={22} color={colors.primary} />
+                  <Text style={styles.followUpText}>
+                    {t('home.followUpCardTitle', { topic: t(`onboardingTopics.${nextOnboardingTopic}`) })}
+                  </Text>
+                </View>
+              </Card>
+            </Pressable>
+          )}
         </ScrollView>
 
         {preferences.map((pref) => {
@@ -606,6 +637,19 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textPrimary,
     textAlign: 'center',
+  },
+  followUpCard: {
+    marginTop: spacing.md,
+  },
+  followUpRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  followUpText: {
+    ...typography.bodyBold,
+    color: colors.textPrimary,
+    flex: 1,
   },
   badge: {
     position: 'absolute',

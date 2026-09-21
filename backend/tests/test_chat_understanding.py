@@ -31,6 +31,26 @@ async def test_classify_message_falls_back_to_keyword_detection_without_openai_c
     assert understanding.context_updates == []
 
 
+def test_detect_categories_promotion_question_suppresses_the_generic_career_parent():
+    # career_timing's own keyword list is deliberately broad and includes
+    # "promotion" (see _TOPIC_KEYWORDS["career"] in templates.py), so before
+    # the _SUB_INTENT_SUPPRESSES_PARENT fix this returned BOTH
+    # career_timing and career_promotion_timing for the identical question
+    # — on the deterministic (no-LLM) chat_reply path that meant the SAME
+    # window got described twice: once as "a career or job change" and
+    # once as "a promotion". A promotion-specific question should surface
+    # only the more specific category.
+    message = "when will I get a promotion?"
+    categories = _detect_categories(message, 1995)
+    assert categories == ["career_promotion_timing"]
+
+
+def test_detect_categories_plain_career_question_still_returns_career_timing():
+    message = "when will I change my job?"
+    categories = _detect_categories(message, 1995)
+    assert categories == ["career_timing"]
+
+
 async def test_classify_message_fallback_handles_empty_history():
     understanding = await classify_message([], "vyasa", None, "en")
     assert understanding == ChatUnderstanding(categories=[])
@@ -76,3 +96,8 @@ def test_relevant_domains_empty_for_pure_astrology_categories():
 def test_relevant_domains_wide_for_decision_categories():
     result = relevant_domains(["job_change_decision"])
     assert set(result) == {"career", "money", "family", "relationships", "goals"}
+
+
+def test_relevant_domains_wide_for_relocation_decision():
+    result = relevant_domains(["relocation_decision"])
+    assert set(result) == {"career", "family", "relationships", "goals", "preferences"}

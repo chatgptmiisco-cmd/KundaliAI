@@ -57,6 +57,16 @@ for _karakas in CATEGORY_KARAKAS.values():
 CATEGORY_KARAKAS["career_promotion"] = CATEGORY_KARAKAS["career"]
 CATEGORY_KARAKAS["business_expansion"] = CATEGORY_KARAKAS["wealth"]
 
+# "property" (Phase 5, house_purchase_decision) — the standard convention:
+# Mars (land) as the primary karaka, Saturn (stability/fixed assets) as a
+# secondary one, paralleling marriage's Ve/Ju and career's Sa/Su. Added
+# AFTER _KARAKA_CATEGORY_COUNT is computed for the SAME reason career_
+# promotion/business_expansion are above: Saturn already has its own
+# exclusive (count=1) role in career's already-shipped, already-tested
+# scoring, and property being a brand-new category is the one that should
+# absorb any cross-category-discount imprecision here, never career.
+CATEGORY_KARAKAS["property"] = ("Ma", "Sa")
+
 # A karaka used by only ONE category (Sa/Su for career, Ra for
 # foreign_travel) is already fully category-discriminating — no discount.
 # A karaka shared across 2+ categories (Ve, Ju) is a real classical signal

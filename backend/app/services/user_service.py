@@ -1,4 +1,6 @@
 """Birth profile CRUD (PII, encrypted at rest) and account deletion."""
+from datetime import date
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,6 +97,9 @@ def decrypt_life_state(life_state: LifeState) -> LifeStateOut:
         else None,
         career_state=life_state.career_state,
         business_state=life_state.business_state,
+        housing_status=life_state.housing_status,
+        planning_property_purchase=life_state.planning_property_purchase,
+        has_home_loan=life_state.has_home_loan,
         version=life_state.version,
     )
 
@@ -118,6 +123,9 @@ async def upsert_life_state(db: AsyncSession, user_id: str, data: LifeStateIn) -
             expected_delivery_encrypted=expected_delivery_encrypted,
             career_state=data.career_state,
             business_state=data.business_state,
+            housing_status=data.housing_status,
+            planning_property_purchase=data.planning_property_purchase,
+            has_home_loan=data.has_home_loan,
             version=1,
         )
         db.add(life_state)
@@ -130,6 +138,9 @@ async def upsert_life_state(db: AsyncSession, user_id: str, data: LifeStateIn) -
         life_state.expected_delivery_encrypted = expected_delivery_encrypted
         life_state.career_state = data.career_state
         life_state.business_state = data.business_state
+        life_state.housing_status = data.housing_status
+        life_state.planning_property_purchase = data.planning_property_purchase
+        life_state.has_home_loan = data.has_home_loan
         # Same staleness convention as BirthProfile.version — the Prediction
         # Engine stores this inside each cached row's JSON blob and treats a
         # mismatch as "recompute," so an edit here can't keep serving a
@@ -140,6 +151,69 @@ async def upsert_life_state(db: AsyncSession, user_id: str, data: LifeStateIn) -
     await db.commit()
     await db.refresh(life_state)
     return life_state
+
+
+_VALID_MARITAL_STATUS = {"single", "dating", "engaged", "married", "divorced", "widowed"}
+_VALID_PREGNANCY_STATUS = {"none", "expecting"}
+_VALID_CAREER_STATE = {"employed", "unemployed", "student"}
+_VALID_BUSINESS_STATE = {"none", "running", "considering"}
+_VALID_HOUSING_STATUS = {"renting", "owns_property", "living_with_parents", "other"}
+
+
+def _sanitize_life_state_fields(fields: dict) -> dict:
+    """Drops (never coerces to a wrong default — a life-state fact wrongly
+    set could misfire prediction_service's marriage/children/business
+    redirect) any field the LLM populated with something outside the small
+    fixed vocabulary, or a date string that doesn't actually parse — same
+    "sanitize at the service boundary, don't let a bad LLM field crash the
+    request" convention as life_context_service.upsert_fact's domain/
+    confidence/source coercion."""
+    clean: dict = {}
+    if (v := fields.get("marital_status")) in _VALID_MARITAL_STATUS:
+        clean["marital_status"] = v
+    if (v := fields.get("pregnancy_status")) in _VALID_PREGNANCY_STATUS:
+        clean["pregnancy_status"] = v
+    if (v := fields.get("career_state")) in _VALID_CAREER_STATE:
+        clean["career_state"] = v
+    if (v := fields.get("business_state")) in _VALID_BUSINESS_STATE:
+        clean["business_state"] = v
+    if (v := fields.get("housing_status")) in _VALID_HOUSING_STATUS:
+        clean["housing_status"] = v
+    if isinstance(v := fields.get("planning_property_purchase"), bool):
+        clean["planning_property_purchase"] = v
+    if isinstance(v := fields.get("has_home_loan"), bool):
+        clean["has_home_loan"] = v
+    if isinstance(v := fields.get("children_count"), int) and v >= 0:
+        clean["children_count"] = v
+    for date_field in ("marriage_date", "expected_delivery"):
+        if isinstance(v := fields.get(date_field), str):
+            try:
+                clean[date_field] = date.fromisoformat(v)
+            except ValueError:
+                pass
+    return clean
+
+
+async def apply_life_state_updates(db: AsyncSession, user_id: str, **fields) -> LifeState | None:
+    """Partial-update path for LifeState, used by the chat pipeline (see
+    chat_understanding.LifeStateUpdate) when the user states a life fact in
+    conversation rather than filling in a settings form. `upsert_life_state`
+    above is a deliberate full-replace (the settings-form contract: every
+    field is resupplied every save, so an unset field really does mean
+    "clear this"), which would silently wipe out unrelated fields — e.g. a
+    known `career_state` — if reused directly for a chat update that only
+    ever mentions ONE fact at a time. This reads the existing row (if any),
+    overlays only the sanitized fields actually passed in `fields`, and
+    routes the merged result through the existing `upsert_life_state` —
+    additive, not a new write path around it."""
+    clean_fields = _sanitize_life_state_fields(fields)
+    if not clean_fields:
+        return await get_life_state(db, user_id)
+    existing = await get_life_state(db, user_id)
+    current = decrypt_life_state(existing) if existing is not None else LifeStateOut(version=0)
+    merged = current.model_copy(update=clean_fields)
+    await upsert_life_state(db, user_id, LifeStateIn(**merged.model_dump(exclude={"version"})))
+    return await get_life_state(db, user_id)
 
 
 async def get_user_profile(db: AsyncSession, user: User) -> UserProfileOut:

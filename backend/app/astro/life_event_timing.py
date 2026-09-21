@@ -25,14 +25,19 @@ from app.astro.transit_corroboration import TransitCheck, check_transits
 EventType = Literal[
     "career", "wealth", "children", "foreign_travel",
     "career_promotion", "business_partnership", "business_expansion",
+    "property",
 ]
 
 # The house each event classically activates. career_promotion/
 # business_partnership/business_expansion are new (Phase 2 sub-intents) —
 # see EVENT_SECONDARY_HOUSES below for the multi-house ones among them.
+# "property" (Phase 5) is the 4th house — home/fixed-assets, the standard
+# classical house for this question (the same convention already used here:
+# one house + a karaka set, run through the same generic scanner).
 EVENT_HOUSE: dict[EventType, int] = {
     "career": 10, "wealth": 2, "children": 5, "foreign_travel": 12,
     "career_promotion": 10, "business_partnership": 7, "business_expansion": 11,
+    "property": 4,
 }
 
 # Secondary houses supporting a multi-house event, weighted below the
@@ -59,6 +64,7 @@ EVENT_KARAKAS: dict[EventType, list[PlanetKey]] = {
     for event_type in (
         "career", "wealth", "children", "foreign_travel",
         "career_promotion", "business_partnership", "business_expansion",
+        "property",
     )
 }
 

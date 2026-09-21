@@ -13,8 +13,11 @@ from app.schemas.life_context import (
     OnboardingContextIn,
 )
 from app.schemas.life_state import LifeStateIn
+from app.schemas.personalization import NextOnboardingTopicOut, PersonalizationScoreOut
 from app.schemas.user import BirthDataIn, PreferencesIn, UserProfileOut
-from app.services import life_context_service, user_service
+from app.services import (
+    life_context_service, onboarding_followup_service, personalization_score_service, user_service,
+)
 from app.services.chat_understanding import extract_onboarding_context
 
 router = APIRouter(prefix="/user", tags=["user"])
@@ -115,6 +118,17 @@ async def delete_life_context_fact(
 async def get_life_timeline(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     timeline = await life_context_service.get_timeline(db, user.id)
     return [LifeTimelineEntry(**e) for e in timeline]
+
+
+@router.get("/personalization-score", response_model=PersonalizationScoreOut)
+async def get_personalization_score(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await personalization_score_service.get_personalization_score(db, user.id)
+
+
+@router.get("/next-onboarding-topic", response_model=NextOnboardingTopicOut)
+async def get_next_onboarding_topic(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await onboarding_followup_service.get_next_onboarding_topic(db, user.id, user.created_at)
+    return result or {"topic": None, "reason": None}
 
 
 @router.post("/onboarding-context", status_code=status.HTTP_204_NO_CONTENT)

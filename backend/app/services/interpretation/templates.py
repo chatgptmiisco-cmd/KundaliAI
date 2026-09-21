@@ -713,6 +713,18 @@ def message_mentions_foreign_travel_timing(message: str) -> bool:
     return has_foreign and _has_timing_signal(lowered)
 
 
+def message_mentions_relocation_decision(message: str) -> bool:
+    # Reuses the SAME keyword list as foreign_travel_timing above — what
+    # distinguishes "should I relocate" (a decision, routes to
+    # relocation_decision) from "when will I get to move abroad"
+    # (foreign_travel_timing) is purely the decision-signal ("should I..."),
+    # not a different vocabulary; _has_decision_signal is defined further
+    # below in this module.
+    lowered = message.lower()
+    has_foreign = _contains_any_keyword(lowered, _FOREIGN_TRAVEL_KEYWORDS)
+    return has_foreign and _has_decision_signal(lowered)
+
+
 # --- Phase 2 sub-intents (career_promotion/business_partnership/
 # business_expansion) — deliberately their own keyword lists, checked
 # ALONGSIDE (not instead of) the generic "career" topic above, which
@@ -788,6 +800,80 @@ def message_mentions_business_start_decision(message: str) -> bool:
     return _contains_any_keyword(lowered, _BUSINESS_START_DECISION_KEYWORDS) and _has_decision_signal(lowered)
 
 
+# Phase 5: no existing "house"/"property" topic keyword list anywhere in
+# this file (confirmed — nothing else in the app talks about property at
+# all) — this is the first and only one, purely for detecting the
+# house_purchase_decision category.
+_HOUSE_PURCHASE_KEYWORDS = [
+    "buy a house", "buying a house", "buy a home", "buying a home", "purchase a house", "purchasing a house",
+    "buy property", "buying property", "ghar khareed", "makaan khareed",
+    "घर खरीद", "मकान खरीद", "प्रॉपर्टी खरीद",
+]
+
+
+def message_mentions_house_purchase_decision(message: str) -> bool:
+    lowered = message.lower()
+    return _contains_any_keyword(lowered, _HOUSE_PURCHASE_KEYWORDS) and _has_decision_signal(lowered)
+
+
+def message_mentions_marriage_decision(message: str) -> bool:
+    # Reuses the SAME keyword list as the plain "marriage" topic/marriage_
+    # timing — what distinguishes "should I get married now" (a decision)
+    # from "tell me about my marriage" (the plain topic) or "when will I
+    # get married" (marriage_timing) is purely the decision-signal
+    # ("should I..."), not a different vocabulary — same pattern as
+    # message_mentions_relocation_decision reusing foreign_travel's list.
+    lowered = message.lower()
+    has_marriage = _contains_any_keyword(lowered, _TOPIC_KEYWORDS["marriage"])
+    return has_marriage and _has_decision_signal(lowered)
+
+
+# Phase 9 — property_sale/property_inheritance/property_relocation reuse
+# the SAME BPHS 48.2-4 signal house_purchase_decision already does (see
+# app.astro.property_analysis), reinterpreted by intent — each gets its own
+# keyword list since "sell"/"inherit"/"move house" are genuinely distinct
+# vocabulary, not shared with _HOUSE_PURCHASE_KEYWORDS above.
+_PROPERTY_SALE_KEYWORDS = [
+    "sell my house", "selling my house", "sell my home", "selling my home", "sell my property",
+    "selling my property", "sell my land", "ghar bech", "makaan bech", "property bech",
+    "घर बेच", "मकान बेच", "संपत्ति बेच",
+]
+_PROPERTY_INHERITANCE_KEYWORDS = [
+    "inherit property", "inherit a house", "inherit land", "inheritance of property",
+    "ancestral property", "ancestral home", "parivarik sampatti", "poojiwali zameen",
+    "विरासत में संपत्ति", "पैतृक संपत्ति", "पैतृक घर",
+]
+# Deliberately distinct from _FOREIGN_TRAVEL_KEYWORDS (country/abroad
+# vocabulary, used by relocation_decision — Phase 3, the 12th house) — this
+# is about moving HOMES, a 4th-house matter, not moving countries.
+_PROPERTY_RELOCATION_KEYWORDS = [
+    "move house", "moving house", "move homes", "moving homes", "change my residence",
+    "changing my residence", "change residence", "shift house", "shifting house", "ghar badal",
+    "makaan badal", "घर बदल", "मकान बदल", "निवास बदल",
+]
+
+
+def message_mentions_property_sale(message: str) -> bool:
+    lowered = message.lower()
+    return _contains_any_keyword(lowered, _PROPERTY_SALE_KEYWORDS) and (
+        _has_timing_signal(lowered) or _has_decision_signal(lowered)
+    )
+
+
+def message_mentions_property_inheritance(message: str) -> bool:
+    lowered = message.lower()
+    return _contains_any_keyword(lowered, _PROPERTY_INHERITANCE_KEYWORDS) and (
+        _has_timing_signal(lowered) or _has_decision_signal(lowered)
+    )
+
+
+def message_mentions_property_relocation(message: str) -> bool:
+    lowered = message.lower()
+    return _contains_any_keyword(lowered, _PROPERTY_RELOCATION_KEYWORDS) and (
+        _has_timing_signal(lowered) or _has_decision_signal(lowered)
+    )
+
+
 # --- Past-event reflection: tense detection + a target-date resolver ------
 # "Why did my marriage get delayed", "what happened to me around 2016",
 # "why was 28 such a hard year" — real astrologers narrate the PAST from the
@@ -822,6 +908,25 @@ _GREETING_RE = re.compile(
 
 def message_is_greeting(message: str) -> bool:
     return bool(_GREETING_RE.match(message.strip()))
+
+
+# A short yes/no reply ("yes", "haan bilkul", "nahi abhi nahi") — used to
+# deterministically resolve a plain yes/no question this app itself just
+# asked (see chat.py's career-employment gate reply handling) on the
+# fallback (no-LLM) path, where there's otherwise no way at all to turn a
+# bare "yes" into a life-state fact. Anchored at the start with a word
+# boundary so "yesterday"/"nobody" don't false-match, but still matches a
+# longer reply that OPENS with the yes/no word ("yeah I am").
+_AFFIRMATIVE_RE = re.compile(r"^(yes+|yeah+|yep+|yup+|haan+|han)\b", re.IGNORECASE)
+_NEGATIVE_RE = re.compile(r"^(nope+|no+|nahi+n?|nah)\b", re.IGNORECASE)
+
+
+def message_is_affirmative_reply(message: str) -> bool:
+    return bool(_AFFIRMATIVE_RE.match(message.strip()))
+
+
+def message_is_negative_reply(message: str) -> bool:
+    return bool(_NEGATIVE_RE.match(message.strip()))
 
 
 # Matches a real calendar year anywhere from a plausible birth year (1900)
@@ -970,6 +1075,11 @@ _LIFE_EVENT_LABEL_EN: dict[str, str] = {
     "career_promotion_timing": "a promotion",
     "business_expansion_timing": "expanding your business",
     "business_partnership_timing": "a business partnership",
+    # relocation_decision reuses the same foreign_travel signal as
+    # foreign_travel_timing above (see chat.py) — its own label reads as a
+    # decision ("should you relocate"), not a timing question ("when will
+    # you travel"), even though both draw on the identical windows.
+    "relocation_decision": "whether now is a good window to relocate",
 }
 _LIFE_EVENT_LABEL_HI: dict[str, str] = {
     "career_timing": "करियर या नौकरी में बदलाव",
@@ -979,6 +1089,7 @@ _LIFE_EVENT_LABEL_HI: dict[str, str] = {
     "career_promotion_timing": "पदोन्नति",
     "business_expansion_timing": "आपके व्यवसाय का विस्तार",
     "business_partnership_timing": "व्यापारिक साझेदारी",
+    "relocation_decision": "क्या अभी स्थानांतरण के लिए अच्छा समय है",
 }
 _LIFE_EVENT_CONTEXT_KEY: dict[str, str] = {
     "career_timing": "career_timing_windows",
@@ -988,6 +1099,7 @@ _LIFE_EVENT_CONTEXT_KEY: dict[str, str] = {
     "career_promotion_timing": "career_promotion_timing_windows",
     "business_expansion_timing": "business_expansion_timing_windows",
     "business_partnership_timing": "business_partnership_timing_windows",
+    "relocation_decision": "relocation_decision_windows",
 }
 # When a life-event category's windows list comes back empty because of a
 # LifeState gate (currently only business_partnership_timing — see
@@ -996,7 +1108,27 @@ _LIFE_EVENT_CONTEXT_KEY: dict[str, str] = {
 # instead of "no window found" reading as though nothing matched at all.
 _LIFE_EVENT_NOTE_CONTEXT_KEY: dict[str, str] = {
     "business_partnership_timing": "business_partnership_timing_note",
+    "relocation_decision": "relocation_decision_note",
+    "career_promotion_timing": "career_promotion_timing_note",
 }
+
+
+def _personal_pattern_sentence(category: str, context: dict[str, Any], hi: bool) -> str | None:
+    """Phase 4 — spec's "richer correlations": a plain, deterministic
+    sentence stating a real correlation in the user's OWN confirmed history
+    (see life_pattern_service), never an interpretive claim, so this stays
+    true and worth stating even on the template (non-LLM) path."""
+    pattern = context.get(f"{category}_personal_pattern")
+    if not pattern:
+        return None
+    lord, count = pattern.get("shared_mahadasha_lord"), pattern.get("shared_mahadasha_count")
+    if not lord:
+        lord, count = pattern.get("shared_antardasha_lord"), pattern.get("shared_antardasha_count")
+    if not lord:
+        return None
+    if hi:
+        return f"दिलचस्प बात यह है कि आपके इस क्षेत्र के {count} पिछले वाकये {lord} की अवधि में हुए हैं।"
+    return f"Interestingly, {count} of your past events in this area happened during a {lord} period."
 
 
 def _life_event_chat_answer(category: str, context: dict[str, Any], hi: bool) -> str:
@@ -1007,7 +1139,9 @@ def _life_event_chat_answer(category: str, context: dict[str, Any], hi: bool) ->
     label = (_LIFE_EVENT_LABEL_HI if hi else _LIFE_EVENT_LABEL_EN)[category]
     direction = context.get(f"{category}_direction", "future")
     birth_year = context.get("birth_year")
-    return _format_timing_reply(windows, label, direction, birth_year, hi)
+    reply = _format_timing_reply(windows, label, direction, birth_year, hi)
+    pattern_sentence = _personal_pattern_sentence(category, context, hi)
+    return f"{reply}\n\n{pattern_sentence}" if pattern_sentence else reply
 
 # Which Rishi persona owns which question category — the specialization the
 # user asked for ("Vasishtha only answers life direction, Parashara only
@@ -1016,17 +1150,21 @@ def _life_event_chat_answer(category: str, context: dict[str, Any], hi: bool) ->
 # dosha/yoga) plus every key in _TOPIC_HOUSE; every category is owned by
 # exactly one Rishi so a reverse lookup (_CATEGORY_RISHI) is unambiguous.
 _RISHI_SPECIALTY: dict[str, set[str]] = {
-    "vasishtha": {"education", "travel", "foreign_travel_timing"},
+    "vasishtha": {"education", "travel", "foreign_travel_timing", "relocation_decision"},
     "parashara": {"dasha", "today", "year_ahead", "life_theme"},
-    "gargi": {"marriage", "family", "friends", "siblings", "children", "marriage_timing", "children_timing"},
+    "gargi": {
+        "marriage", "family", "friends", "siblings", "children", "marriage_timing", "children_timing",
+        "marriage_decision",
+    },
     "agastya": {"dosha", "yoga", "health"},
     "bhrigu": {
         "career", "money", "career_timing", "wealth_timing",
-        # Phase 2/3 sub-intents — same specialist as career/wealth, since
-        # they're career- and business-flavored variants of that same
-        # domain, not a new topic of their own.
+        # Phase 2/3/5 sub-intents — same specialist as career/wealth/money,
+        # since they're career-, business-, or asset-flavored variants of
+        # that same domain, not a new topic of their own.
         "career_promotion_timing", "business_expansion_timing", "business_partnership_timing",
-        "job_change_decision", "business_start_decision",
+        "job_change_decision", "business_start_decision", "house_purchase_decision",
+        "property_sale_intent", "property_inheritance_intent", "property_relocation_intent",
     },
 }
 _CATEGORY_RISHI: dict[str, str] = {
@@ -1295,6 +1433,30 @@ def _asked_about(message: str, keywords: list[str]) -> bool:
     return _contains_any_keyword(message, keywords)
 
 
+# career_timing's own keyword list is deliberately broad and includes
+# "promotion"/"promoted"/"business" (see _TOPIC_KEYWORDS["career"]) — so a
+# message asking specifically about a promotion, business expansion, or a
+# business partnership ALSO satisfies the generic career_timing match. The
+# Phase 2 sub-intents (career_promotion_timing/business_expansion_timing/
+# business_partnership_timing) were built to be checked "alongside, not
+# instead of" that generic parent (see the comment above
+# _CAREER_PROMOTION_KEYWORDS) on the assumption an LLM would receive both
+# windows and pick/merge them intelligently. The deterministic template
+# path (chat_reply, used whenever OpenAI is unavailable) has no such
+# judgment — it just concatenates every matched category's answer — so
+# without this, a plain promotion question came back with the SAME window
+# described twice: once framed as "a career or job change" and once as "a
+# promotion". Since each sub-intent's own house rule already covers its
+# parent's primary house (see life_event_timing.EVENT_HOUSE_WEIGHTS), the
+# generic parent adds no real information once the specific one has fired,
+# so it's suppressed the same way a "_timing" category already suppresses
+# its plain-topic sibling below.
+_SUB_INTENT_SUPPRESSES_PARENT = {
+    "career_promotion_timing": "career_timing",
+    "business_expansion_timing": "career_timing",
+    "business_partnership_timing": "career_timing",
+}
+
 # A "_timing" category and its plain-topic sibling both key off the same
 # underlying topic keywords (message_mentions_marriage_timing REQUIRES the
 # "marriage" topic keywords to be present, for instance) — so whenever the
@@ -1364,10 +1526,26 @@ def _detect_categories(message: str, birth_year: int | None = None) -> list[str]
         add("business_expansion_timing")
     if message_mentions_business_partnership_timing(message):
         add("business_partnership_timing")
+
+    for sub_intent, parent in _SUB_INTENT_SUPPRESSES_PARENT.items():
+        if sub_intent in found and parent in found:
+            found.remove(parent)
     if message_mentions_job_change_decision(message):
         add("job_change_decision")
     if message_mentions_business_start_decision(message):
         add("business_start_decision")
+    if message_mentions_relocation_decision(message):
+        add("relocation_decision")
+    if message_mentions_house_purchase_decision(message):
+        add("house_purchase_decision")
+    if message_mentions_marriage_decision(message):
+        add("marriage_decision")
+    if message_mentions_property_sale(message):
+        add("property_sale_intent")
+    if message_mentions_property_inheritance(message):
+        add("property_inheritance_intent")
+    if message_mentions_property_relocation(message):
+        add("property_relocation_intent")
     if message_mentions_year_ahead(message):
         add("year_ahead")
 
@@ -1425,13 +1603,19 @@ def _compute_answer_for_category(
         windows: list[dict[str, Any]] = context.get("marriage_timing_windows") or []
         direction = context.get("marriage_timing_direction", "future")
         label = "विवाह या किसी गंभीर साझेदारी" if hi else "marriage or a serious partnership"
-        return _format_timing_reply(windows, label, direction, context.get("birth_year"), hi)
+        reply = _format_timing_reply(windows, label, direction, context.get("birth_year"), hi)
+        pattern_sentence = _personal_pattern_sentence(category, context, hi)
+        return f"{reply}\n\n{pattern_sentence}" if pattern_sentence else reply
 
     if category in _LIFE_EVENT_CONTEXT_KEY:
         return _life_event_chat_answer(category, context, hi)
 
-    if category in ("job_change_decision", "business_start_decision"):
-        # A verdict + reasoning (see prediction_service.get_decision), not a
+    if category in (
+        "job_change_decision", "business_start_decision", "house_purchase_decision", "marriage_decision",
+        "property_sale_intent", "property_inheritance_intent", "property_relocation_intent",
+    ):
+        # A verdict + reasoning (see prediction_service.get_decision /
+        # get_marriage_decision / get_property_analysis), not a
         # ranked window list — the composed `reasoning` text already reads
         # as a complete answer on its own, same as how the timing categories
         # above hand back _format_timing_reply's finished sentence rather
@@ -1439,7 +1623,11 @@ def _compute_answer_for_category(
         decision: dict[str, Any] | None = context.get(category)
         if not decision:
             return None
-        return decision.get("note") or decision.get("reasoning")
+        reply = decision.get("note") or decision.get("reasoning")
+        if not reply:
+            return None
+        pattern_sentence = _personal_pattern_sentence(category, context, hi)
+        return f"{reply}\n\n{pattern_sentence}" if pattern_sentence else reply
 
     if category == "life_theme":
         theme_data: dict[str, Any] | None = context.get("life_theme")
@@ -1934,7 +2122,19 @@ class TemplateInterpreter(Interpreter):
         birth_year = context.get("birth_year")
 
         message = history[-1]["content"].lower() if history else ""
-        categories = _detect_categories(message, birth_year)
+        # chat.py always sets context["detected_categories"] (it's what
+        # openai_interpreter already reads — see its own use of the same
+        # key) — prefer that over re-deriving from the raw message text
+        # whenever it's present, since chat.py's own list can carry a
+        # category that isn't recoverable from the latest message alone
+        # (e.g. a bare "yes" answering a life-state gate question — see
+        # chat.py's career-employment gate handling, which injects
+        # career_promotion_timing after a plain "yes" that _detect_
+        # categories itself would never match on its own). Re-derive only
+        # when the caller genuinely didn't supply one (e.g. calling this
+        # directly in tests without going through chat.py).
+        context_categories = context.get("detected_categories")
+        categories = context_categories if context_categories is not None else _detect_categories(message, birth_year)
 
         def _out_of_scope(cat: str) -> bool:
             return rishi_id in _RISHI_SPECIALTY and cat not in _RISHI_SPECIALTY[rishi_id]

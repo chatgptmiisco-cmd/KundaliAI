@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { resolveBirthPlace } from '../data/geocoding';
 import { apiRequest, apiRequestMultipart, setAuthToken } from './httpClient';
 import {
@@ -889,7 +890,22 @@ export async function postChatMessage(message: string, lang: AppLanguage, rishiI
 // multipart form data since it's a file, not JSON.
 export async function transcribeAudio(uri: string, lang: AppLanguage): Promise<{ text: string }> {
   const formData = new FormData();
-  formData.append('audio', { uri, name: 'recording.m4a', type: 'audio/m4a' } as unknown as Blob);
+  if (Platform.OS === 'web') {
+    // The RN `{uri, name, type}` shorthand below only works with React
+    // Native's own FormData/fetch shim, which uploads directly from a local
+    // file path — on web, `fetch`/`FormData` are the browser's real
+    // implementations, and appending a plain object just stringifies it to
+    // "[object Object]" instead of attaching a file. The backend correctly
+    // rejects that as not a real upload (422) — recording looks like it
+    // "failed to understand" when actually no audio ever made it there.
+    // expo-audio's web recorder produces a `blob:` URI (WebM, per
+    // RecordingPresets.HIGH_QUALITY's web mimeType) — fetch it back into a
+    // real Blob first.
+    const blob = await (await fetch(uri)).blob();
+    formData.append('audio', blob, 'recording.webm');
+  } else {
+    formData.append('audio', { uri, name: 'recording.m4a', type: 'audio/m4a' } as unknown as Blob);
+  }
   formData.append('language', lang);
   return apiRequestMultipart<{ text: string }>('/voice/transcribe', formData);
 }
@@ -994,5 +1010,50 @@ export interface LifeTimelineEntry {
 export async function getLifeTimeline(): Promise<LifeTimelineEntry[]> {
   const data = await apiRequest<{ id: number; event_type: string; description: string; year: number; month: number | null }[]>('/user/life-timeline');
   return data.map((e) => ({ id: e.id, eventType: e.event_type, description: e.description, year: e.year, month: e.month }));
+}
+
+// --- Personalization score ---
+
+export interface PersonalizationScore {
+  score: number;
+  domainsCovered: number;
+  domainsTotal: number;
+  lifeStateFieldsSet: number;
+  lifeStateFieldsTotal: number;
+  hasLifeEvent: boolean;
+  hasImportantDate: boolean;
+  hasTrackedDecision: boolean;
+}
+
+export async function getPersonalizationScore(): Promise<PersonalizationScore> {
+  const data = await apiRequest<{
+    score: number; domains_covered: number; domains_total: number;
+    life_state_fields_set: number; life_state_fields_total: number;
+    has_life_event: boolean; has_important_date: boolean; has_tracked_decision: boolean;
+  }>('/user/personalization-score');
+  return {
+    score: data.score,
+    domainsCovered: data.domains_covered,
+    domainsTotal: data.domains_total,
+    lifeStateFieldsSet: data.life_state_fields_set,
+    lifeStateFieldsTotal: data.life_state_fields_total,
+    hasLifeEvent: data.has_life_event,
+    hasImportantDate: data.has_important_date,
+    hasTrackedDecision: data.has_tracked_decision,
+  };
+}
+
+// --- Adaptive onboarding follow-up (Phase 7) ---
+
+export interface NextOnboardingTopic {
+  topic: string | null;
+  reason: 'life_event' | 'time_based' | null;
+}
+
+export async function getNextOnboardingTopic(): Promise<NextOnboardingTopic> {
+  const data = await apiRequest<{ topic: string | null; reason: 'life_event' | 'time_based' | null }>(
+    '/user/next-onboarding-topic',
+  );
+  return { topic: data.topic, reason: data.reason };
 }
 

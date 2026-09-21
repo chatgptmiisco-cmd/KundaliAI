@@ -121,12 +121,12 @@ def test_marriage_window_reason_text_surfaces_natal_strength_when_given(language
     )
     assert strong != weak != plain
     if language == "en":
-        assert "well-placed in your birth chart" in strong
-        assert "weakly placed in your birth chart" in weak
+        assert "is also strong in your birth chart" in strong
+        assert "isn't especially strong in your birth chart" in weak
     else:
         assert "मज़बूत स्थिति में है" in strong
-        assert "कमज़ोर स्थिति में है" in weak
-    assert "well-placed" not in plain and "weakly placed" not in plain
+        assert "बहुत मज़बूत नहीं है" in weak
+    assert "is also strong in your birth chart" not in plain and "isn't especially strong in your birth chart" not in plain
 
 
 @pytest.mark.parametrize("language", ["en", "hi"])
@@ -202,13 +202,13 @@ def test_marriage_window_reason_text_surfaces_transit_obstruction_when_given(lan
     )
     assert obstructed != plain
     if language == "en":
-        assert "Mars is also transiting through" in obstructed
-        assert "caution flag" in obstructed
+        assert "Mars is also moving through" in obstructed
+        assert "real caution" in obstructed
         # Corroboration and obstruction are independent, not contradictory —
         # both sentences appear together.
         assert "second real signal" in obstructed
     else:
-        assert "मंगल भी आपकी कुंडली" in obstructed
+        assert "मंगल भी इसी दौर में आपकी कुंडली" in obstructed
         assert "गुरु या शनि" in obstructed
 
 
@@ -222,8 +222,8 @@ def test_marriage_window_reason_text_obstruction_note_reads_past_tense():
         transit_corroborated=False, language="en", tense="past", transit_obstructing_planet="Mars",
     )
     assert future_text != past_text
-    assert "is also transiting through that same part of your chart" in future_text
-    assert "was also transiting through that same part of your chart" in past_text
+    assert "is also moving through that same part of your chart" in future_text
+    assert "was also moving through that same part of your chart" in past_text
 
 
 def test_life_event_reason_text_surfaces_transit_obstruction_when_given():
@@ -236,7 +236,7 @@ def test_life_event_reason_text_surfaces_transit_obstruction_when_given():
         transit_corroborated=False, language="en",
     )
     assert obstructed != plain
-    assert "Rahu is also transiting through" in obstructed
+    assert "Rahu is also moving through" in obstructed
 
 
 @pytest.mark.parametrize("language", ["en", "hi"])
@@ -496,9 +496,9 @@ def test_life_event_reason_text_surfaces_natal_strength_when_given():
         transit_corroborated=False, language="en",
     )
     assert strong != weak != plain
-    assert "well-placed in your birth chart" in strong
-    assert "weakly placed in your birth chart" in weak
-    assert "well-placed" not in plain and "weakly placed" not in plain
+    assert "is also strong in your birth chart" in strong
+    assert "isn't especially strong in your birth chart" in weak
+    assert "is also strong in your birth chart" not in plain and "isn't especially strong in your birth chart" not in plain
 
 
 def test_life_event_reason_text_composes_the_dasha_relationship_note():

@@ -17,6 +17,7 @@ from app.schemas.prediction import (
     MultiYearOutlookResponse,
     YearOutlookResponse,
 )
+from app.schemas.property import PropertyAnalysis, PropertyIntent
 from app.services import prediction_service, user_service
 from app.services.interpretation.base import Language
 from app.services.prediction_service import Direction
@@ -89,13 +90,41 @@ async def life_event_timing(
 @limiter.limit("20/minute")
 async def decision(
     request: Request,
-    decision_type: Literal["job_change", "business_start"] = Query(...),
+    decision_type: Literal["job_change", "business_start", "house_purchase", "marriage"] = Query(...),
     language: Language = Query(default="en"),
     profile: BirthProfile = Depends(require_birth_profile),
     db: AsyncSession = Depends(get_db),
 ):
     birth = user_service.decrypt_birth_data(profile)
+    # marriage deliberately bypasses get_decision's generic engine — see
+    # prediction_service.get_marriage_decision's own docstring for why.
+    if decision_type == "marriage":
+        return await prediction_service.get_marriage_decision(db, profile, birth, language)
     return await prediction_service.get_decision(db, profile, birth, decision_type, language)
+
+
+@router.get("/property-purchase-analysis", response_model=PropertyAnalysis)
+@limiter.limit("20/minute")
+async def property_purchase_analysis(
+    request: Request,
+    intent: PropertyIntent = Query(default="property_purchase"),
+    direction: Direction = Query(default="future"),
+    language: Language = Query(default="en"),
+    profile: BirthProfile = Depends(require_birth_profile),
+    db: AsyncSession = Depends(get_db),
+):
+    """Phase 8 (property_purchase) + Phase 9 (property_sale/property_
+    inheritance/property_relocation — see prediction_service.get_property_
+    analysis) — the rich, reference-based structure: natal property_
+    promise, rule-tagged evidence, and current/next/medium-term/long-term
+    windows. Deliberately a separate endpoint from /decision above, whose
+    house_purchase response shape stays exactly as Phase 5 shipped it —
+    no breaking change to that existing contract. The path is kept as
+    "property-purchase-analysis" (not renamed) since it's already shipped
+    in this dev environment and purchase remains the primary use case;
+    `intent` selects which of the 4 implemented framings to use."""
+    birth = user_service.decrypt_birth_data(profile)
+    return await prediction_service.get_property_analysis(db, profile, birth, language, intent, direction)
 
 
 @router.get("/life-theme", response_model=LifeThemeResponse)

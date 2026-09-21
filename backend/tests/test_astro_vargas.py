@@ -2,6 +2,7 @@ import pytest
 
 from app.astro.constants import OWN_SIGNS
 from app.astro.vargas import (
+    chaturthamsa_sign_index,
     drekkana_sign_index,
     dwadashamsa_sign_index,
     hora_sign_index,
@@ -102,3 +103,38 @@ def test_trimshamsa_even_sign_boundaries_match_the_classical_degree_ranges():
     assert trimshamsa_sign_index(_TAURUS * 30 + 15) == _PISCES  # Jupiter's even sign
     assert trimshamsa_sign_index(_TAURUS * 30 + 22) == _CAPRICORN  # Saturn's even sign
     assert trimshamsa_sign_index(_TAURUS * 30 + 27) == _SCORPIO  # Mars's even sign
+
+
+# --- D4 Chaturthamsa (Phase 9) ------------------------------------------------
+
+def test_chaturthamsa_four_quarters_follow_the_1_4_7_10_kendra_sequence():
+    # Aries: 1st quarter (0-7.5) stays Aries, 2nd (7.5-15) -> 4th sign
+    # (Cancer), 3rd (15-22.5) -> 7th sign (Libra), 4th (22.5-30) -> 10th
+    # sign (Capricorn).
+    assert chaturthamsa_sign_index(_ARIES * 30 + 2) == _ARIES
+    assert chaturthamsa_sign_index(_ARIES * 30 + 10) == _CANCER
+    assert chaturthamsa_sign_index(_ARIES * 30 + 18) == _LIBRA
+    assert chaturthamsa_sign_index(_ARIES * 30 + 26) == _CAPRICORN
+
+
+def test_chaturthamsa_sequence_is_identical_regardless_of_sign_modality():
+    # Taurus (fixed) and Gemini (dual) must follow the SAME kendra pattern
+    # as Aries (movable) above — the classical rule is explicitly not
+    # dependent on chara/sthira/dwiswabhava, unlike D3/D7/D30's odd/even
+    # branching.
+    assert chaturthamsa_sign_index(_TAURUS * 30 + 2) == _TAURUS
+    assert chaturthamsa_sign_index(_TAURUS * 30 + 10) == _LEO
+    assert chaturthamsa_sign_index(_TAURUS * 30 + 18) == _SCORPIO
+    assert chaturthamsa_sign_index(_TAURUS * 30 + 26) == _AQUARIUS
+
+    assert chaturthamsa_sign_index(_GEMINI * 30 + 2) == _GEMINI
+    assert chaturthamsa_sign_index(_GEMINI * 30 + 10) == _VIRGO
+    assert chaturthamsa_sign_index(_GEMINI * 30 + 18) == _SAGITTARIUS
+    assert chaturthamsa_sign_index(_GEMINI * 30 + 26) == _PISCES
+
+
+def test_chaturthamsa_quarter_boundaries_are_exactly_7_5_degrees():
+    assert chaturthamsa_sign_index(_ARIES * 30 + 7.49) == _ARIES
+    assert chaturthamsa_sign_index(_ARIES * 30 + 7.51) == _CANCER
+    assert chaturthamsa_sign_index(_ARIES * 30 + 22.49) == _LIBRA
+    assert chaturthamsa_sign_index(_ARIES * 30 + 22.51) == _CAPRICORN

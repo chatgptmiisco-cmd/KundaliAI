@@ -29,6 +29,9 @@ def test_category_karakas_registry_matches_the_five_event_categories():
         # _KARAKA_CATEGORY_COUNT is computed); business_partnership is a
         # genuinely new domain (Mercury).
         "career_promotion", "business_partnership", "business_expansion",
+        # Phase 5: property (house_purchase_decision) — Mars+Saturn, also
+        # added after _KARAKA_CATEGORY_COUNT is computed (see the next test).
+        "property",
     }
 
 
@@ -45,3 +48,14 @@ def test_career_promotion_and_business_expansion_do_not_inflate_specificity_coun
     assert karaka_specificity_multiplier("Me") == 1.0  # business_partnership's own karaka, not shared
     assert CATEGORY_KARAKAS["career_promotion"] == CATEGORY_KARAKAS["career"]
     assert CATEGORY_KARAKAS["business_expansion"] == CATEGORY_KARAKAS["wealth"]
+
+
+def test_property_karaka_does_not_inflate_careers_saturn_specificity():
+    # Regression guard for the SAME risk as above, but for Phase 5's new
+    # "property" category: it genuinely needs its own (Ma, Sa) karaka set
+    # (not a parent-domain alias), and Saturn already has career's exclusive
+    # (count=1) role — property is appended after _KARAKA_CATEGORY_COUNT is
+    # computed specifically so it absorbs any cross-category-discount
+    # imprecision, never career's already-shipped scoring.
+    assert karaka_specificity_multiplier("Sa") == 1.0
+    assert CATEGORY_KARAKAS["property"] == ("Ma", "Sa")

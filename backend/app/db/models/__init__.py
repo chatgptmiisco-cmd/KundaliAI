@@ -12,8 +12,10 @@ from app.db.models.cache import (
     UsageCounter,
 )
 from app.db.models.chat import ChatMessage
+from app.db.models.important_date import ImportantDate
 from app.db.models.life_context import LifeContextItem, LifeDecision, LifeEvent
 from app.db.models.life_state import LifeState
+from app.db.models.prediction_feedback import PredictionFeedback
 from app.db.models.prediction_query_log import PredictionQueryLog
 from app.db.models.subscription import Subscription
 from app.db.models.user import OtpRequest, User
@@ -29,10 +31,12 @@ __all__ = [
     "PeriodAnalysisCache",
     "UsageCounter",
     "ChatMessage",
+    "ImportantDate",
     "LifeContextItem",
     "LifeDecision",
     "LifeEvent",
     "LifeState",
+    "PredictionFeedback",
     "PredictionQueryLog",
     "Subscription",
     "OtpRequest",

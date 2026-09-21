@@ -45,11 +45,21 @@ from app.astro.natal_insights import (
     planet_dignity,
     significator_strength_multipliers,
 )
+from app.astro.property_analysis import (
+    BPHS_48_2_4,
+    PROPERTY_INTENT_REFRAME_INHERITANCE,
+    PROPERTY_INTENT_REFRAME_RELOCATION,
+    PROPERTY_INTENT_REFRAME_SALE,
+    PROPERTY_KARAKA_MARS_SATURN,
+    PROPERTY_TIMING_WINDOWS,
+    compute_property_promise,
+)
 from app.astro.shadbala import MINIMUM_RUPAS, ShadbalaChartInputs, compute_all_shadbala, compute_time_of_day_facts
 from app.astro.transit_corroboration import TransitCheck
 from app.astro.transits import compute_transit_snapshot
 from app.astro.varshaphala import compute_solar_return, compute_varshaphala
 from app.astro.vargas import (
+    chaturthamsa_sign_index,
     drekkana_sign_index,
     dwadashamsa_sign_index,
     hora_sign_index,
@@ -74,6 +84,15 @@ from app.schemas.prediction import (
     YearOutlookResponse,
 )
 from app.schemas.life_state import LifeStateOut
+from app.schemas.property import (
+    IMPLEMENTED_PROPERTY_INTENTS,
+    PropertyAnalysis,
+    PropertyD4Factors,
+    PropertyFactors,
+    PropertyIntent,
+    PropertyPromise,
+    PropertyRuleEvidence,
+)
 from app.schemas.user import BirthDataOut
 from app.services.cache_utils import add_and_commit_or_fetch_existing
 from app.services.chart_service import birth_datetime_utc, get_chart
@@ -400,7 +419,16 @@ _TRANSIT_OBSTRUCTION_PENALTY = 1.0
 #     trade/commerce karaka) — gated by the user's LifeState.business_state
 #     so it doesn't return a generic 7th-house reading indistinguishable
 #     from marriage_timing for someone with no stated business intent.
-_TIMING_ALGO_VERSION = 19
+# v20 — no new astrology, plain-language pass over prediction_templates'
+# natal-strength ("dignified, unafflicted"/"afflicted or debilitated" ->
+# plain strong/weak wording) and transit-obstruction ("a real caution flag
+# alongside the corroboration above, not a contradiction of it" -> a
+# self-contained caution sentence that doesn't presuppose a corroboration
+# sentence which may not even be present) reason-text sentences, plus
+# career's karaka descriptions (untranslated "karaka"/"santan" -> "the
+# classical significator for..."). Bumped purely so already-cached reason
+# text (which bakes the old wording into the stored JSON) gets recomputed.
+_TIMING_ALGO_VERSION = 20
 
 # The 7 classical planets Shadbala scores (Rahu/Ketu excluded — see
 # app.astro.shadbala's module docstring). MINIMUM_RUPAS.keys() is the public
@@ -1399,6 +1427,15 @@ async def get_life_event_timing(
         life_state is not None and life_state.business_state in ("running", "considering")
     )
 
+    # A promotion presupposes an existing job — without this gate, someone
+    # who isn't even employed (or hasn't told us either way) gets the exact
+    # same 10th-house dasha reading as someone asking a genuinely answerable
+    # promotion question, with no acknowledgment that the premise itself is
+    # unconfirmed. Same precedent as business_partnership_blocked above.
+    career_promotion_blocked = event_type == "career_promotion" and not (
+        life_state is not None and life_state.career_state == "employed"
+    )
+
     # Already expecting, with a known due date: "when will I have a child?"
     # is already resolved at the conception level — searching for a NEW
     # blind future window would be wrong. Anchor directly to whichever
@@ -1420,6 +1457,16 @@ async def get_life_event_timing(
             "अपनी व्यावसायिक स्थिति प्रोफ़ाइल में सेट करें ताकि व्यापार-साझेदारी की समयावधि मिल सके।"
             if language == "hi" else
             "Set your business status in your profile to get business-partnership timing."
+        )
+    elif career_promotion_blocked:
+        windows_out = []
+        long_term_peak_out = None
+        note_out = (
+            "पदोन्नति का समय बताने से पहले मुझे यह जानना होगा — क्या आप अभी नौकरी में हैं? अपनी करियर स्थिति "
+            "प्रोफ़ाइल में सेट करें, फिर मैं आपके लिए असली पदोन्नति समयावधि निकाल सकता/सकती हूं।"
+            if language == "hi" else
+            "Before I can talk about promotion timing — are you currently employed? Set your career status in "
+            "your profile and I can give you a real read on this."
         )
     elif expecting_override:
         expected_delivery_dt = datetime.combine(life_state.expected_delivery, datetime.min.time(), timezone.utc)
@@ -1708,12 +1755,15 @@ def _history_nudge(
     return None
 
 
-_DECISION_EVENT_TYPE: dict[str, EventType] = {"job_change": "career_promotion", "business_start": "business_partnership"}
-_DECISION_HOUSE: dict[str, int] = {"job_change": 10, "business_start": 7}
+_DECISION_EVENT_TYPE: dict[str, EventType] = {
+    "job_change": "career_promotion", "business_start": "business_partnership", "house_purchase": "property",
+}
+_DECISION_HOUSE: dict[str, int] = {"job_change": 10, "business_start": 7, "house_purchase": 4}
 
 
 async def get_decision(
-    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, decision_type: Literal["job_change", "business_start"],
+    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut,
+    decision_type: Literal["job_change", "business_start", "house_purchase"],
     language: Language,
 ) -> DecisionResponse:
     """Answers "should I do X now?" with a verdict (favorable/unfavorable/
@@ -1856,6 +1906,307 @@ async def get_decision(
         decision_type=decision_type, language=language, verdict=verdict, reasoning=reasoning,
         current_period=current_period_out, better_window=better_window_out, history_nudge=history_nudge,
     )
+
+
+async def get_marriage_decision(
+    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, language: Language,
+) -> DecisionResponse:
+    """"Should I get married now" — deliberately NOT routed through
+    get_decision's generic `_DECISION_EVENT_TYPE`/`_DECISION_HOUSE` machinery
+    the way job_change/business_start/house_purchase are. Marriage already
+    has its OWN dedicated, separately-vetted window computation
+    (get_marriage_timing -> app.astro.marriage_timing.find_marriage_windows,
+    with its own evidence levels and `stage`), and routing it through the
+    generic path too would mean a SECOND, parallel marriage-timing
+    computation that could disagree with the one marriage_timing_windows
+    already relies on. This is a thin translation layer over that single
+    existing source of truth instead — zero changes to get_decision itself."""
+    life_state_row = await get_life_state(db, profile.user_id)
+    life_state = decrypt_life_state(life_state_row) if life_state_row else None
+    if life_state is not None and life_state.marital_status == "married":
+        note = (
+            "आप पहले से ही विवाहित हैं — यह सवाल अब लागू नहीं होता।" if language == "hi" else
+            "You're already married — this decision doesn't apply anymore."
+        )
+        await log_prediction_query(
+            db, profile.user_id, "marriage_decision", None, language, {"verdict": None, "blocked": True}
+        )
+        return DecisionResponse(decision_type="marriage", language=language, verdict="neutral", reasoning=note, note=note)
+
+    timing = await get_marriage_timing(db, profile, birth, language, "future")
+    now = datetime.now(timezone.utc).date()
+    current_window = next((w for w in timing.windows if w.start_date <= now <= w.end_date), None)
+    dusthana_afflicted = current_window is not None and current_window.stage == "relationship_stress"
+
+    if dusthana_afflicted:
+        verdict: Literal["favorable", "unfavorable", "wait_for_better_window", "neutral"] = "unfavorable"
+    elif current_window is not None and current_window.evidence_level in ("house_lord_antardasha", "karaka_antardasha"):
+        verdict = "favorable"
+    elif timing.windows:
+        verdict = "wait_for_better_window"
+    else:
+        verdict = "neutral"
+
+    current_period_out = None
+    if current_window is not None:
+        current_period_out = {
+            "start_date": current_window.start_date, "end_date": current_window.end_date,
+            "mahadasha_lord": current_window.mahadasha_lord, "mahadasha_lord_name": current_window.mahadasha_lord_name,
+            "antardasha_lord": current_window.antardasha_lord, "antardasha_lord_name": current_window.antardasha_lord_name,
+            "score": current_window.score, "evidence_level": current_window.evidence_level,
+            "dusthana_afflicted": dusthana_afflicted,
+        }
+    better_window_out = None
+    if verdict == "wait_for_better_window" and timing.windows:
+        best = timing.windows[0]
+        better_window_out = {
+            "start_date": best.start_date, "end_date": best.end_date,
+            "mahadasha_lord": best.mahadasha_lord, "mahadasha_lord_name": best.mahadasha_lord_name,
+            "antardasha_lord": best.antardasha_lord, "antardasha_lord_name": best.antardasha_lord_name,
+            "score": best.score,
+        }
+
+    prior_rows = []
+    if verdict == "neutral":
+        result = await db.execute(
+            select(PredictionQueryLog)
+            .where(PredictionQueryLog.user_id == profile.user_id, PredictionQueryLog.intent == "marriage_decision")
+            .order_by(PredictionQueryLog.created_at.desc())
+            .limit(2)
+        )
+        prior_rows = result.scalars().all()
+    prior_verdicts = [row.result_summary.get("verdict") for row in prior_rows]
+    history_nudge = _history_nudge(verdict, prior_verdicts)
+    history_dates = [row.created_at.date().isoformat() for row in prior_rows] if history_nudge is not None else []
+
+    reasoning = decision_reason_text(
+        "marriage", verdict, language,
+        current_period_lord=current_window.antardasha_lord if current_window else None,
+        dusthana_afflicted=dusthana_afflicted,
+        better_window_start=better_window_out["start_date"].isoformat() if better_window_out else None,
+        history_nudge=history_nudge,
+        history_dates=history_dates,
+    )
+
+    await log_prediction_query(
+        db, profile.user_id, "marriage_decision", None, language,
+        {"verdict": verdict, "current_period_start": current_window.start_date.isoformat() if current_window else None},
+    )
+
+    return DecisionResponse(
+        decision_type="marriage", language=language, verdict=verdict, reasoning=reasoning,
+        current_period=current_period_out, better_window=better_window_out, history_nudge=history_nudge,
+    )
+
+
+def _property_evidence_out(e) -> PropertyRuleEvidence:
+    return PropertyRuleEvidence(
+        rule_id=e.rule_id, type=e.type, description=e.description,
+        source=e.source, chapter=e.chapter, verses=e.verses,
+    )
+
+
+_PROPERTY_INTENT_REFRAME = {
+    "property_sale": PROPERTY_INTENT_REFRAME_SALE,
+    "property_inheritance": PROPERTY_INTENT_REFRAME_INHERITANCE,
+    "property_relocation": PROPERTY_INTENT_REFRAME_RELOCATION,
+}
+# Maps a PropertyIntent to the label key prediction_templates._DECISION_
+# LABEL_EN/HI (and decision_reason_text's verdict-headline interpolation)
+# already use — "property_purchase" reuses "house_purchase" (Phase 5's own
+# label, unchanged) so chat.py's existing house_purchase_decision category
+# keeps its exact reasoning text; the 3 new intents get their own labels.
+_PROPERTY_INTENT_DECISION_LABEL_KEY = {
+    "property_purchase": "house_purchase", "property_sale": "property_sale",
+    "property_inheritance": "property_inheritance", "property_relocation": "property_relocation",
+}
+
+
+async def get_property_analysis(
+    db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, language: Language,
+    intent: PropertyIntent = "property_purchase", direction: Direction = "future",
+) -> PropertyAnalysis:
+    """"When will I buy my first house?" (Phase 8) and its 3 Phase-9
+    siblings — property_sale/property_inheritance/property_relocation reuse
+    the IDENTICAL BPHS Ch.48 v.2-4 signal (the 4th-lord's Dasha/Antardasha
+    is associated with acquisition of house and land), reinterpreted by
+    context rather than computed differently — see app.astro.property_
+    analysis for the full classical/derived citation discipline, and its
+    PROPERTY_INTENT_REFRAME_* constants for why the citation's own
+    description is never silently rewritten to claim something the verse
+    didn't say. The other 4 documented-but-unimplemented intents (see
+    schemas.property.IMPLEMENTED_PROPERTY_INTENTS) get an honest "not yet
+    supported" response, never a guess routed through this logic.
+
+    Reuses the "property" EventType Phase 5 already wired through the
+    generic window-scanning engine (get_life_event_timing) — zero new
+    scanning code for any of the 4 implemented intents, since they all
+    describe the SAME underlying astrological activation. What's genuinely
+    new: the natal property_promise assessment (data get_chart already
+    computed) and the current/next/medium-term/long-term framing, mirroring
+    get_marriage_decision's own "thin wrapper over the real engine"
+    precedent — plus, as of Phase 9, the D4 (Chaturthamsha) refinement
+    layer (see app.astro.vargas.chaturthamsa_sign_index)."""
+    if intent not in IMPLEMENTED_PROPERTY_INTENTS:
+        note = (
+            f"यह तरह का संपत्ति सवाल अभी समर्थित नहीं है — फ़िलहाल केवल खरीद, बिक्री, विरासत और "
+            f"स्थानांतरण को ही यह इंजन कवर करता है।" if language == "hi" else
+            f"This kind of property question ({intent.replace('property_', '')}) isn't supported by "
+            "this engine yet — only purchase, sale, inheritance, and relocation are currently covered."
+        )
+        await log_prediction_query(
+            db, profile.user_id, "property_analysis", None, language, {"intent": intent, "blocked": True}
+        )
+        return PropertyAnalysis(intent=intent, language=language, note=note)
+
+    life_state_row = await get_life_state(db, profile.user_id)
+    life_state = decrypt_life_state(life_state_row) if life_state_row else None
+
+    d1 = await get_chart(db, profile, birth, "D1")
+    fourth_lord = house_lord(4, d1.lagna_sign_index)
+    fourth_lord_planet = next(p for p in d1.planets if p.planet == fourth_lord)
+    mars_planet = next(p for p in d1.planets if p.planet == "Ma")
+    names = PLANET_NAMES_HI if language == "hi" else PLANET_NAMES_EN
+
+    fourth_lord_dignity = fourth_lord_planet.dignity or "neutral"
+    fourth_lord_combust = bool(fourth_lord_planet.combust)
+
+    # Phase 9 — D4 refinement layer: only computable when the D1 chart's
+    # degree-in-sign is available (absent on old cached rows) — honestly
+    # skipped, never guessed, when it isn't.
+    d4_factors = None
+    fourth_lord_d4_dignity = None
+    if fourth_lord_planet.degree_in_sign is not None:
+        fourth_lord_longitude = fourth_lord_planet.sign_index * 30 + fourth_lord_planet.degree_in_sign
+        fourth_lord_d4_sign = chaturthamsa_sign_index(fourth_lord_longitude)
+        fourth_lord_d4_dignity = planet_dignity(fourth_lord, fourth_lord_d4_sign)
+        d4_factors = PropertyD4Factors(
+            fourth_lord_d4_sign_index=fourth_lord_d4_sign,
+            fourth_lord_d4_dignity=fourth_lord_d4_dignity,
+            confirmed=fourth_lord_d4_dignity in ("exalted", "own_sign"),
+        )
+
+    promise = compute_property_promise(fourth_lord_dignity, fourth_lord_combust, fourth_lord_d4_dignity)
+
+    factors = PropertyFactors(
+        fourth_lord=fourth_lord, fourth_lord_name=names[fourth_lord],
+        fourth_lord_dignity=fourth_lord_dignity, fourth_lord_combust=fourth_lord_combust,
+        planets_in_fourth_house=[p.planet for p in d1.planets if p.house == 4],
+        mars_dignity=mars_planet.dignity or "neutral", d4=d4_factors,
+    )
+    property_promise_out = PropertyPromise(
+        status=promise.status, evidence=[_property_evidence_out(e) for e in promise.evidence]
+    )
+
+    # Spec §9: already owning property doesn't make a PURCHASE question moot
+    # the way "already married" does for marriage_decision — it's a real
+    # clarifying-question case (another/investment property?), handled by
+    # chat_understanding's gap-check, not a hard block here; SALE is the
+    # inverse case (can't sell what's never been indicated as owned).
+    # INHERITANCE/RELOCATION carry no such life-state gate.
+    note = None
+    if intent == "property_purchase" and life_state is not None and life_state.housing_status == "owns_property":
+        note = (
+            "आपने बताया है कि आपके पास पहले से ही एक संपत्ति है — यह विश्लेषण मान रहा है कि आप किसी "
+            "अतिरिक्त या दूसरी संपत्ति के बारे में पूछ रहे हैं।" if language == "hi" else
+            "You've indicated you already own property — this reading assumes you're asking about "
+            "an additional or investment property, not a first home."
+        )
+    elif intent == "property_sale" and (life_state is None or life_state.housing_status != "owns_property"):
+        note = (
+            "आपने प्रोफ़ाइल में संपत्ति के मालिक होने का ज़िक्र नहीं किया है — यह विश्लेषण मान रहा है कि आप "
+            "काल्पनिक रूप से पूछ रहे हैं, या यह संपत्ति अभी आपकी प्रोफ़ाइल में दर्ज नहीं है।" if language == "hi" else
+            "You haven't indicated owning property in your profile — this reading assumes you're "
+            "asking hypothetically, or about a property not yet reflected there."
+        )
+
+    timing = await get_life_event_timing(db, profile, birth, "property", language, direction)
+
+    await log_prediction_query(
+        db, profile.user_id, "property_analysis", direction, language,
+        {"intent": intent, "property_promise_status": promise.status, "window_count": len(timing.windows)},
+    )
+
+    if direction == "past":
+        return PropertyAnalysis(
+            intent=intent, language=language, property_promise=property_promise_out,
+            property_factors=factors, historical_windows=timing.windows, note=note,
+        )
+
+    # Spec §8: current / next relevant / medium-term / long-term peak — four
+    # genuinely distinct, already-computed windows (never a fabricated
+    # date), chronologically ordered so "next" really means nearest-future,
+    # not just highest-scored. `long_term_peak` is the engine's own
+    # existing field, passed through as-is.
+    windows_by_date = sorted(timing.windows, key=lambda w: w.start_date)
+    today = date.today()
+    current_period = next((w for w in windows_by_date if w.start_date <= today <= w.end_date), None)
+    remaining = [w for w in windows_by_date if w is not current_period and w.start_date > today]
+    next_relevant_window = remaining[0] if remaining else None
+    medium_term_window = remaining[1] if len(remaining) > 1 else None
+
+    # Spec §16: astro_strength/event_confidence are the primary window's
+    # OWN already-computed score/confidence, relabeled — never a new number.
+    primary = current_period or next_relevant_window
+    astro_strength = primary.score if primary else None
+    event_confidence = primary.confidence if primary else None
+
+    evidence: list[PropertyRuleEvidence] = []
+    if primary is not None:
+        if primary.evidence_level == "house_lord_antardasha":
+            evidence.append(_property_evidence_out(BPHS_48_2_4))
+        elif primary.evidence_level == "karaka_antardasha":
+            evidence.append(_property_evidence_out(PROPERTY_KARAKA_MARS_SATURN))
+        evidence.append(_property_evidence_out(PROPERTY_TIMING_WINDOWS))
+        if intent in _PROPERTY_INTENT_REFRAME:
+            evidence.append(_property_evidence_out(_PROPERTY_INTENT_REFRAME[intent]))
+
+    return PropertyAnalysis(
+        intent=intent, language=language,
+        property_promise=property_promise_out, property_factors=factors,
+        current_period=current_period, next_relevant_window=next_relevant_window,
+        medium_term_window=medium_term_window, long_term_peak=timing.long_term_peak,
+        astro_strength=astro_strength, event_confidence=event_confidence,
+        evidence=evidence, note=note,
+    )
+
+
+def property_analysis_decision_view(analysis: PropertyAnalysis, language: Language) -> dict:
+    """Derives a DecisionResponse-compatible dict (verdict/reasoning/
+    current_period/better_window/history_nudge/note) from an ALREADY-
+    computed PropertyAnalysis — pure, no DB/engine calls — so chat.py's
+    deterministic TemplateInterpreter path (which expects that exact shape,
+    same as job_change_decision/business_start_decision) works for all 4
+    implemented intents unchanged. See get_property_analysis for how the
+    analysis itself is computed."""
+    label_key = _PROPERTY_INTENT_DECISION_LABEL_KEY.get(analysis.intent, "house_purchase")
+    if analysis.note:
+        verdict: Literal["favorable", "unfavorable", "wait_for_better_window", "neutral"] = "neutral"
+        reasoning = analysis.note
+    else:
+        if analysis.current_period is not None and analysis.current_period.evidence_level in (
+            "house_lord_antardasha", "karaka_antardasha"
+        ):
+            verdict = "favorable"
+        elif analysis.next_relevant_window is not None:
+            verdict = "wait_for_better_window"
+        else:
+            verdict = "neutral"
+        reasoning = decision_reason_text(
+            label_key, verdict, language,
+            current_period_lord=analysis.current_period.antardasha_lord if analysis.current_period else None,
+            dusthana_afflicted=False,
+            better_window_start=analysis.next_relevant_window.start_date.isoformat() if analysis.next_relevant_window else None,
+            history_nudge=None, history_dates=[],
+        )
+    return {
+        "verdict": verdict,
+        "reasoning": reasoning,
+        "current_period": analysis.current_period.model_dump(mode="json") if analysis.current_period else None,
+        "better_window": analysis.next_relevant_window.model_dump(mode="json") if analysis.next_relevant_window else None,
+        "history_nudge": None,
+        "note": analysis.note,
+    }
 
 
 def _life_theme_select_stmt(profile: BirthProfile, target_date: date, language: Language):

@@ -230,7 +230,7 @@ class DecisionResponse(BaseModel):
     """Answers "should I do X now?" with a verdict, not a list of windows —
     see app.services.prediction_service.get_decision."""
 
-    decision_type: Literal["job_change", "business_start"]
+    decision_type: Literal["job_change", "business_start", "house_purchase", "marriage"]
     language: str
     verdict: Literal["favorable", "unfavorable", "wait_for_better_window", "neutral"]
     reasoning: str

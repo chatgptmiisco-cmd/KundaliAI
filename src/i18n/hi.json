@@ -201,6 +201,7 @@
     "upgrade": "प्लान अपग्रेड करें",
     "cancel": "रद्द करें",
     "tryAgain": "फिर से कोशिश करें",
+    "thanks": "धन्यवाद!",
     "contactSupport": "सहायता से संपर्क करें",
     "loading": "लोड हो रहा है…",
     "seeFullKundali": "पूरी कुंडली देखें",
@@ -234,7 +235,8 @@
     "profileButtonLabel": "प्रोफ़ाइल और जन्म विवरण",
     "focusMeaningLabel": "इसका मतलब",
     "focusAvoidLabel": "आज बचें",
-    "focusDoLabel": "आज इस पर ध्यान दें"
+    "focusDoLabel": "आज इस पर ध्यान दें",
+    "followUpCardTitle": "एक मिनट है? अपने {{topic}} के बारे में और बताएं"
   },
   "kundali": {
     "screenTitle": "पूर्ण कुंडली",
@@ -433,6 +435,7 @@
     "planLabel": "मौजूदा प्लान",
     "savedMessage": "सहेजा गया। इन विवरणों के साथ आपकी कुंडली फिर से तैयार की जाएगी।",
     "languageLabel": "ऐप की भाषा",
+    "personalizationScoreLabel": "{{score}}% आपके अनुसार व्यक्तिगत",
     "creditsLabel": "चैट क्रेडिट",
     "unlimitedCredits": "असीमित चैट क्रेडिट",
     "buyCredits": "और क्रेडिट खरीदें",
@@ -481,6 +484,10 @@
     "screenTitle": "मेरी लाइफ टाइमलाइन",
     "loadError": "अभी आपकी टाइमलाइन लोड नहीं हो पाई।",
     "empty": "अभी टाइमलाइन में कुछ नहीं है — चैट में बताई गई ज़रूरी बातें (नई नौकरी, शिफ्टिंग, कोई बड़ा फ़ैसला) यहां दिखेंगी।"
+  },
+  "followUp": {
+    "screenTitle": "एक छोटा सवाल",
+    "thanksMessage": "धन्यवाद — इससे आपकी रीडिंग और व्यक्तिगत बनती है।"
   },
   "rishi": {
     "unlimitedMessages": "असीमित संदेश",

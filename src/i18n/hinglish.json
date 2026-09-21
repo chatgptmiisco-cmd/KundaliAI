@@ -201,6 +201,7 @@
     "upgrade": "Plan upgrade karein",
     "cancel": "Cancel",
     "tryAgain": "Phir try karein",
+    "thanks": "Thanks!",
     "contactSupport": "Support se contact karein",
     "loading": "Load ho raha hai…",
     "seeFullKundali": "Poori kundali dekhein",
@@ -234,7 +235,8 @@
     "profileButtonLabel": "Profile aur birth details",
     "focusMeaningLabel": "Iska matlab",
     "focusAvoidLabel": "Aaj bachein",
-    "focusDoLabel": "Aaj isme dhyan dein"
+    "focusDoLabel": "Aaj isme dhyan dein",
+    "followUpCardTitle": "Ek minute hai? Apne {{topic}} ke baare mein aur batayein"
   },
   "kundali": {
     "screenTitle": "Complete Kundali",
@@ -433,6 +435,7 @@
     "planLabel": "Current plan",
     "savedMessage": "Saved. In details ke saath aapki kundali fresh taiyaar hogi.",
     "languageLabel": "App ki language",
+    "personalizationScoreLabel": "{{score}}% aapke hisaab se personalized",
     "creditsLabel": "chat credits",
     "unlimitedCredits": "Unlimited chat credits",
     "buyCredits": "Aur credits khareedein",
@@ -481,6 +484,10 @@
     "screenTitle": "Meri Life Timeline",
     "loadError": "Abhi aapki timeline load nahi ho paayi.",
     "empty": "Abhi timeline mein kuch nahi hai — chat mein batayi gayi zaroori baatein (nayi job, shifting, koi bada faisla) yahan dikhengi."
+  },
+  "followUp": {
+    "screenTitle": "Ek chhota sawal",
+    "thanksMessage": "Thanks — isse aapki readings aur personal ban jaati hain."
   },
   "rishi": {
     "unlimitedMessages": "Unlimited messages",

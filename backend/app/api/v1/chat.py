@@ -5,13 +5,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_birth_profile, require_tier
+from app.astro.natal_insights import compute_natal_insights
 from app.core.rate_limit import limiter
 from app.db.base import get_db
 from app.db.models.birth_profile import BirthProfile
 from app.db.models.chat import ChatMessage
 from app.db.models.user import User
 from app.schemas.voice import ChatMessageIn, ChatMessageOut
-from app.services import life_context_service, prediction_service, user_service
+from app.services import (
+    important_date_service, life_context_service, life_pattern_service, prediction_feedback_service,
+    prediction_service, user_service,
+)
 from app.services.chart_service import get_chart
 from app.services.chat_understanding import classify_message, compute_out_of_domain_redirects, relevant_domains
 from app.services.daily_reading_service import get_daily_reading
@@ -23,7 +27,9 @@ from app.services.interpretation.templates import (
     _TOPIC_TIMING_COUNTERPART,
     build_greeting_reply,
     detect_answering_rishi,
+    message_is_affirmative_reply,
     message_is_greeting,
+    message_is_negative_reply,
     message_mentions_past_tense,
     resolve_past_reference,
 )
@@ -45,6 +51,13 @@ _LIFE_EVENT_CHECKS = (
 _DECISION_CHECKS = (
     ("job_change", "job_change_decision"),
     ("business_start", "business_start_decision"),
+    # house_purchase (Phase 5) is generic in prediction_service.get_decision
+    # (new EventType="property" + karakas), but Phase 8 pulled
+    # house_purchase_decision OUT of this loop — it now gets its own block
+    # below (like marriage_decision) calling the richer, reference-based
+    # get_property_analysis instead. get_decision itself still supports
+    # "house_purchase" unchanged, for the plain /prediction/decision REST
+    # endpoint's existing contract.
 )
 # Reverse of _TOPIC_TIMING_COUNTERPART ({"career": "career_timing", ...}) —
 # used below to also fetch real timing windows when the plain topic was
@@ -52,10 +65,24 @@ _DECISION_CHECKS = (
 # never separately asked "when", so the reply can include a genuine future
 # timeline alongside the static house-based read.
 _TIMING_TO_TOPIC = {v: k for k, v in _TOPIC_TIMING_COUNTERPART.items()}
+# Which life_pattern_service correlation domain each category maps to — see
+# life_pattern_service._EVENT_TYPE_DOMAIN for the matching LifeEvent types.
+_PATTERN_DOMAIN_BY_CATEGORY = {
+    "career_timing": "career", "career_promotion_timing": "career",
+    "job_change_decision": "career", "business_start_decision": "career",
+    "marriage_timing": "relationships", "children_timing": "family",
+    "marriage_decision": "relationships",
+}
 
 
-_DECISION_LABEL_EN = {"job_change": "leaving your job", "business_start": "starting your business"}
-_DECISION_LABEL_HI = {"job_change": "नौकरी छोड़ने", "business_start": "अपना व्यवसाय शुरू करने"}
+_DECISION_LABEL_EN = {
+    "job_change": "leaving your job", "business_start": "starting your business",
+    "house_purchase": "buying a house", "marriage": "getting married",
+}
+_DECISION_LABEL_HI = {
+    "job_change": "नौकरी छोड़ने", "business_start": "अपना व्यवसाय शुरू करने",
+    "house_purchase": "घर खरीदने", "marriage": "विवाह करने",
+}
 
 
 def _build_outcome_checkin_question(decision, language: str) -> str:
@@ -89,6 +116,138 @@ def _build_reconfirm_question(item, language: str) -> str:
         )
     prefix = "Ek chhota check — " if language == "hinglish" else "Quick check-in — "
     return f"{prefix}you'd mentioned this a while back: \"{item.value}\". Still the case, or has it changed?"
+
+
+def _build_important_date_checkin_question(item, language: str) -> str:
+    """Phase 5 — deterministic (not LLM-written), same reasoning as
+    _build_outcome_checkin_question/_build_reconfirm_question above: this
+    exact text becomes the most recent assistant turn in history, so
+    chat_understanding can reliably recognize a reply to it as answering
+    this specific date rather than starting a new topic."""
+    date_str = item.target_date.isoformat()
+    if language == "hi":
+        return f"वैसे, आपने \"{item.description}\" ({date_str}) का ज़िक्र किया था — उसका क्या हुआ?"
+    prefix = "Waise, " if language == "hinglish" else "By the way — "
+    return f"{prefix}you'd mentioned \"{item.description}\" around {date_str}. How did that go?"
+
+
+def _window_context(w) -> dict:
+    """A MarriageWindow/LifeEventWindow, trimmed to what the chat LLM
+    actually needs — previously only start/end/reason/antardasha_lord_name/
+    transit_corroborated reached this far, discarding evidence_level/
+    confidence/literal_event_plausible/peak_window even though the engine
+    already computes all of them on every window. See openai_interpreter.
+    chat_reply's prompt for how these get used (hedge on weak evidence,
+    reinterpret when a literal reading isn't age-plausible)."""
+    out = {
+        "start_date": w.start_date.isoformat(),
+        "end_date": w.end_date.isoformat(),
+        "reason": w.reason,
+        "antardasha_lord_name": w.antardasha_lord_name,
+        "transit_corroborated": w.transit_corroborated,
+        "evidence_level": w.evidence_level,
+        "confidence": w.confidence,
+        "literal_event_plausible": w.literal_event_plausible,
+    }
+    if w.peak_window:
+        out["peak_window"] = {
+            "start_date": w.peak_window.start_date.isoformat(),
+            "end_date": w.peak_window.end_date.isoformat(),
+        }
+    return out
+
+
+def _long_term_peak_context(peak) -> dict:
+    return {
+        "start_date": peak.start_date.isoformat(),
+        "end_date": peak.end_date.isoformat(),
+        "antardasha_lord_name": peak.antardasha_lord_name,
+    }
+
+
+# Product spec §13/§17 — a vague "what happened in my past" defaults to the
+# recent past — PRIMARILY the last 5 years, widening to 10 only when
+# nothing at all falls in that tighter window (never further, and never
+# past the user's own birth year) — rather than surfacing a childhood-era
+# window just because it happens to score highest classically.
+_RECENT_PAST_YEARS_PRIMARY = 5
+_RECENT_PAST_YEARS_FALLBACK = 10
+_CONFIDENCE_RANK = {"strong": 2, "moderate": 1, "low": 0}
+# Product spec §20 — Cross-Domain Events: how much two windows' date ranges
+# have to overlap (as a fraction of the SHORTER one) before they're treated
+# as one combined life theme rather than two unrelated candidates the
+# selection logic just picks the stronger of.
+_OVERLAP_FRACTION_THRESHOLD = 0.3
+
+
+def _best_recent_window(windows, horizon_start_year: int):
+    recent = [w for w in windows if w.start_date.year >= horizon_start_year]
+    if not recent:
+        return None
+    return max(recent, key=lambda w: (_CONFIDENCE_RANK[w.confidence], w.score))
+
+
+def _overlap_fraction(a, b) -> float:
+    overlap_days = (min(a.end_date, b.end_date) - max(a.start_date, b.start_date)).days
+    if overlap_days <= 0:
+        return 0.0
+    shorter_days = min((a.end_date - a.start_date).days, (b.end_date - b.start_date).days)
+    return overlap_days / shorter_days if shorter_days > 0 else 0.0
+
+
+async def _recent_past_candidate(db, profile, birth, language: str) -> dict | None:
+    """The best real candidate(s) — career and/or marriage/relationship —
+    for an open-ended past question, reusing the exact same past-direction
+    engine calls chat.py already makes for explicit timing questions — no
+    new astrology, just a different selection rule (recency-preferring, not
+    highest-score-anywhere) applied to windows the engine already computed.
+    When the two domains' best recent windows genuinely overlap in time
+    (see _OVERLAP_FRACTION_THRESHOLD), returns ONE combined candidate
+    spanning both (product spec §20 — Cross-Domain Events) instead of
+    picking whichever domain scored higher and discarding the other."""
+    current_year = datetime.now(timezone.utc).year
+
+    marriage_timing = await prediction_service.get_marriage_timing(db, profile, birth, language, "past")
+    career_timing = await prediction_service.get_life_event_timing(db, profile, birth, "career", language, "past")
+
+    # Two passes over the SAME already-fetched windows — no new engine
+    # calls — preferring the tighter, more memorable 5-year horizon and
+    # only widening to 10 when nothing at all falls in it.
+    relationship_best = career_best = None
+    for years_back in (_RECENT_PAST_YEARS_PRIMARY, _RECENT_PAST_YEARS_FALLBACK):
+        horizon_start_year = max(birth.date_of_birth.year, current_year - years_back)
+        relationship_best = _best_recent_window(marriage_timing.windows, horizon_start_year)
+        career_best = _best_recent_window(career_timing.windows, horizon_start_year)
+        if relationship_best is not None or career_best is not None:
+            break
+
+    if relationship_best is not None and career_best is not None:
+        if _overlap_fraction(relationship_best, career_best) >= _OVERLAP_FRACTION_THRESHOLD:
+            start = max(relationship_best.start_date, career_best.start_date)
+            end = min(relationship_best.end_date, career_best.end_date)
+            confidence = min(
+                relationship_best.confidence, career_best.confidence, key=lambda c: _CONFIDENCE_RANK[c]
+            )
+            return {
+                "domains": ["career", "relationships"],
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+                "reason": f"{career_best.reason} At the same time: {relationship_best.reason}",
+                "confidence": confidence,
+            }
+
+    named = [("career", career_best), ("relationships", relationship_best)]
+    named = [(domain, w) for domain, w in named if w is not None]
+    if not named:
+        return None
+    domain, best = max(named, key=lambda pair: (_CONFIDENCE_RANK[pair[1].confidence], pair[1].score))
+    return {
+        "domains": [domain],
+        "start_date": best.start_date.isoformat(),
+        "end_date": best.end_date.isoformat(),
+        "reason": best.reason,
+        "confidence": best.confidence,
+    }
 
 
 def _planet_technical(chart, planet_code: str, hi: bool) -> dict:
@@ -128,8 +287,64 @@ async def chat_astro(
     lagna_sign = chart.lagna_sign_name_hi if hi else chart.lagna_sign_name_en
     mahadasha_lord = (current_dasha.mahadasha.lord_name_hi if hi else current_dasha.mahadasha.lord_name_en) if current_dasha else None
     antardasha_lord = (current_dasha.antardasha.lord_name_hi if hi else current_dasha.antardasha.lord_name_en) if current_dasha else None
+    # Product spec §21 — Astrological Fingerprint: a standing, ambient
+    # personalization signal (not gated behind any one category), computed
+    # from data already in hand above — no extra DB/ephemeris cost. Reuses
+    # the SAME compute_natal_insights already relied on for the Complete
+    # Kundali screen (see kundali_service.py), never a new astrological rule.
+    natal_insights = compute_natal_insights(
+        chart.lagna_sign_index,
+        {p.planet: p.sign_index for p in chart.planets},
+        {p.planet: p.house for p in chart.planets},
+    )
+    # Phase 5 fix: NatalInsights.stress_house/stress_planet always name
+    # whichever of the 6th/8th/12th lords is LEAST-worst, even when none of
+    # the three is genuinely afflicted (severity 0 for all three) — unlike
+    # blind_spot_reason, there's no "none" signal built into the field
+    # itself. Recomputed here from the same public planet_dignity/
+    # combust_planets fields natal_insights.py's own _severity uses
+    # internally, so this only surfaces a real affliction, never an
+    # invented one — same guard as blind_spot_reason != "none" above.
+    _stress_severity = (
+        (2 if natal_insights.planet_dignity.get(natal_insights.stress_planet) == "debilitated" else 0)
+        + (1 if natal_insights.stress_planet in natal_insights.combust_planets else 0)
+    )
     context = {
         "lagna_sign": lagna_sign,
+        "strongest_planet": (
+            (chart.planet_themes[natal_insights.strongest_planet].name_hi if hi
+             else chart.planet_themes[natal_insights.strongest_planet].name_en)
+            if natal_insights.strongest_planet else None
+        ),
+        "weakest_planet": (
+            (chart.planet_themes[natal_insights.weakest_planet].name_hi if hi
+             else chart.planet_themes[natal_insights.weakest_planet].name_en)
+            if natal_insights.weakest_planet else None
+        ),
+        "decision_style": natal_insights.decision_style,
+        # A chart with no real affliction has no genuine blind spot to
+        # report — never invented just to fill the field (see
+        # NatalInsights.blind_spot_reason's "none" fallback).
+        **(
+            {
+                "blind_spot_planet": (
+                    chart.planet_themes[natal_insights.blind_spot_planet].name_hi if hi
+                    else chart.planet_themes[natal_insights.blind_spot_planet].name_en
+                ),
+                "blind_spot_reason": natal_insights.blind_spot_reason,
+            }
+            if natal_insights.blind_spot_reason != "none" else {}
+        ),
+        **(
+            {
+                "stress_house": natal_insights.stress_house,
+                "stress_planet": (
+                    chart.planet_themes[natal_insights.stress_planet].name_hi if hi
+                    else chart.planet_themes[natal_insights.stress_planet].name_en
+                ),
+            }
+            if _stress_severity > 0 else {}
+        ),
         "planets": [
             {
                 "planet": p.planet_name_hi if hi else p.planet_name_en,
@@ -220,7 +435,16 @@ async def chat_astro(
     result = await db.execute(
         select(ChatMessage)
         .where(ChatMessage.user_id == user.id, ChatMessage.rishi_id == body.rishi_id)
-        .order_by(ChatMessage.created_at.desc())
+        # `created_at` alone isn't a safe conversation-order key: it's a DB
+        # server_default(func.now()), and the user+assistant rows from one
+        # turn are always added and committed together — on SQLite that's
+        # second-granularity, so same-turn rows routinely tie and the DB is
+        # then free to return them in EITHER order, silently scrambling
+        # "who said this" for the very next request. `id` is a real
+        # autoincrement PK, so it strictly reflects insertion order and
+        # breaks every tie correctly; ordering by it directly (not just as
+        # a tiebreaker) sidesteps the granularity issue entirely.
+        .order_by(ChatMessage.id.desc())
         .limit(_HISTORY_LIMIT)
     )
     history_rows = list(reversed(result.scalars().all()))
@@ -249,6 +473,21 @@ async def chat_astro(
     stale_facts = await life_context_service.get_facts_due_for_reconfirmation(db, user.id)
     if not history_rows and not pending_checkins and stale_facts:
         reply = _build_reconfirm_question(stale_facts[0], body.language)
+        db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
+        db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id, used_personalization=True))
+        await db.commit()
+        return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=None)
+
+    # Phase 5 — an important date/goal target the user mentioned has since
+    # passed and hasn't been checked back on yet: third priority tier,
+    # same "pull on next fresh conversation" reasoning as the two checks
+    # above. See important_date_service.get_pending_checkin — this same
+    # row is reused below (fetched only once) for classify_message's
+    # benefit too, since unlike the two checks above it can also be
+    # answered later in an ongoing conversation, not just right here.
+    pending_important_date = await important_date_service.get_pending_checkin(db, user.id)
+    if not history_rows and not pending_checkins and not stale_facts and pending_important_date:
+        reply = _build_important_date_checkin_question(pending_important_date, body.language)
         db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
         db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id, used_personalization=True))
         await db.commit()
@@ -292,6 +531,36 @@ async def chat_astro(
         {"domain": stale_facts[0].domain, "key": stale_facts[0].key, "value": stale_facts[0].value}
         if stale_facts else None
     )
+    # The one deterministic table the Prediction Engine itself already
+    # gates marriage/children/business predictions on (see
+    # prediction_service's already_married/already_has_children/
+    # business_state checks) — fetched here so a conversational statement
+    # ("I got married in November") can update the SAME row a settings-form
+    # edit would, not just the free-form LifeContextItem facts below.
+    life_state_row = await user_service.get_life_state(db, user.id)
+    current_life_state = user_service.decrypt_life_state(life_state_row) if life_state_row else None
+    current_life_state_for_prompt = (
+        {
+            k: v for k, v in current_life_state.model_dump(mode="json", exclude={"version"}).items()
+            if v not in (None, 0, "none")
+        }
+        if current_life_state else None
+    )
+    # Product spec §15/§30 — a real, falsifiable past-event question the
+    # app itself asked earlier (see the life_theme branch further down and
+    # prediction_feedback_service) — fetched unconditionally, same
+    # "classify_message decides if THIS message answers it" pattern as
+    # pending_reconfirmation above, since the answer can arrive at any
+    # point in the conversation, not just at the very start.
+    pending_feedback_row = await prediction_feedback_service.get_pending_feedback(db, user.id)
+    pending_prediction_feedback_for_prompt = (
+        {"question_asked": pending_feedback_row.question_asked, "domain": pending_feedback_row.domain}
+        if pending_feedback_row else None
+    )
+    pending_important_date_for_prompt = (
+        {"description": pending_important_date.description, "target_date": pending_important_date.target_date.isoformat()}
+        if pending_important_date else None
+    )
 
     # Decides which real-life categories this message touches — an OpenAI
     # call when configured (see app.services.chat_understanding), otherwise
@@ -301,7 +570,8 @@ async def chat_astro(
     understanding = await classify_message(
         history, body.rishi_id, birth.date_of_birth.year, body.language,
         open_decisions_for_prompt, pending_checkins_for_prompt, pending_reconfirmation_for_prompt,
-        decision_known_facts_for_prompt,
+        decision_known_facts_for_prompt, current_life_state_for_prompt, pending_prediction_feedback_for_prompt,
+        pending_important_date_for_prompt,
     )
 
     if understanding.needs_clarification and understanding.clarifying_question:
@@ -330,6 +600,46 @@ async def chat_astro(
         return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=None)
 
     categories = understanding.categories
+    # Deterministic fallback for a plain yes/no reply to the career-
+    # employment gate question this endpoint itself may have just asked
+    # (see prediction_service.get_life_event_timing's career_promotion_
+    # blocked note). _fallback_understanding (used whenever OpenAI is
+    # unavailable — the state of this whole environment) only ever returns
+    # categories, never a life_state_update, so a bare "yes" would
+    # otherwise fall through every category check below and dead-end on
+    # the exact question the app asked. Matched against that note's own
+    # fixed English/Hindi text — never LLM-paraphrased on this path — so
+    # this never misfires on an unrelated yes/no. Once OpenAI is available
+    # again, classify_message's own life_state_line extraction already
+    # handles this turn correctly on its own; this only fills the gap for
+    # the no-LLM fallback.
+    _prior_assistant_message = (
+        history[-2]["content"] if len(history) >= 2 and history[-2]["role"] == "assistant" else ""
+    )
+    _asked_career_employment_gate = (
+        "are you currently employed" in _prior_assistant_message
+        or "क्या आप अभी नौकरी में हैं" in _prior_assistant_message
+    )
+    if _asked_career_employment_gate and message_is_affirmative_reply(body.message):
+        await user_service.apply_life_state_updates(db, user.id, career_state="employed")
+        if "career_promotion_timing" not in categories:
+            categories = [*categories, "career_promotion_timing"]
+    elif _asked_career_employment_gate and message_is_negative_reply(body.message):
+        await user_service.apply_life_state_updates(db, user.id, career_state="unemployed")
+        reply = (
+            "ठीक है, कोई बात नहीं — जब आप दोबारा किसी नौकरी में हों तो मुझसे पदोन्नति के समय के बारे में पूछिए।"
+            if body.language == "hi" else
+            "Got it, no worries — ask me about promotion timing again once you're back in a role."
+        )
+        db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
+        db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id))
+        await db.commit()
+        return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=None)
+    # Set inside the life_theme branch below when a vague-past-event
+    # candidate is surfaced; the actual PredictionFeedback row is only
+    # created once `reply` (the interpreter's real phrasing) exists — see
+    # that assignment.
+    pending_past_event_candidate = None
     # Every extracted fact gets recorded as structured Life Context (see
     # app.services.life_context_service) — never as a bare "confirmed"
     # fact when the model only inferred it; confidence/source travel with
@@ -365,6 +675,72 @@ async def chat_astro(
     if understanding.reconfirmed and stale_facts:
         fact = stale_facts[0]
         await life_context_service.upsert_fact(db, user.id, fact.domain, fact.key, fact.value, "high", "user_confirmed")
+    # The bridge this whole feature exists for: a life fact stated in
+    # conversation updates the SAME LifeState row prediction_service already
+    # reads to redirect marriage/children/business predictions — not just
+    # the free-form LifeContextItem facts above, which chat_reply's prose
+    # uses but the deterministic engine never sees. Partial merge (see
+    # apply_life_state_updates) so stating just one fact never wipes out
+    # other, previously-known ones.
+    if understanding.life_state_update:
+        life_state_fields = {
+            k: v for k, v in understanding.life_state_update.__dict__.items() if v is not None
+        }
+        if life_state_fields:
+            await user_service.apply_life_state_updates(db, user.id, **life_state_fields)
+    # Product spec §15/§30 — closing the loop on a real, falsifiable
+    # past-event question this endpoint asked earlier (see the life_theme
+    # branch below and prediction_feedback_service). A confirmed/partial
+    # answer becomes a real LifeEvent anchored to the WINDOW'S OWN known
+    # start year — more reliable than hoping the general events extraction
+    # above independently re-infers the year from a reply like "yes, then"
+    # that doesn't restate it. Never touches the astrology calculation
+    # itself, per the product spec's "the LLM cannot compensate for
+    # incorrect deterministic astrology" principle — this only ever
+    # records what the user said happened, as personalization context.
+    if understanding.prediction_feedback and pending_feedback_row:
+        await prediction_feedback_service.record_feedback(
+            db, user.id, pending_feedback_row.id,
+            understanding.prediction_feedback.verdict, understanding.prediction_feedback.detail,
+        )
+        # Phase 10 — surfaced so THIS SAME reply can acknowledge the
+        # resolution honestly (spec §41/§42: never defend a wrong
+        # prediction, never silently ignore that it was just resolved).
+        # Absent on every other turn — same "only present when relevant"
+        # convention as blind_spot_planet etc.
+        context["resolved_prediction_feedback"] = {
+            "verdict": understanding.prediction_feedback.verdict,
+            "domain": pending_feedback_row.domain,
+            "question_asked": pending_feedback_row.question_asked,
+        }
+        if understanding.prediction_feedback.verdict in ("correct", "partial") and understanding.prediction_feedback.detail:
+            await life_context_service.add_event(
+                db, user.id, "other", understanding.prediction_feedback.detail,
+                pending_feedback_row.window_start.year,
+            )
+    # Phase 5 — a real future date/goal the user just stated (see the
+    # important_date_update extraction instruction) gets recorded; a
+    # malformed target_date from the LLM is dropped rather than crashing
+    # the request, same "sanitize at the service boundary" convention as
+    # user_service._sanitize_life_state_fields.
+    if understanding.important_date_update:
+        try:
+            parsed_date = date.fromisoformat(understanding.important_date_update.target_date)
+        except ValueError:
+            parsed_date = None
+        if parsed_date is not None:
+            await important_date_service.add_important_date(
+                db, user.id, understanding.important_date_update.domain,
+                understanding.important_date_update.description, parsed_date,
+            )
+    # Closing the loop on an important-date check-in this endpoint asked
+    # earlier (see the pending_important_date early-return above) — same
+    # "confirmed answer becomes a real LifeEvent" convention as prediction_
+    # feedback just above.
+    if understanding.important_date_outcome and pending_important_date:
+        await important_date_service.resolve_important_date(
+            db, user.id, pending_important_date.id, understanding.important_date_outcome,
+        )
 
     # A past-tense question ("why did my marriage get delayed", "was there a
     # good period for X") searches backward (birth-to-now) instead of
@@ -380,16 +756,9 @@ async def chat_astro(
     if "marriage_timing" in categories or "marriage" in categories:
         marriage_timing = await prediction_service.get_marriage_timing(db, profile, birth, body.language, direction)
         context["marriage_timing_direction"] = direction
-        context["marriage_timing_windows"] = [
-            {
-                "start_date": w.start_date.isoformat(),
-                "end_date": w.end_date.isoformat(),
-                "reason": w.reason,
-                "antardasha_lord_name": w.antardasha_lord_name,
-                "transit_corroborated": w.transit_corroborated,
-            }
-            for w in marriage_timing.windows
-        ]
+        context["marriage_timing_windows"] = [_window_context(w) for w in marriage_timing.windows]
+        if marriage_timing.long_term_peak:
+            context["marriage_timing_long_term_peak"] = _long_term_peak_context(marriage_timing.long_term_peak)
 
     # Career/wealth/children/foreign-travel timing — same conditional-fetch
     # pattern as marriage timing above, one block per event type since each
@@ -407,16 +776,9 @@ async def chat_astro(
                 db, profile, birth, event_type, body.language, direction
             )
             context[f"{category}_direction"] = direction
-            context[f"{category}_windows"] = [
-                {
-                    "start_date": w.start_date.isoformat(),
-                    "end_date": w.end_date.isoformat(),
-                    "reason": w.reason,
-                    "antardasha_lord_name": w.antardasha_lord_name,
-                    "transit_corroborated": w.transit_corroborated,
-                }
-                for w in life_event.windows
-            ]
+            context[f"{category}_windows"] = [_window_context(w) for w in life_event.windows]
+            if life_event.long_term_peak:
+                context[f"{category}_long_term_peak"] = _long_term_peak_context(life_event.long_term_peak)
             if life_event.note:
                 context[f"{category}_note"] = life_event.note
 
@@ -444,6 +806,130 @@ async def chat_astro(
             # were exploring this" instead of re-deriving it from scratch.
             await life_context_service.upsert_decision(db, user.id, category, body.message)
 
+    # "Should I relocate?" — relocation_decision has no get_decision verdict
+    # engine behind it (see life_context_service._DECISION_TYPE_BY_CATEGORY's
+    # comment: no classical house-rule maps "should you move" the way
+    # house-lord dasha timing does for job_change/business_start). Reuses the
+    # SAME foreign_travel life-event-timing signal the foreign_travel_timing
+    # category above already surfaces, rather than inventing a new
+    # astrological rule. Still tracked as a real Decision Memory row so
+    # outcome follow-ups and gap-filling generalize to it exactly like the
+    # two get_decision-backed types (both already read generically off
+    # life_context_service's category<->type map).
+    if "relocation_decision" in categories:
+        # Same flat {category}_windows/_direction/_note/_long_term_peak
+        # context shape as the _LIFE_EVENT_CHECKS loop above (not a
+        # get_decision-style verdict dict) — both openai_interpreter._chat_
+        # facts' suffix loop and templates._life_event_chat_answer already
+        # pick these up generically by category name, needing no extra
+        # per-category wiring in either place.
+        relocation_timing = await prediction_service.get_life_event_timing(
+            db, profile, birth, "foreign_travel", body.language, direction
+        )
+        context["relocation_decision_direction"] = direction
+        context["relocation_decision_windows"] = [_window_context(w) for w in relocation_timing.windows]
+        if relocation_timing.long_term_peak:
+            context["relocation_decision_long_term_peak"] = _long_term_peak_context(relocation_timing.long_term_peak)
+        if relocation_timing.note:
+            context["relocation_decision_note"] = relocation_timing.note
+        await life_context_service.upsert_decision(db, user.id, "relocation_decision", body.message)
+
+    # "Should I get married now?" — deliberately NOT part of the generic
+    # _DECISION_CHECKS loop above (unlike house_purchase_decision): marriage
+    # already has its OWN dedicated, separately-vetted timing computation
+    # (get_marriage_timing), so this calls a thin wrapper over THAT (see
+    # prediction_service.get_marriage_decision) instead of routing through
+    # get_decision's generic engine, which would mean a second, parallel
+    # marriage-timing computation that could disagree with the one
+    # marriage_timing_windows already relies on.
+    if "marriage_decision" in categories:
+        marriage_decision = await prediction_service.get_marriage_decision(db, profile, birth, body.language)
+        context["marriage_decision"] = {
+            "verdict": marriage_decision.verdict,
+            "reasoning": marriage_decision.reasoning,
+            "current_period": marriage_decision.current_period.model_dump(mode="json") if marriage_decision.current_period else None,
+            "better_window": marriage_decision.better_window.model_dump(mode="json") if marriage_decision.better_window else None,
+            "history_nudge": marriage_decision.history_nudge,
+            "note": marriage_decision.note,
+        }
+        await life_context_service.upsert_decision(db, user.id, "marriage_decision", body.message)
+
+    # "Should I buy a house now?" — Phase 8: house_purchase_decision was
+    # pulled OUT of the generic _DECISION_CHECKS loop (unlike Phase 5) to
+    # call the richer, reference-based get_property_analysis instead (see
+    # its own docstring for the BPHS Ch.48 v.2-4 citation and the full
+    # classical/derived evidence discipline). Still builds a
+    # DecisionResponse-compatible context["house_purchase_decision"] dict
+    # (verdict/reasoning/current_period/better_window) so the existing
+    # deterministic TemplateInterpreter path needs zero changes, PLUS the
+    # full rich structure under its own key for the LLM path.
+    if "house_purchase_decision" in categories:
+        property_analysis = await prediction_service.get_property_analysis(
+            db, profile, birth, body.language, "property_purchase", direction
+        )
+        context["house_purchase_decision"] = prediction_service.property_analysis_decision_view(
+            property_analysis, body.language
+        )
+        # The full rich structure (property_promise/evidence/medium_term_
+        # window/long_term_peak/astro_strength/event_confidence) — LLM-path
+        # only, same convention as every other *_windows fact's extra
+        # evidence_level/confidence/literal_event_plausible detail.
+        context["property_purchase_analysis"] = property_analysis.model_dump(mode="json")
+        await life_context_service.upsert_decision(db, user.id, "house_purchase_decision", body.message)
+
+    # Phase 9 — property_sale/property_inheritance/property_relocation:
+    # the SAME reference-based engine as house_purchase_decision above
+    # (identical BPHS Ch.48 v.2-4 signal, reinterpreted by intent — see
+    # get_property_analysis's own docstring), but NOT tracked as a
+    # LifeDecision (these are timing-support questions, not a "should I..."
+    # choice the way job/business/marriage/house-purchase decisions are —
+    # the existing Outcome Follow-Up convention doesn't fit "when might I
+    # inherit property").
+    for category, intent in (
+        ("property_sale_intent", "property_sale"),
+        ("property_inheritance_intent", "property_inheritance"),
+        ("property_relocation_intent", "property_relocation"),
+    ):
+        if category in categories:
+            property_intent_analysis = await prediction_service.get_property_analysis(
+                db, profile, birth, body.language, intent, direction
+            )
+            context[category] = prediction_service.property_analysis_decision_view(
+                property_intent_analysis, body.language
+            )
+            context[f"{category}_full"] = property_intent_analysis.model_dump(mode="json")
+
+    # Product spec's "richer correlations" — does the user's OWN confirmed
+    # history (never inferred facts) share a dasha lord across 2+ real past
+    # events in this same life area? Computed once per domain (not once per
+    # category — several categories below share a domain), then attached to
+    # every category currently asked about that maps to it. See
+    # life_pattern_service for why this is a plain historical correlation,
+    # never a new astrological rule.
+    pattern_domains_needed = {
+        _PATTERN_DOMAIN_BY_CATEGORY[c] for c in categories if c in _PATTERN_DOMAIN_BY_CATEGORY
+    }
+    for pattern_domain in pattern_domains_needed:
+        pattern = await life_pattern_service.get_recurring_dasha_pattern(db, profile, birth, user.id, pattern_domain)
+        if pattern is None:
+            continue
+
+        def _lord_name(code: str | None) -> str | None:
+            if code is None:
+                return None
+            return chart.planet_themes[code].name_hi if hi else chart.planet_themes[code].name_en
+
+        display_pattern = {
+            "domain": pattern["domain"],
+            "shared_mahadasha_lord": _lord_name(pattern["shared_mahadasha_lord"]),
+            "shared_mahadasha_count": pattern["shared_mahadasha_count"],
+            "shared_antardasha_lord": _lord_name(pattern["shared_antardasha_lord"]),
+            "shared_antardasha_count": pattern["shared_antardasha_count"],
+        }
+        for category in categories:
+            if _PATTERN_DOMAIN_BY_CATEGORY.get(category) == pattern_domain:
+                context[f"{category}_personal_pattern"] = display_pattern
+
     # The general "what was going on then" reflection — only fires when a
     # past reference actually resolves to a real date (never guessed).
     # _detect_categories/classify_message both only add "life_theme" when
@@ -454,6 +940,31 @@ async def chat_astro(
         if target_date is not None:
             life_theme = await prediction_service.get_life_theme(db, profile, birth, target_date, body.language)
             context["life_theme"] = {"theme": life_theme.theme, "rating": life_theme.rating}
+        elif message_mentions_past_tense(body.message):
+            # Product spec §13 — "Past Event Mode": a genuinely open-ended
+            # past question ("tell me something important that happened in
+            # my past") has no explicit anchor for resolve_past_reference to
+            # latch onto, so this branch used to simply do nothing — no
+            # engine call, no candidate, a generic reply with nothing
+            # chart-specific to say. Reuses the SAME past-direction engine
+            # calls already used for explicit timing questions (no new
+            # engine code) across career + marriage, prefers a candidate
+            # within the recent-past horizon below (age-aware: never older
+            # than the user's own birth year) over an old/childhood one, and
+            # surfaces it as a specific, falsifiable candidate to ask about
+            # — never as a stated fact.
+            candidate = await _recent_past_candidate(db, profile, birth, body.language)
+            if candidate is not None:
+                context["past_event_candidate"] = candidate
+                # The actual PredictionFeedback row is created further down,
+                # AFTER the interpreter has generated its real reply — the
+                # question the user actually sees is the LLM's own phrasing
+                # of this candidate, not `candidate["reason"]` (the engine's
+                # internal astrological justification, which reads nothing
+                # like a question and badly confused classify_message's
+                # later "is this message answering that" check when it was
+                # stored as question_asked instead).
+                pending_past_event_candidate = candidate
 
     if "year_ahead" in categories:
         current_year = datetime.now(timezone.utc).year
@@ -493,11 +1004,27 @@ async def chat_astro(
     context["open_decisions"] = [
         {"decision_type": d.decision_type, "context": d.context, "created_at": d.created_at.isoformat()}
         for d in open_decision_objs
-        if d.decision_type in {dt for dt, cat in _DECISION_CHECKS if cat in categories}
+        # Generalized off life_context_service's own category<->type map (not
+        # just _DECISION_CHECKS) so this also covers relocation_decision,
+        # which has no get_decision verdict engine behind it.
+        if life_context_service.CATEGORY_BY_DECISION_TYPE.get(d.decision_type) in categories
     ]
 
     interpreter = get_interpreter()
     reply = await interpreter.chat_reply(history, context, body.language)
+    # Product spec §15/§30 — tracked using the REPLY THAT WAS ACTUALLY
+    # SHOWN (truncated) as question_asked, not the engine's internal
+    # reason text — that's what a later classify_message call needs to
+    # recognize a reply as answering "the thing chat.py asked", since it's
+    # what actually appears as the assistant's last turn in history.
+    if pending_past_event_candidate is not None:
+        candidate = pending_past_event_candidate
+        await prediction_feedback_service.create_pending_feedback(
+            db, user.id, "+".join(candidate["domains"]),
+            datetime.combine(date.fromisoformat(candidate["start_date"]), datetime.min.time(), tzinfo=timezone.utc),
+            datetime.combine(date.fromisoformat(candidate["end_date"]), datetime.min.time(), tzinfo=timezone.utc),
+            reply[:2000],
+        )
     # Which real specialist "owns" this question's topic — computed
     # independently of which persona actually answered (see
     # detect_answering_rishi), so it's a stable attribution label even when

@@ -9,9 +9,16 @@ interpreter unit in isolation (see test_interpretation_templates.py).
 with ALL_FEATURES_FREE forced off (see conftest.py) so tier-gating tests
 elsewhere stay meaningful, which means these tests bypass it explicitly the
 same way test_feature_gating.py does."""
+from datetime import date, datetime, timedelta, timezone
+
 import pytest
 
+from app.api.v1 import chat as chat_module
+from app.astro.dasha import Antardasha, Mahadasha
 from app.core.config import Settings
+from app.db.base import AsyncSessionLocal
+from app.services import dasha_service, important_date_service, life_context_service
+from app.services.chat_understanding import ChatUnderstanding
 from tests.test_api_e2e import _signup_and_set_birth_data
 
 
@@ -120,6 +127,297 @@ async def test_chat_astro_decision_category_context_is_json_serializable(client,
     json.dumps(dumped)  # must not raise
 
 
+async def test_chat_astro_relocation_decision_answers_and_tracks_as_a_decision(client, monkeypatch):
+    """Phase 3 (spec §56 "relocation decisions") — relocation_decision has no
+    get_decision verdict engine behind it (see life_context_service._DECISION_
+    TYPE_BY_CATEGORY's comment); it reuses the SAME foreign_travel life-event-
+    timing engine as foreign_travel_timing. Exercises the real deterministic
+    keyword path end-to-end (message_mentions_relocation_decision in
+    templates.py -> chat.py's relocation block -> _life_event_chat_answer),
+    not a monkeypatched classifier, and confirms it's tracked as a real
+    Decision Memory row under decision_type "relocation" — the same
+    generalized mapping outcome-checkins/gap-filling already read off."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    user_id = profile.json()["id"]
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers,
+        json={"message": "Should I relocate abroad for work?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["reply"]
+
+    async with AsyncSessionLocal() as db:
+        open_decisions = await life_context_service.get_open_decisions(db, user_id)
+        assert any(d.decision_type == "relocation" for d in open_decisions)
+
+
+async def test_chat_astro_decision_gap_question_gate_generalizes_to_relocation(client, monkeypatch):
+    """The decision-critical gap-filling gate (chat.py, right after the
+    classify_message call) checks `c in decision_known_facts_for_prompt for
+    c in understanding.categories` — decision_known_facts_for_prompt is
+    built generically off life_context_service.CATEGORY_BY_DECISION_TYPE's
+    values, which now includes relocation_decision, so a crafted
+    decision_gap_question for it should short-circuit the reply exactly like
+    it already does for job_change_decision/business_start_decision, with
+    zero relocation-specific code in this gate."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    async def _fake_classify_message(*args, **kwargs):
+        return ChatUnderstanding(
+            categories=["relocation_decision"],
+            decision_gap_question="Is this move mainly for work, family, or lifestyle reasons?",
+        )
+
+    monkeypatch.setattr(chat_module, "classify_message", _fake_classify_message)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "Should I move abroad?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["reply"] == "Is this move mainly for work, family, or lifestyle reasons?"
+
+
+async def test_chat_astro_mentions_a_recurring_dasha_pattern_via_the_template_path(client, monkeypatch):
+    """Phase 4 (spec's "richer correlations") — two of the user's OWN
+    confirmed career events sharing a Mahadasha lord should surface as a
+    real, deterministic sentence even on the template (non-LLM) path (see
+    templates._personal_pattern_sentence), since it states a fact about
+    their own recorded history, not an interpretive claim. Monkeypatches
+    dasha_service.get_mahadashas_raw with a small fixed fixture for
+    deterministic control (mirrors test_life_pattern_service.py)."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    user_id = profile.json()["id"]
+
+    async def _fake_mahadashas(*a, **k):
+        return [
+            Mahadasha(
+                lord="Sa", start=datetime(2010, 1, 1, tzinfo=timezone.utc), end=datetime(2029, 1, 1, tzinfo=timezone.utc),
+                antardashas=[
+                    Antardasha(lord="Ve", start=datetime(2010, 1, 1, tzinfo=timezone.utc), end=datetime(2020, 1, 1, tzinfo=timezone.utc)),
+                ],
+            )
+        ]
+    monkeypatch.setattr(dasha_service, "get_mahadashas_raw", _fake_mahadashas)
+
+    async with AsyncSessionLocal() as db:
+        await life_context_service.add_event(db, user_id, "new_job", "started at Acme", 2011)
+        await life_context_service.add_event(db, user_id, "promotion", "promoted", 2015)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "When will my career improve?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "2 of your past events in this area happened during a" in reply
+
+
+async def test_chat_astro_exposes_astrological_fingerprint_fields_in_context(client, monkeypatch):
+    """Phase 4 (finishes spec §21, deferred from Phase 2) — compute_natal_
+    insights is computed from the D1 chart chat.py already fetches (zero
+    extra cost) and stored as strongest_planet/weakest_planet/decision_style
+    always, plus blind_spot_planet/reason only when there's a real
+    affliction to report. This isn't visible in the template reply (it's an
+    LLM-prompt-only tone signal per the plan), so this test goes straight at
+    chat_module.classify_message's own `current_life_state`-style plumbing
+    isn't relevant here — instead it captures the context dict chat_reply
+    receives by monkeypatching the interpreter's chat_reply."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    captured = {}
+
+    async def _fake_chat_reply(self, history, context, language):
+        captured.update(context)
+        return "ok"
+
+    from app.services.interpretation.templates import TemplateInterpreter
+    monkeypatch.setattr(TemplateInterpreter, "chat_reply", _fake_chat_reply)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "How's my career looking?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "decision_style" in captured
+    assert captured["decision_style"] in (
+        "fast_and_decisive", "steady_and_persistent", "adaptive_and_scattered", "impulsive_and_reactive",
+    )
+    # Either both blind_spot fields are present, or neither is — never one
+    # without the other, and never invented when there's no real affliction.
+    assert ("blind_spot_planet" in captured) == ("blind_spot_reason" in captured)
+
+
+def _fake_natal_insights(*, debilitated_stress_planet: bool):
+    """Phase 5 fix's fixture: a minimal but complete NatalInsights, varying
+    only whether the stress_planet is genuinely debilitated (the real
+    affliction chat.py's own severity recompute checks for) — every other
+    field is a plausible placeholder, irrelevant to what's under test."""
+    from app.astro.natal_insights import NatalInsights
+    return NatalInsights(
+        lagna_lord="Ma", lagna_lord_house=1, tenth_lord="Sa", tenth_lord_house=10,
+        seventh_lord="Ve", seventh_lord_house=7, sixth_lord="Me", sixth_lord_house=6,
+        planet_dignity={"Me": "debilitated" if debilitated_stress_planet else "neutral"},
+        strongest_planet=None, weakest_planet="Me" if debilitated_stress_planet else None,
+        house_lords={h: "Me" for h in range(1, 13)}, house_lord_houses={h: 6 for h in range(1, 13)},
+        combust_planets=frozenset(), blind_spot_planet="Ma", blind_spot_reason="none",
+        stress_house=6, stress_planet="Me", decision_style="steady_and_persistent",
+    )
+
+
+async def test_chat_astro_shows_stress_house_when_genuinely_afflicted(client, monkeypatch):
+    """Phase 5 fix — stress_house/stress_planet are only ever exposed when
+    chat.py's own severity recompute (from planet_dignity/combust_planets)
+    finds a real affliction, never unconditionally like Phase 4 originally
+    left them (which risked a forced "stress" narrative onto an
+    unafflicted chart)."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    monkeypatch.setattr(chat_module, "compute_natal_insights", lambda *a, **k: _fake_natal_insights(debilitated_stress_planet=True))
+
+    captured = {}
+
+    async def _fake_chat_reply(self, history, context, language):
+        captured.update(context)
+        return "ok"
+
+    from app.services.interpretation.templates import TemplateInterpreter
+    monkeypatch.setattr(TemplateInterpreter, "chat_reply", _fake_chat_reply)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "How's my career looking?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert captured.get("stress_house") == 6
+    assert captured.get("stress_planet")
+
+
+async def test_chat_astro_omits_stress_house_when_not_afflicted(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    monkeypatch.setattr(chat_module, "compute_natal_insights", lambda *a, **k: _fake_natal_insights(debilitated_stress_planet=False))
+
+    captured = {}
+
+    async def _fake_chat_reply(self, history, context, language):
+        captured.update(context)
+        return "ok"
+
+    from app.services.interpretation.templates import TemplateInterpreter
+    monkeypatch.setattr(TemplateInterpreter, "chat_reply", _fake_chat_reply)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "How's my career looking?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "stress_house" not in captured
+    assert "stress_planet" not in captured
+
+
+async def test_chat_astro_house_purchase_decision_answers_and_tracks_as_a_decision(client, monkeypatch):
+    """Phase 5 — house_purchase_decision is fully generic in get_decision
+    (new EventType="property"), reusing the exact same _DECISION_CHECKS
+    loop as job_change/business_start with zero new chat.py code. Exercises
+    the real deterministic keyword path (message_mentions_house_purchase_
+    decision) end to end, mirroring Phase 3's relocation_decision test."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    user_id = profile.json()["id"]
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "Should I buy a house right now?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["reply"]
+
+    async with AsyncSessionLocal() as db:
+        open_decisions = await life_context_service.get_open_decisions(db, user_id)
+        assert any(d.decision_type == "house_purchase" for d in open_decisions)
+
+
+async def test_chat_astro_marriage_decision_answers_and_tracks_as_a_decision(client, monkeypatch):
+    """Phase 5 — marriage_decision deliberately bypasses get_decision (see
+    prediction_service.get_marriage_decision's docstring), but is tracked as
+    a Decision Memory row exactly like the get_decision-backed types.
+    Exercises the real deterministic keyword path (message_mentions_
+    marriage_decision, reusing the plain "marriage" topic's own keyword
+    list) end to end."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    user_id = profile.json()["id"]
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "Should I get married now?", "rishi_id": "vyasa", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["reply"]
+
+    async with AsyncSessionLocal() as db:
+        open_decisions = await life_context_service.get_open_decisions(db, user_id)
+        assert any(d.decision_type == "marriage" for d in open_decisions)
+
+
+async def test_chat_astro_important_date_checkin_resolves_and_creates_a_life_event(client, monkeypatch):
+    """Phase 5 — a real important-date check-in resolved via a crafted
+    ChatUnderstanding.important_date_outcome (classify_message itself needs
+    a real OpenAI call the test environment deliberately disables) creates
+    a real LifeEvent — mirrors Phase 2's test_chat_resolves_pending_
+    feedback_and_creates_a_life_event."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    user_id = profile.json()["id"]
+
+    past_date = date.today() - timedelta(days=5)
+    async with AsyncSessionLocal() as db:
+        await important_date_service.add_important_date(db, user_id, "career", "final exam", past_date)
+
+    async def _fake_classify_message(*args, **kwargs):
+        return ChatUnderstanding(categories=[], important_date_outcome="I passed the exam")
+
+    monkeypatch.setattr(chat_module, "classify_message", _fake_classify_message)
+
+    # Turn 1: a brand-new conversation deterministically leads with the
+    # check-in question itself (see chat.py's "not history_rows" gate) —
+    # classify_message is never even called on this turn.
+    first = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": "hi", "language": "en"},
+    )
+    assert first.status_code == 200, first.text
+    assert "final exam" in first.json()["reply"]
+
+    # Turn 2: now history_rows is non-empty, so this reaches the real
+    # classify_message call (monkeypatched above).
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "It went well, I passed", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    async with AsyncSessionLocal() as db:
+        pending = await important_date_service.get_pending_checkin(db, user_id)
+        assert pending is None  # resolved, no longer pending
+
+        timeline = await life_context_service.get_timeline(db, user_id)
+        assert any(e["description"] == "I passed the exam" for e in timeline)
+
+
 async def test_chat_astro_vyasa_answers_every_topic_directly_without_redirecting(client, monkeypatch):
     """Vyasa is the new default generalist persona (see
     templates._RISHI_SPECIALTY, which deliberately excludes it) — it must
@@ -222,6 +520,13 @@ async def test_chat_astro_answers_hows_my_year_from_the_real_prediction_engine(c
 async def test_chat_astro_answers_life_event_timing_questions_from_the_real_engine(client, monkeypatch, message, rishi_id):
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
+    if "promotion" in message:
+        # career_promotion_timing is gated on career_state == "employed" —
+        # see test_career_promotion_timing_is_gated_by_career_state in
+        # test_api_e2e.py for the gate itself; this test is about the
+        # real-engine reply shape once that precondition is met, same as
+        # every other category here.
+        await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
 
     resp = await client.post(
         "/api/v1/chat/astro", headers=headers, json={"message": message, "rishi_id": rishi_id, "language": "en"},
@@ -229,6 +534,72 @@ async def test_chat_astro_answers_life_event_timing_questions_from_the_real_engi
     assert resp.status_code == 200, resp.text
     reply = resp.json()["reply"]
     assert "probable favorable window" in reply or "I didn't find a strongly favorable window" in reply
+
+
+async def test_chat_astro_promotion_question_asks_about_employment_before_answering(client, monkeypatch):
+    """Without a known career_state, a promotion question must not silently
+    assume the user has a job to be promoted in — the reply should surface
+    the career_promotion_blocked note (see prediction_service.
+    get_life_event_timing) instead of a full dasha-window analysis."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    resp = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers, json={"message": "When will I get a promotion?", "rishi_id": "bhrigu", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "currently employed" in reply
+    assert "probable favorable window" not in reply
+
+
+async def test_chat_astro_replying_yes_to_the_employment_gate_answers_same_turn(client, monkeypatch):
+    """The exact dead-end a real user hit: the fallback (no-LLM) path can't
+    turn a bare "yes" into a life_state_update on its own (see chat.py's
+    _asked_career_employment_gate handling), so without a deterministic
+    fallback the conversation fell through to the generic Lagna/menu reply
+    instead of ever answering the original question. A plain "yes" right
+    after the gate note must set career_state=employed AND give the real
+    promotion-timing analysis in that SAME reply — not require yet another
+    message."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    gated = await client.post(
+        "/api/v1/chat/astro",
+        headers=headers, json={"message": "When will I get a promotion?", "rishi_id": "bhrigu", "language": "en"},
+    )
+    assert "currently employed" in gated.json()["reply"]
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": "yes", "rishi_id": "bhrigu", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "probable favorable window" in reply
+    assert "Your Lagna is" not in reply
+
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    assert profile.json()["life_state"]["career_state"] == "employed"
+
+
+async def test_chat_astro_replying_no_to_the_employment_gate_is_acknowledged(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    await client.post(
+        "/api/v1/chat/astro",
+        headers=headers, json={"message": "When will I get a promotion?", "rishi_id": "bhrigu", "language": "en"},
+    )
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": "no", "rishi_id": "bhrigu", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "no worries" in resp.json()["reply"]
+
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    assert profile.json()["life_state"]["career_state"] == "unemployed"
 
 
 async def test_chat_astro_career_timing_question_redirects_to_bhrigu_from_another_rishi(client, monkeypatch):

@@ -40,13 +40,25 @@ _CONFIDENCE_BY_RANK = {2: "high", 1: "medium", 0: "low"}
 # or an explicit reconfirmation — see get_facts_due_for_reconfirmation).
 _DECAY_STEP_DAYS = 120
 
-# job_change/business_start are the only two decision types the chat
+# job_change/business_start/relocation are the decision types the chat
 # classifier can currently detect (job_change_decision/business_start_
-# decision categories) — kept this narrow deliberately, see LifeDecision's
-# docstring.
+# decision/relocation_decision categories) — kept this narrow deliberately,
+# see LifeDecision's docstring. relocation_decision has no get_decision
+# verdict engine behind it (see app.api.v1.chat's relocation block) — it
+# reuses the existing foreign_travel life-event-timing signal instead of
+# inventing a new astrological rule for "should I move."
 _DECISION_TYPE_BY_CATEGORY = {
     "job_change_decision": "job_change",
     "business_start_decision": "business_start",
+    "relocation_decision": "relocation",
+    # Phase 5: house_purchase_decision is fully generic (get_decision's own
+    # _DECISION_EVENT_TYPE/_DECISION_HOUSE, new EventType="property");
+    # marriage_decision deliberately bypasses get_decision entirely (see
+    # prediction_service.get_marriage_decision) but is tracked here exactly
+    # like the others — Decision Memory tracking has no idea which engine
+    # call backed a decision, only its category<->type mapping.
+    "house_purchase_decision": "house_purchase",
+    "marriage_decision": "marriage",
 }
 CATEGORY_BY_DECISION_TYPE = {v: k for k, v in _DECISION_TYPE_BY_CATEGORY.items()}
 
@@ -326,7 +338,7 @@ async def get_all_decisions(db: AsyncSession, user_id: str) -> list[LifeDecision
 
 
 _VALID_EVENT_TYPES = {
-    "new_job", "promotion", "started_business", "marriage", "breakup",
+    "new_job", "promotion", "started_business", "engagement", "marriage", "breakup",
     "moved_city", "became_parent", "other",
 }
 

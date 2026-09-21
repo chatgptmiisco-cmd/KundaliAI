@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     use_ai_interpretation: bool = False
 
+    # Birth-place search (Google Places API) — proxied through this backend
+    # (see app.services.geocoding_service) rather than called directly from
+    # the app, so the key never ships inside the mobile bundle where it
+    # could be extracted and reused to run up billing on this project's
+    # Google account. Leave unset and the frontend falls back to its own
+    # offline city table + OpenStreetMap Nominatim (see src/data/geocoding.ts).
+    google_places_api_key: str | None = None
+
     # Every subscription-gated feature (D9/D10 charts, unlimited period
     # analyses, real AI chat, voice narration) is unlocked for every tier
     # while pricing isn't live yet — see app.api.deps.require_tier and

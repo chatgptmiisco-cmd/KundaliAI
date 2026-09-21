@@ -37,6 +37,25 @@ def drekkana_sign_index(longitude: float) -> int:
     return (rasi + decan * 4) % 12
 
 
+def chaturthamsa_sign_index(longitude: float) -> int:
+    """D4 — Phase 9 (property engine's "D4 refinement layer", see
+    app.services.prediction_service.get_property_analysis / app.astro.
+    property_analysis). Each 30° sign splits into four 7°30' quarters,
+    mapping to a fixed 1st-4th-7th-10th (kendra/angular) sequence from the
+    sign itself — 0°-7°30' the sign itself, 7°30'-15° the 4th sign from it,
+    15°-22°30' the 7th, 22°30'-30° the 10th — and this is the SAME for
+    every sign regardless of its movable/fixed/dual classification, unlike
+    D3/D7/D30's odd/even branching above/below. Reduces to the same kind of
+    closed form D3 above already uses: (rasi + quarter*3) % 12, since
+    kendras are always 3 signs apart. Verified against two independent
+    published sources (not reconstructed from memory alone, same discipline
+    D30's own docstring below describes) before implementing — see the
+    "iterative-strolling-truffle" plan (Phase 9) for the citations."""
+    rasi = sign_index(longitude)
+    quarter = int(degree_in_sign(longitude) // 7.5)
+    return (rasi + quarter * 3) % 12
+
+
 def saptamsa_sign_index(longitude: float) -> int:
     """D7. Each 30° sign splits into seven parts of 30/7 degrees. Classical
     rule: an odd sign counts its 7 parts starting from itself; an even sign

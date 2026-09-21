@@ -216,12 +216,12 @@ _TRANSIT_CORROBORATION_HI = "इस अवधि के दौरान गु�
 # single window would read as noise, not signal.
 NatalStrength = Literal["strong", "weak"]
 _NATAL_STRENGTH_EN: dict[NatalStrength, str] = {
-    "strong": "{name} is also well-placed in your birth chart itself (dignified, unafflicted) — a genuinely stronger version of this signal, not just a favorable dasha label.",
-    "weak": "{name} is weakly placed in your birth chart itself (afflicted or debilitated) — so treat this window as a real but comparatively softer signal.",
+    "strong": "{name} is also strong in your birth chart itself — a genuinely more reliable signal, not just a favorable-sounding phase.",
+    "weak": "{name} isn't especially strong in your birth chart itself, though — so treat this window as real, but a gentler signal than it would be with a stronger {name}.",
 }
 _NATAL_STRENGTH_HI: dict[NatalStrength, str] = {
-    "strong": "{name} आपकी जन्म कुंडली में भी मज़बूत स्थिति में है (सशक्त, बिना किसी दोष के) — यह सिर्फ़ दशा का नाम नहीं बल्कि वाकई एक मज़बूत संकेत है।",
-    "weak": "{name} आपकी जन्म कुंडली में कमज़ोर स्थिति में है (पीड़ित या नीच) — इसलिए इसे एक वास्तविक लेकिन अपेक्षाकृत हल्का संकेत मानें।",
+    "strong": "{name} आपकी जन्म कुंडली में भी मज़बूत स्थिति में है — यह सिर्फ़ एक अच्छी अवधि नहीं, बल्कि वाकई एक ज़्यादा भरोसेमंद संकेत है।",
+    "weak": "हालांकि {name} आपकी जन्म कुंडली में बहुत मज़बूत नहीं है — इसलिए इसे एक वास्तविक लेकिन थोड़ा हल्का संकेत मानें।",
 }
 
 # Surfaces a real, already-computed fact (see app.astro.charts's
@@ -242,8 +242,8 @@ _RETROGRADE_NOTE_HI = "{name} फ़िलहाल वक्री (retrograde)
 # independent of (and can coexist with) a positive Jupiter/Saturn or karaka
 # corroboration above. A real, separate classical caution, not a
 # contradiction of the corroboration note.
-_TRANSIT_OBSTRUCTION_EN = "At the same time, {planet} is also transiting through that same part of your chart — a real caution flag alongside the corroboration above, not a contradiction of it."
-_TRANSIT_OBSTRUCTION_HI = "इसी दौरान {planet} भी आपकी कुंडली के उसी हिस्से से गुज़र रहा है — यह ऊपर के संकेत के साथ-साथ एक वास्तविक सतर्कता का संकेत है, उसका खंडन नहीं।"
+_TRANSIT_OBSTRUCTION_EN = "One real caution, though: {planet} is also moving through that same part of your chart during this window — worth keeping in mind alongside everything above, not a reason to dismiss it."
+_TRANSIT_OBSTRUCTION_HI = "एक ज़रूरी सावधानी: {planet} भी इसी दौर में आपकी कुंडली के उसी हिस्से से गुज़र रहा है — इसे ऊपर बताई बातों के साथ ध्यान में रखें, इसे नज़रअंदाज़ न करें।"
 
 # Surfaces app.astro.life_stage_plausibility's real-world (NOT classical)
 # age-sanity factor, which already scales this window's score down — see
@@ -529,8 +529,8 @@ _TENSE_REPLACEMENTS_EN: list[tuple[str, str]] = [
     ("are also passing through", "also passed through"),
     ("is also passing through", "also passed through"),
     ("during this window", "during that window"),
-    ("is also well-placed in your birth chart itself", "was also well-placed in your birth chart itself"),
-    ("is weakly placed in your birth chart itself", "was weakly placed in your birth chart itself"),
+    ("is also strong in your birth chart itself", "was also strong in your birth chart itself"),
+    ("isn't especially strong in your birth chart itself", "wasn't especially strong in your birth chart itself"),
     (
         "is running both the broader period and this specific phase, which classically gives",
         "ran both the broader period and that specific phase, which classically gave",
@@ -546,8 +546,8 @@ _TENSE_REPLACEMENTS_EN: list[tuple[str, str]] = [
     ("is also retrograde right now", "was also retrograde during that period"),
     ("what that means here", "what that meant there"),
     (
-        "is also transiting through that same part of your chart",
-        "was also transiting through that same part of your chart",
+        "is also moving through that same part of your chart",
+        "was also moving through that same part of your chart",
     ),
     ("This window falls earlier in life than", "That window fell earlier in life than"),
     ("This window falls later in life than", "That window fell later in life than"),
@@ -561,7 +561,8 @@ _TENSE_REPLACEMENTS_HI: list[tuple[str, str]] = [
     ("इस दौर में", "उस दौर में"),
     ("इसी दौरान", "उसी दौरान"),
     ("मज़बूत स्थिति में है", "मज़बूत स्थिति में था"),
-    ("कमज़ोर स्थिति में है", "कमज़ोर स्थिति में था"),
+    ("बहुत मज़बूत नहीं है", "बहुत मज़बूत नहीं था"),
+    ("इसी दौर में", "उसी दौर में"),
     ("असामान्य रूप से केंद्रित और स्पष्ट मिलते हैं", "असामान्य रूप से केंद्रित और स्पष्ट मिले"),
     ("एक-दूसरे को मज़बूत करते हैं", "एक-दूसरे को मज़बूत करते थे"),
     ("मिश्रित संकेत आ सकते हैं", "मिश्रित संकेत आए"),
@@ -715,12 +716,16 @@ _EVENT_HOUSE_PHRASE_EN: dict[str, str] = {
     # marriage); business_expansion is the 11th house of gains.
     "career_promotion": "your 10th house of career", "business_partnership": "your 7th house of partnerships",
     "business_expansion": "your 11th house of gains",
+    # Phase 8 — property_purchase (BPHS Ch.48 v.2-4: the 4th house/Bandhu
+    # Bhava lord's dasha, associated with acquisition of house and land).
+    "property": "your 4th house of home and property",
 }
 _EVENT_HOUSE_PHRASE_HI: dict[str, str] = {
     "career": "आपके करियर के दसवें भाव", "wealth": "आपके धन के दूसरे भाव",
     "children": "आपकी संतान के पांचवें भाव", "foreign_travel": "आपके विदेश के बारहवें भाव",
     "career_promotion": "आपके करियर के दसवें भाव", "business_partnership": "आपके साझेदारी के सातवें भाव",
     "business_expansion": "आपके लाभ के ग्यारहवें भाव",
+    "property": "आपके घर और संपत्ति के चौथे भाव",
 }
 # Phrase for a SECONDARY supporting house (Phase 2 multi-house events —
 # see app.astro.life_event_timing.EVENT_SECONDARY_HOUSES), keyed by house
@@ -744,6 +749,7 @@ _EVENT_KARAKA_NAME_EN: dict[tuple[str, str], str] = {
     ("career_promotion", "Sa"): "Saturn", ("career_promotion", "Su"): "the Sun",
     ("business_partnership", "Me"): "Mercury",
     ("business_expansion", "Ju"): "Jupiter", ("business_expansion", "Ve"): "Venus",
+    ("property", "Ma"): "Mars", ("property", "Sa"): "Saturn",
 }
 _EVENT_KARAKA_NAME_HI: dict[tuple[str, str], str] = {
     ("career", "Sa"): "शनि", ("career", "Su"): "सूर्य",
@@ -753,20 +759,26 @@ _EVENT_KARAKA_NAME_HI: dict[tuple[str, str], str] = {
     ("career_promotion", "Sa"): "शनि", ("career_promotion", "Su"): "सूर्य",
     ("business_partnership", "Me"): "बुध",
     ("business_expansion", "Ju"): "गुरु", ("business_expansion", "Ve"): "शुक्र",
+    ("property", "Ma"): "मंगल", ("property", "Sa"): "शनि",
 }
 _EVENT_KARAKA_DESC_EN: dict[tuple[str, str], str] = {
-    ("career", "Sa"): "your karma/profession karaka",
-    ("career", "Su"): "the karaka for authority and status",
+    ("career", "Sa"): "the classical significator for duty and profession",
+    ("career", "Su"): "the classical significator for authority and status",
     ("wealth", "Ju"): "a classical wealth significator",
     ("wealth", "Ve"): "a classical wealth significator",
-    ("children", "Ju"): "the classical santan (children) karaka",
+    ("children", "Ju"): "the classical significator for children",
     ("foreign_travel", "Ra"): "the classical significator of foreign lands and relocation",
     ("foreign_travel", "Ju"): "co-significator of long journeys",
-    ("career_promotion", "Sa"): "your karma/profession karaka",
-    ("career_promotion", "Su"): "the karaka for authority and status",
+    ("career_promotion", "Sa"): "the classical significator for duty and profession",
+    ("career_promotion", "Su"): "the classical significator for authority and status",
     ("business_partnership", "Me"): "the classical karaka for trade and commerce",
     ("business_expansion", "Ju"): "a classical wealth significator",
     ("business_expansion", "Ve"): "a classical wealth significator",
+    # Supporting, not primary, significators (see app.astro.property_
+    # analysis.PROPERTY_KARAKA_MARS_SATURN) — the 4th house/4th lord remain
+    # the primary classical framework for property.
+    ("property", "Ma"): "a traditional significator of land/property",
+    ("property", "Sa"): "a significator of stability and fixed assets",
 }
 _EVENT_KARAKA_DESC_HI: dict[tuple[str, str], str] = {
     ("career", "Sa"): "आपका कर्म/पेशा कारक",
@@ -781,6 +793,8 @@ _EVENT_KARAKA_DESC_HI: dict[tuple[str, str], str] = {
     ("business_partnership", "Me"): "व्यापार और वाणिज्य का शास्त्रीय कारक",
     ("business_expansion", "Ju"): "धन का एक शास्त्रीय कारक",
     ("business_expansion", "Ve"): "धन का एक शास्त्रीय कारक",
+    ("property", "Ma"): "भूमि/संपत्ति का एक पारंपरिक कारक",
+    ("property", "Sa"): "स्थिरता और स्थायी संपत्ति का कारक",
 }
 _EVENT_TRANSIT_CORROBORATION_EN = "A relevant planet is also passing through {house} during this window — a second real signal pointing the same way."
 _EVENT_TRANSIT_CORROBORATION_HI = "इस अवधि के दौरान एक संबंधित ग्रह भी {house} से गुज़र रहा है — यह उसी दिशा में एक और वास्तविक संकेत है।"
@@ -942,8 +956,21 @@ def expecting_delivery_reason_text(antardasha_lord: PlanetKey, expected_delivery
 # (verdict, risk flag, a cited alternative window, an optional history
 # nudge) already computed by the caller.
 
-_DECISION_LABEL_EN: dict[str, str] = {"job_change": "switching jobs", "business_start": "starting or expanding your business"}
-_DECISION_LABEL_HI: dict[str, str] = {"job_change": "नौकरी बदलना", "business_start": "व्यवसाय शुरू या विस्तार करना"}
+_DECISION_LABEL_EN: dict[str, str] = {
+    "job_change": "switching jobs", "business_start": "starting or expanding your business",
+    "house_purchase": "buying a house", "marriage": "getting married",
+    # Phase 9 — property_sale/property_inheritance/property_relocation
+    # reuse the SAME BPHS_48_2_4 signal as house_purchase, reinterpreted;
+    # see app.astro.property_analysis's PROPERTY_INTENT_REFRAME_* constants.
+    "property_sale": "selling a property", "property_inheritance": "an inheritance-related property matter",
+    "property_relocation": "a change of residence",
+}
+_DECISION_LABEL_HI: dict[str, str] = {
+    "job_change": "नौकरी बदलना", "business_start": "व्यवसाय शुरू या विस्तार करना",
+    "house_purchase": "घर खरीदना", "marriage": "विवाह करना",
+    "property_sale": "संपत्ति बेचना", "property_inheritance": "विरासत में मिली संपत्ति का मामला",
+    "property_relocation": "निवास स्थान बदलना",
+}
 
 _VERDICT_HEADLINE_EN: dict[str, str] = {
     "favorable": "The current period reads as a genuinely favorable time for {decision}.",
@@ -983,7 +1010,10 @@ _NUDGE_LABEL_HI = {"favorable": "अनुकूल", "unfavorable": "प्र�
 
 
 def decision_reason_text(
-    decision_type: Literal["job_change", "business_start"],
+    decision_type: Literal[
+        "job_change", "business_start", "house_purchase", "marriage",
+        "property_sale", "property_inheritance", "property_relocation",
+    ],
     verdict: Literal["favorable", "unfavorable", "wait_for_better_window", "neutral"],
     language: Language,
     current_period_lord: PlanetKey | None,

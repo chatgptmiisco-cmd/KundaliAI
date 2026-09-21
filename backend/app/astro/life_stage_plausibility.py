@@ -27,6 +27,7 @@ from typing import Literal
 EventCategory = Literal[
     "marriage", "career", "wealth", "children", "foreign_travel",
     "career_promotion", "business_partnership", "business_expansion",
+    "property",
 ]
 
 # (hard_floor, soft_floor, soft_ceiling, hard_ceiling), in years of age at
@@ -61,6 +62,10 @@ _AGE_BANDS: dict[EventCategory, tuple[float, float, float, float]] = {
     "career_promotion": (13.0, 17.0, 65.0, 75.0),
     "business_partnership": (15.0, 19.0, 45.0, 60.0),
     "business_expansion": (16.0, 19.0, 70.0, 80.0),
+    # Phase 5: buying a house is a financial/asset milestone, closest to
+    # wealth's own age relevance — reuses wealth's exact band rather than
+    # inventing new numbers, same convention as the three reuses above.
+    "property": (16.0, 19.0, 70.0, 80.0),
 }
 
 _MIN_MULTIPLIER = 0.15

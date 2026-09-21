@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -42,6 +42,15 @@ class LifeState(Base):
 
     career_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
     business_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    # Phase 8 — property_purchase engine's life-state gate (spec §9/§23):
+    # renting | owns_property | living_with_parents | other. Deliberately no
+    # "considering_city_change" field — that's already tracked by Phase 3's
+    # relocation_decision/LifeDecision(decision_type="relocation"); a second
+    # parallel tracker for the same fact would be real duplication.
+    housing_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    planning_property_purchase: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    has_home_loan: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 

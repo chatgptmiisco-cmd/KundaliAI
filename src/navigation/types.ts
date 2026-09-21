@@ -34,4 +34,5 @@ export type RootStackParamList = {
   MyLifeTwin: undefined;
   LifeTimeline: undefined;
   ChartLookup: undefined;
+  FollowUpQuestions: { topic: import('../data/onboardingTopics').OnboardingTopic };
 };

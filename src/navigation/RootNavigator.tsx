@@ -7,6 +7,7 @@ import AppInfoScreen from '../screens/AppInfoScreen';
 import AuthScreen from '../screens/AuthScreen';
 import BirthDataScreen from '../screens/BirthDataScreen';
 import ChartLookupScreen from '../screens/ChartLookupScreen';
+import FollowUpQuestionsScreen from '../screens/FollowUpQuestionsScreen';
 import GunaMilanScreen from '../screens/GunaMilanScreen';
 import HoroscopeDetailScreen from '../screens/HoroscopeDetailScreen';
 import InsightsScreen from '../screens/InsightsScreen';
@@ -164,6 +165,11 @@ export default function RootNavigator() {
             name="ChartLookup"
             component={ChartLookupScreen}
             options={{ title: t('chartLookup.screenTitle') }}
+          />
+          <Stack.Screen
+            name="FollowUpQuestions"
+            component={FollowUpQuestionsScreen}
+            options={{ title: t('followUp.screenTitle') }}
           />
         </>
       )}
