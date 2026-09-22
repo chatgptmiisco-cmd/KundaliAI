@@ -11,6 +11,8 @@ import PlanetPositionsTable from '../components/PlanetPositionsTable';
 import PremiumLockNotice from '../components/PremiumLockNotice';
 import PrimaryButton from '../components/PrimaryButton';
 import SouthIndianChart from '../components/SouthIndianChart';
+import WebPageContainer from '../components/WebPageContainer';
+import useIsWideScreen from '../hooks/useIsWideScreen';
 import { CHART_LABELS } from '../constants/astro';
 import { toContentLanguage } from '../i18n/contentLanguage';
 import { useUserStore } from '../store/useUserStore';
@@ -43,6 +45,8 @@ export default function ChartLookupScreen() {
 
   const canSubmit = person.dateOfBirth.trim() && person.timeOfBirth.trim() && person.placeOfBirth.trim();
   const isLocked = PREMIUM_CHARTS.includes(selectedType) && !isPremium;
+  const isWide = useIsWideScreen();
+  const chartSize = isWide ? 420 : 300;
 
   const runLookup = async (type: ChartType) => {
     setLoading(true);
@@ -68,6 +72,7 @@ export default function ChartLookupScreen() {
 
   if (!chart) {
     return (
+      <WebPageContainer style={styles.webContainer}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.subtitle}>{t('chartLookup.formSubtitle')}</Text>
         <Card>
@@ -75,10 +80,12 @@ export default function ChartLookupScreen() {
         </Card>
         <PrimaryButton label={t('chartLookup.viewButton')} onPress={handleView} disabled={!canSubmit} />
       </ScrollView>
+      </WebPageContainer>
     );
   }
 
   return (
+    <WebPageContainer style={styles.webContainer}>
     <ScrollView contentContainerStyle={styles.content}>
       {!!person.name.trim() && <Text style={styles.personName}>{person.name}</Text>}
 
@@ -137,9 +144,9 @@ export default function ChartLookupScreen() {
             </View>
             <View style={styles.chartWrap}>
               {chartStyle === 'north' ? (
-                <NorthIndianChart chart={chart} language={language} size={300} />
+                <NorthIndianChart chart={chart} language={language} size={chartSize} />
               ) : (
-                <SouthIndianChart chart={chart} language={language} size={300} />
+                <SouthIndianChart chart={chart} language={language} size={chartSize} />
               )}
             </View>
           </Card>
@@ -152,10 +159,14 @@ export default function ChartLookupScreen() {
 
       <PrimaryButton label={t('chartLookup.checkAnother')} variant="outline" onPress={() => setChart(null)} />
     </ScrollView>
+    </WebPageContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  webContainer: {
+    flex: 1,
+  },
   content: {
     padding: spacing.md,
     paddingBottom: spacing.xxl,

@@ -17,6 +17,8 @@ import SectionHeader from '../components/SectionHeader';
 import NorthIndianChart from '../components/NorthIndianChart';
 import SouthIndianChart from '../components/SouthIndianChart';
 import TimeEngine from '../components/TimeEngine';
+import WebPageContainer from '../components/WebPageContainer';
+import useIsWideScreen from '../hooks/useIsWideScreen';
 import { CHART_LABELS } from '../constants/astro';
 import { toContentLanguage } from '../i18n/contentLanguage';
 import { useKundaliStore } from '../store/useKundaliStore';
@@ -35,6 +37,8 @@ export default function ChartsScreen() {
   const chartStyle = useUserStore((s) => s.chartStyle);
   const setChartStyle = useUserStore((s) => s.setChartStyle);
   const [selected, setSelected] = useState<ChartType>('D1');
+  const isWide = useIsWideScreen();
+  const chartSize = isWide ? 420 : 300;
 
   const chart = useKundaliStore((s) => s.charts[selected]?.[language]);
   const loading = useKundaliStore((s) => s.chartLoading);
@@ -67,6 +71,7 @@ export default function ChartsScreen() {
   }, [language]);
 
   return (
+    <WebPageContainer style={styles.webContainer}>
     <ScrollView contentContainerStyle={styles.content}>
       {identity && <IdentityBasics identity={identity} language={language} />}
 
@@ -133,9 +138,9 @@ export default function ChartsScreen() {
             </View>
             <View style={styles.chartWrap}>
               {chartStyle === 'north' ? (
-                <NorthIndianChart chart={chart} language={language} size={300} />
+                <NorthIndianChart chart={chart} language={language} size={chartSize} />
               ) : (
-                <SouthIndianChart chart={chart} language={language} size={300} />
+                <SouthIndianChart chart={chart} language={language} size={chartSize} />
               )}
             </View>
           </Card>
@@ -179,10 +184,14 @@ export default function ChartsScreen() {
         </>
       )}
     </ScrollView>
+    </WebPageContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  webContainer: {
+    flex: 1,
+  },
   content: {
     padding: spacing.md,
     paddingBottom: spacing.xxl,

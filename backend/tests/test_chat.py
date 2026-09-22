@@ -17,7 +17,7 @@ from app.api.v1 import chat as chat_module
 from app.astro.dasha import Antardasha, Mahadasha
 from app.core.config import Settings
 from app.db.base import AsyncSessionLocal
-from app.services import dasha_service, important_date_service, life_context_service
+from app.services import chat_memory_service, dasha_service, important_date_service, life_context_service
 from app.services.chat_understanding import ChatUnderstanding
 from tests.test_api_e2e import _signup_and_set_birth_data
 
@@ -704,3 +704,87 @@ async def test_chat_astro_requires_birth_profile(client):
 
     resp = await client.post("/api/v1/chat/astro", headers=headers, json={"message": "Hello", "language": "en"})
     assert resp.status_code == 400
+
+
+async def test_chat_astro_surfaces_retrieved_history_into_context(client, monkeypatch):
+    """See app.services.chat_memory_service — older conversation context
+    that fell out of the raw history window must reach the reply-
+    generating context under "retrieved_history", the same way
+    life_context/open_decisions already do (see openai_interpreter.py's
+    retrieved_history_line)."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    canned = [{"text": "User: I work at a startup.\nAssistant: noted.", "when": "3 months ago"}]
+
+    async def _fake_retrieve(*args, **kwargs):
+        return canned
+
+    monkeypatch.setattr(chat_memory_service, "retrieve_relevant_turns", _fake_retrieve)
+
+    captured = {}
+
+    async def _fake_chat_reply(self, history, context, language):
+        captured.update(context)
+        return "ok"
+
+    from app.services.interpretation.templates import TemplateInterpreter
+    monkeypatch.setattr(TemplateInterpreter, "chat_reply", _fake_chat_reply)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": "how's my job going", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert captured.get("retrieved_history") == canned
+
+
+async def test_chat_astro_embeds_the_assistant_reply_when_embedding_succeeds(client, monkeypatch):
+    from app.db.models.chat import ChatMessage
+    from sqlalchemy import select
+
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    async def _fake_embed_turn(user_message, assistant_reply):
+        return [0.1, 0.2, 0.3], f"User: {user_message}\nAssistant: {assistant_reply}"
+
+    monkeypatch.setattr(chat_memory_service, "embed_turn", _fake_embed_turn)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": "How's my career looking?", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ChatMessage).where(ChatMessage.role == "assistant").order_by(ChatMessage.id.desc()).limit(1)
+        )
+        row = result.scalar_one()
+        assert row.embedding == "[0.1, 0.2, 0.3]"
+        assert row.embedding_source_text is not None and "How's my career looking?" in row.embedding_source_text
+
+
+async def test_chat_astro_embedding_failure_leaves_the_row_unembedded_but_still_replies(client, monkeypatch):
+    from app.db.models.chat import ChatMessage
+    from sqlalchemy import select
+
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    async def _fake_embed_turn(user_message, assistant_reply):
+        return None
+
+    monkeypatch.setattr(chat_memory_service, "embed_turn", _fake_embed_turn)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": "How's my career looking?", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ChatMessage).where(ChatMessage.role == "assistant").order_by(ChatMessage.id.desc()).limit(1)
+        )
+        row = result.scalar_one()
+        assert row.embedding is None
+        assert row.embedding_source_text is None

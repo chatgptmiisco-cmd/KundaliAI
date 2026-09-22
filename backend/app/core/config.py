@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     use_ai_interpretation: bool = False
+    # Chat memory retrieval (see app.services.chat_memory_service) — reuses
+    # openai_api_key above, no separate key needed. text-embedding-3-small
+    # is cheap (~$0.02/1M tokens) and more than accurate enough for
+    # retrieving a user's own past chat turns.
+    embedding_model: str = "text-embedding-3-small"
 
     # Birth-place search (Google Places API) — proxied through this backend
     # (see app.services.geocoding_service) rather than called directly from

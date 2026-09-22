@@ -1489,6 +1489,137 @@ _TOPIC_TIMING_COUNTERPART = {
     "children": "children_timing",
     "travel": "foreign_travel_timing",
 }
+# Short label for the one-line timing hint appended to a plain topic
+# answer (see _topic_timing_hint) — deliberately its own, shorter phrasing
+# than _LIFE_EVENT_LABEL_EN/HI (meant for the full dedicated "when will X
+# happen" answer), since this is one clause tacked onto a verdict, not a
+# standalone answer.
+_TOPIC_TIMING_HINT_LABEL_EN: dict[str, str] = {
+    "career_timing": "a career shift", "wealth_timing": "financial growth", "marriage_timing": "marriage",
+    "children_timing": "having a child", "foreign_travel_timing": "foreign travel or relocation",
+}
+_TOPIC_TIMING_HINT_LABEL_HI: dict[str, str] = {
+    "career_timing": "करियर में बदलाव", "wealth_timing": "आर्थिक वृद्धि", "marriage_timing": "विवाह",
+    "children_timing": "संतान होना", "foreign_travel_timing": "विदेश यात्रा या स्थानांतरण",
+}
+
+
+def _topic_timing_hint(category: str, context: dict[str, Any], hi: bool) -> str | None:
+    """The real fix for a plain topic question ("how's my career looking?")
+    reading as a generic mood word and nothing else: chat.py already
+    fetches the topic's timing counterpart windows in the background (see
+    _TOPIC_TIMING_COUNTERPART's own comment — "so the reply can include a
+    genuine future timeline instead of only the static house-based read")
+    but nothing ever actually read that data back out before this. Zero
+    new engine calls — this only surfaces what's already sitting in
+    context. Deliberately just the top window's dates + lord as one short
+    clause, not the full multi-window/age-estimate/caveat structure
+    _format_timing_reply gives a DEDICATED timing question — that fuller
+    shape belongs to "when will X happen", not one sentence tacked onto a
+    verdict."""
+    counterpart = _TOPIC_TIMING_COUNTERPART.get(category)
+    if not counterpart:
+        return None
+    windows: list[dict[str, Any]] = context.get(f"{counterpart}_windows") or []
+    if not windows:
+        return None
+    top = windows[0]
+    label = (_TOPIC_TIMING_HINT_LABEL_HI if hi else _TOPIC_TIMING_HINT_LABEL_EN)[counterpart]
+    lord = top["antardasha_lord_name"]
+    is_past = context.get(f"{counterpart}_direction") == "past"
+    if hi:
+        return (
+            f"हाल ही में {label} के लिए सबसे मज़बूत दौर {top['start_date']} से {top['end_date']} के बीच था, जो "
+            f"{lord} की अवधि में आया।"
+            if is_past else
+            f"आगे {label} के लिए सबसे मज़बूत समय {top['start_date']} से {top['end_date']} के बीच लगता है, जो "
+            f"{lord} की अवधि में आता है।"
+        )
+    return (
+        f"The strongest recent window for {label} was {top['start_date']} to {top['end_date']}, under a "
+        f"period led by {lord}."
+        if is_past else
+        f"Looking ahead, the strongest window for {label} is {top['start_date']} to {top['end_date']}, under "
+        f"a period led by {lord}."
+    )
+
+
+def _house_technical_hint(category: str, context: dict[str, Any], hi: bool) -> str | None:
+    """The other half of "generic verdict, no real chart facts": backs the
+    mood word with the actual sign/lord/placement for the house this topic
+    maps to (see chat.py's house_technical, already computed for every
+    house on every turn — _planet_technical's own docstring: "naming the
+    real houses/signs read as more personal, not more confusing" per
+    direct feedback). Unlike _topic_timing_hint, this applies to every
+    _TOPIC_HOUSE category, including the ones with no timing engine behind
+    them (health/family/friends/education/siblings) — those previously got
+    nothing but the bare verdict and nothing else."""
+    house_technical: dict[int, dict] = context.get("house_technical", {})
+    house = _TOPIC_HOUSE.get(category)
+    if house is None:
+        return None
+    tech = house_technical.get(house)
+    if not tech:
+        return None
+    house_word = (lambda h: _hindi_house(h)) if hi else (lambda h: f"{_ordinal(h)} house")
+    placed_house = tech["placed_house"]
+    if placed_house == house:
+        # The house's own lord sits right there — naming the same house/
+        # sign twice ("your 10th house is Taurus, ruled by Venus, placed
+        # in your 10th house, Taurus") would just read as a repeated
+        # sentence, not a new fact.
+        if hi:
+            return f"आपका {house_word(house)} {tech['house_sign']} है, और इसके स्वामी {tech['planet_name']} भी यहीं स्थित हैं।"
+        return f"Your {house_word(house)} is {tech['house_sign']}, and its ruler {tech['planet_name']} sits right there too."
+    if hi:
+        return (
+            f"आपका {house_word(house)} {tech['house_sign']} है, जिसके स्वामी {tech['planet_name']} अभी आपके "
+            f"{house_word(placed_house)} ({tech['placed_sign']}) में स्थित हैं।"
+        )
+    return (
+        f"Your {house_word(house)} is {tech['house_sign']}, ruled by {tech['planet_name']}, currently placed "
+        f"in your {house_word(placed_house)} ({tech['placed_sign']})."
+    )
+
+
+# Deterministic stand-in for openai_interpreter's memory_line — the
+# template path has no LLM to naturally weave a remembered fact into
+# prose, so this only ever does the one safe thing a FIXED template can
+# do: wrap the fact's own value text (already short/factual/third-person
+# — see chat_understanding's context_updates extraction instructions) in
+# a plain carrier sentence, never inventing phrasing around what it says.
+# Values are always captured in English regardless of target language
+# (same instruction) — a known, accepted limitation on the Hindi path,
+# same as openai_interpreter's memory_line has no way to guarantee
+# translation either without an LLM call of its own.
+_LIFE_CONTEXT_HINT_EN = "Worth keeping in mind, from what you've shared before: {value}."
+_LIFE_CONTEXT_HINT_HI = "यह भी याद रखें, आपने पहले बताया था: {value}"
+
+# Narrow, LOCAL duplicate of chat_understanding._CATEGORY_DOMAINS — just
+# the _TOPIC_HOUSE categories that map onto ONE life_context domain
+# cleanly. Duplicated rather than imported: chat_understanding already
+# imports FROM this module (_detect_categories etc.), so importing back
+# from it here would be circular. health/education have no matching
+# life_context domain (see life_context_service.VALID_DOMAINS) and are
+# deliberately left out rather than forced onto an ill-fitting one.
+_TOPIC_LIFE_CONTEXT_DOMAIN: dict[str, str] = {
+    "career": "career", "money": "money", "marriage": "relationships", "family": "family",
+    "children": "family", "siblings": "family", "friends": "relationships", "travel": "preferences",
+}
+
+
+def _life_context_hint(category: str, context: dict[str, Any], hi: bool) -> str | None:
+    domain = _TOPIC_LIFE_CONTEXT_DOMAIN.get(category)
+    if domain is None:
+        return None
+    facts: dict[str, dict] = (context.get("life_context") or {}).get(domain) or {}
+    if not facts:
+        return None
+    value = next(iter(facts.values()))["value"]
+    template = _LIFE_CONTEXT_HINT_HI if hi else _LIFE_CONTEXT_HINT_EN
+    return template.format(value=value)
+
+
 _MAX_CATEGORIES_PER_REPLY = 2
 
 
@@ -1739,7 +1870,26 @@ def _compute_answer_for_category(
         # about that life area, not a chart-reading lesson. See
         # chart_explanation_service._VERDICT_BY_HOUSE_EN/HI.
         house_verdict: dict[int, str] = context.get("house_verdict", {})
-        return house_verdict.get(_TOPIC_HOUSE[category])
+        verdict = house_verdict.get(_TOPIC_HOUSE[category])
+        if verdict is None:
+            return None
+        # Backs the mood word with real, already-computed chart facts
+        # instead of stopping at a generic verdict: the house's actual
+        # sign/lord/placement (_house_technical_hint, every topic) and,
+        # where a timing engine exists for it (career/money/marriage/
+        # children/travel), the real forward-looking window too
+        # (_topic_timing_hint).
+        parts = [verdict]
+        tech_hint = _house_technical_hint(category, context, hi)
+        if tech_hint:
+            parts.append(tech_hint)
+        timing_hint = _topic_timing_hint(category, context, hi)
+        if timing_hint:
+            parts.append(timing_hint)
+        memory_hint = _life_context_hint(category, context, hi)
+        if memory_hint:
+            parts.append(memory_hint)
+        return " ".join(parts)
 
     return None
 

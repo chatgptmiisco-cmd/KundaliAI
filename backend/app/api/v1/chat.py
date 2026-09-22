@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
@@ -13,8 +14,8 @@ from app.db.models.chat import ChatMessage
 from app.db.models.user import User
 from app.schemas.voice import ChatMessageIn, ChatMessageOut
 from app.services import (
-    important_date_service, life_context_service, life_pattern_service, prediction_feedback_service,
-    prediction_service, user_service,
+    chat_memory_service, important_date_service, life_context_service, life_pattern_service,
+    prediction_feedback_service, prediction_service, user_service,
 )
 from app.services.chart_service import get_chart
 from app.services.chat_understanding import classify_message, compute_out_of_domain_redirects, relevant_domains
@@ -1009,6 +1010,17 @@ async def chat_astro(
         # which has no get_decision verdict engine behind it.
         if life_context_service.CATEGORY_BY_DECISION_TYPE.get(d.decision_type) in categories
     ]
+    # Older conversation context that's fallen out of the raw history
+    # window above (see _HISTORY_LIMIT) but was never captured as a
+    # durable structured fact either — see app.services.chat_memory_
+    # service's module docstring for why this exists and how it's scoped.
+    # Skips the retrieval query entirely (exclude_ids_below=0) when the
+    # conversation hasn't even filled the raw window yet — nothing older
+    # than it exists to search for.
+    context["retrieved_history"] = await chat_memory_service.retrieve_relevant_turns(
+        db, user.id, body.rishi_id, body.message,
+        exclude_ids_below=min(r.id for r in history_rows) if len(history_rows) >= _HISTORY_LIMIT else 0,
+    )
 
     interpreter = get_interpreter()
     reply = await interpreter.chat_reply(history, context, body.language)
@@ -1034,12 +1046,23 @@ async def chat_astro(
     # app.services.metrics_service) — did real personal facts actually sit
     # on the table for THIS answer, not just "does personalization exist
     # anywhere in the system."
-    used_personalization = bool(context["life_context"] or context["open_decisions"])
+    used_personalization = bool(
+        context["life_context"] or context["open_decisions"] or context["retrieved_history"]
+    )
+
+    # Embeds THIS turn for future retrieval (see chat_memory_service) — a
+    # pure enhancement, never allowed to affect the reply that's about to
+    # be persisted: on any failure (quota, network) embed_turn returns
+    # None and the row's embedding/embedding_source_text just stay NULL,
+    # same "enhancement, not a hard dependency" convention as voice STT/TTS.
+    embedded_turn = await chat_memory_service.embed_turn(body.message, reply)
 
     db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
     db.add(ChatMessage(
         user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id,
         used_personalization=used_personalization,
+        embedding=json.dumps(embedded_turn[0]) if embedded_turn else None,
+        embedding_source_text=embedded_turn[1] if embedded_turn else None,
     ))
     await db.commit()
 

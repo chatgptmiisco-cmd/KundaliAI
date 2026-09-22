@@ -15,6 +15,8 @@ import PrimaryButton from '../components/PrimaryButton';
 import SectionHeader from '../components/SectionHeader';
 import NorthIndianChart from '../components/NorthIndianChart';
 import SouthIndianChart from '../components/SouthIndianChart';
+import WebPageContainer from '../components/WebPageContainer';
+import useIsWideScreen from '../hooks/useIsWideScreen';
 import SpeakerButton from '../components/SpeakerButton';
 import { trackEvent } from '../analytics/analytics';
 import { toContentLanguage } from '../i18n/contentLanguage';
@@ -30,6 +32,8 @@ export default function CompleteKundaliScreen() {
   const isPremium = useUserStore((s) => s.isPremium);
   const chartStyle = useUserStore((s) => s.chartStyle);
   const setChartStyle = useUserStore((s) => s.setChartStyle);
+  const isWide = useIsWideScreen();
+  const chartSize = isWide ? 420 : 280;
 
   const complete = useKundaliStore((s) => s.complete[language]);
   const loading = useKundaliStore((s) => s.completeLoading);
@@ -102,6 +106,7 @@ export default function CompleteKundaliScreen() {
         />
       </View>
 
+      <WebPageContainer style={styles.webContainer}>
       <ScrollView contentContainerStyle={styles.content}>
       {d1Chart && (
         <Card style={styles.chartCard}>
@@ -126,9 +131,9 @@ export default function CompleteKundaliScreen() {
           </View>
           <View style={styles.chartWrap}>
             {chartStyle === 'north' ? (
-              <NorthIndianChart chart={d1Chart} language={language} size={280} />
+              <NorthIndianChart chart={d1Chart} language={language} size={chartSize} />
             ) : (
-              <SouthIndianChart chart={d1Chart} language={language} size={280} />
+              <SouthIndianChart chart={d1Chart} language={language} size={chartSize} />
             )}
           </View>
         </Card>
@@ -220,11 +225,15 @@ export default function CompleteKundaliScreen() {
         icon="document-text-outline"
       />
       </ScrollView>
+      </WebPageContainer>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  webContainer: {
+    flex: 1,
+  },
   screen: {
     flex: 1,
     backgroundColor: colors.background,

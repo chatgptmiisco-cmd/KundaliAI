@@ -31,4 +31,21 @@ class ChatMessage(Base):
     # facts were actually on the table for that specific answer. Always
     # False on user-role rows.
     used_personalization: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Set only on an assistant-role row: an embedding of the WHOLE exchange
+    # ("User: ...\nAssistant: ..."), JSON-encoded as a plain float list —
+    # see app.services.chat_memory_service. Powers retrieval of older
+    # conversation context that has fallen out of the raw recent-history
+    # window (see chat.py's _HISTORY_LIMIT) but was never captured as a
+    # durable structured fact (life_state/life_context) either. No pgvector
+    # here deliberately (not installed on this dev Postgres, and unusable
+    # on the SQLite test DB anyway) — similarity is computed in plain
+    # Python, which is more than fast enough at one user's own message-
+    # history scale. Never set on user-role rows.
+    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The exact "User: ...\nAssistant: ..." pair text the embedding above
+    # was computed from — kept alongside it (rather than reconstructed from
+    # `content`, which on this row is only the assistant's OWN reply) so a
+    # retrieval hit can surface what the user actually said, not just how
+    # it was answered. Always set together with `embedding`, never alone.
+    embedding_source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

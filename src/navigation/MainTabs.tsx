@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
 import { useTranslation } from 'react-i18next';
 import ChartsScreen from '../screens/ChartsScreen';
 import CompleteKundaliScreen from '../screens/CompleteKundaliScreen';
 import HomeDashboardScreen from '../screens/HomeDashboardScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import WebSidebarNav from '../components/WebSidebarNav';
 import { colors, elevation, fontFamily, radius } from '../theme/theme';
 import RishiStack from './RishiStack';
 import { MainTabParamList } from './types';
@@ -37,13 +38,28 @@ export default function MainTabs() {
 
   return (
     <Tab.Navigator
+      // Desktop gets a persistent left sidebar instead of a bottom bar (see
+      // WebSidebarNav) — native is completely untouched, still the default
+      // bottom tab bar built from screenOptions/options below exactly as
+      // before. One navigator, one set of Tab.Screen registrations either
+      // way; this only swaps which component renders the chrome around them.
+      // tabBarPosition:'left' is what actually makes the navigator lay the
+      // bar out as a true side-by-side sidebar (a real, first-class option
+      // on this navigator — it switches its own root layout to flexDirection
+      // row) rather than a tall bar still stacked above/below the content.
+      tabBar={Platform.OS === 'web' ? (props) => <WebSidebarNav {...props} /> : undefined}
       screenOptions={{
+        tabBarPosition: Platform.OS === 'web' ? 'left' : 'bottom',
         headerStyle: { backgroundColor: colors.surface },
         headerTitleStyle: { fontFamily: fontFamily.semiBold, fontSize: 20, color: colors.textPrimary },
         headerTintColor: colors.primary,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: {
+        // On web the WebSidebarNav component owns its own width/padding —
+        // this only needs to stay out of its way, not size it (a fixed
+        // `height: 68`, correct for a bottom bar, would be wrong for a left
+        // sidebar's cross-axis).
+        tabBarStyle: Platform.OS === 'web' ? { backgroundColor: colors.surface } : {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
           height: 68,

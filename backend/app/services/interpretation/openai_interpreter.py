@@ -293,6 +293,7 @@ class OpenAIInterpreter(Interpreter):
         out_of_domain: dict[str, str] = context.get("out_of_domain_redirects", {})
         life_context: dict = context.get("life_context", {})
         open_decisions: list = context.get("open_decisions", [])
+        retrieved_history: list = context.get("retrieved_history", [])
         in_domain_facts, out_of_domain_facts = _chat_facts(context, set(out_of_domain))
 
         persona_line = (
@@ -331,6 +332,28 @@ class OpenAIInterpreter(Interpreter):
             "If an open decision exists and this message continues that thread, acknowledge where things "
             "stood before rather than starting over from zero."
             if (life_context or open_decisions)
+            else ""
+        )
+        # See app.services.chat_memory_service — snippets from FURTHER BACK
+        # in this same conversation than the message history already given
+        # above (that's always the recent window; this is what fell out of
+        # it), surfaced only when genuinely similar to what's being asked
+        # right now. Same "natural callback, never expose the mechanism"
+        # rule as memory_line, and explicitly lower-authority than a direct
+        # stated fact — this is a loose semantic match, not a database
+        # lookup, so treat it the same tentative way as a low-confidence
+        # memory_line fact.
+        retrieved_history_line = (
+            f"A few things you said earlier in this SAME conversation, further back than the messages "
+            f"already shown above, that seem relevant to what they're asking now: "
+            f"{json.dumps(retrieved_history, ensure_ascii=False)}. Reference this naturally if it's "
+            "genuinely useful (\"you mentioned earlier...\"), the same warm-callback way as the known "
+            "facts above — never say anything like \"retrieved\" or \"found in our chat history\", and "
+            "never treat it as more certain than it is: it's a loose match on what seemed related, not a "
+            "confirmed fact, so hold it more loosely than anything in the known-facts block above. If "
+            "nothing here actually helps answer the current message, ignore it completely and don't "
+            "mention it at all."
+            if retrieved_history
             else ""
         )
         # Whether there's any real in-domain content at all beyond the
@@ -490,7 +513,7 @@ class OpenAIInterpreter(Interpreter):
             f"{_BASE_SYSTEM_PROMPT}\n{_LANGUAGE_INSTRUCTION[language]}\n{persona_line}\n{tone_line}\n"
             "Answer ONLY using the real facts given below — never invent a fact not present here, "
             f"and never guess at a topic's answer if no fact for it was given. {detail_line} {scope_line} "
-            f"{memory_line}\n"
+            f"{memory_line}\n{retrieved_history_line}\n"
             f"Real facts (JSON): {json.dumps(facts_blob, ensure_ascii=False)}\n\n"
             f"Respond with ONLY JSON, no markdown fences, matching exactly: {schema}"
         )

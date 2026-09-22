@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(powershell -Command \"Stop-Process -Id 52568 -Force\")",
-      "WebSearch"
+      "WebSearch",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('src/i18n/en.json'\\)\\); JSON.parse\\(require\\('fs'\\).readFileSync\\('src/i18n/hi.json'\\)\\); JSON.parse\\(require\\('fs'\\).readFileSync\\('src/i18n/hinglish.json'\\)\\); console.log\\('all valid'\\)\")"
     ]
   },
   "enabledPlugins": {

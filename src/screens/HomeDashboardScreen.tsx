@@ -20,6 +20,8 @@ import DailyReadingSections from '../components/DailyReadingSections';
 import ErrorState from '../components/ErrorState';
 import LanguageToggle from '../components/LanguageToggle';
 import LoadingState from '../components/LoadingState';
+import WebPageContainer from '../components/WebPageContainer';
+import useIsWideScreen from '../hooks/useIsWideScreen';
 import { ONBOARDING_TOPICS, OnboardingTopic, TOPIC_SLUG } from '../data/onboardingTopics';
 import { toContentLanguage } from '../i18n/contentLanguage';
 import { useInsightsStore } from '../store/useInsightsStore';
@@ -93,6 +95,13 @@ export default function HomeDashboardScreen() {
   const [activeTab, setActiveTab] = useState(0);
   const pagerRef = useRef<ScrollView>(null);
   const now = useLiveClock();
+  // Desktop shows only the active tab's content directly (the chip row
+  // above already drives which one that is) instead of a horizontal-
+  // paging ScrollView sized to Dimensions.get('window').width — that
+  // width is captured once at module load and never adapts to a resized
+  // browser window, and swipe-paging has no equivalent on a mouse/
+  // trackpad anyway.
+  const isWide = useIsWideScreen();
 
   // Phase 7 — adaptive multi-session onboarding: null unless the backend
   // has something worth asking about right now (see onboarding_followup_
@@ -182,6 +191,116 @@ export default function HomeDashboardScreen() {
     { key: 'today', label: t('home.todayCardTitle'), icon: 'today-outline' as const },
     ...preferences.map((p) => ({ key: p, label: t(`preferences.${p}`), icon: PREFERENCE_ICONS[p] })),
   ];
+
+  // The "today" tab and each preference tab's content, factored out so
+  // both the native/narrow horizontal pager below AND the wide-screen
+  // single-tab view can render the exact same JSX instead of duplicating
+  // it — see isWide above.
+  const renderTodayContent = () => (
+    <>
+      {readingError && !reading && (
+        <ErrorState title={t('kundali.errorTitle')} message={t('horoscope.errorMessage')} onRetry={loadReading} />
+      )}
+      {!reading && !readingError && <LoadingState message={t('horoscope.loadingMessage')} />}
+      {reading && identity && (
+        <Card style={styles.horoscopeHeaderCard}>
+          <Text style={styles.horoscopeHeaderTitle}>{t('horoscope.todaysHoroscopeTitle')}</Text>
+          <Text style={styles.horoscopeHeaderRashi}>
+            {t('horoscope.yourRashiLabel', {
+              rashi: language === 'hi' ? identity.moonSign.signHi : identity.moonSign.signEn,
+            })}
+          </Text>
+        </Card>
+      )}
+      {reading && <DailyReadingSections reading={reading} />}
+
+      <View style={styles.quickActionsRow}>
+        {quickActions.map((action) => (
+          <Pressable
+            key={action.key}
+            onPress={action.onPress}
+            accessibilityRole="button"
+            accessibilityLabel={action.label}
+            style={({ pressed }) => [styles.quickAction, pressed && styles.quickActionPressed]}
+          >
+            <Ionicons name={action.icon} size={24} color={colors.primary} />
+            <Text style={styles.quickActionLabel} numberOfLines={2}>
+              {action.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {nextOnboardingTopic && (
+        <Pressable onPress={() => navigation.navigate('FollowUpQuestions', { topic: nextOnboardingTopic })}>
+          <Card style={styles.followUpCard}>
+            <View style={styles.followUpRow}>
+              <Ionicons name="chatbubble-ellipses-outline" size={22} color={colors.primary} />
+              <Text style={styles.followUpText}>
+                {t('home.followUpCardTitle', { topic: t(`onboardingTopics.${nextOnboardingTopic}`) })}
+              </Text>
+            </View>
+          </Card>
+        </Pressable>
+      )}
+    </>
+  );
+
+  const renderPreferenceContent = (pref: PreferenceKey) => {
+    const areaKey = AREA_KEY_MAP[pref];
+    const focusReading = focusReadings?.find((r) => r.area === areaKey) ?? null;
+    return (
+      <>
+        <Card style={styles.todayCard}>
+          <View style={styles.todayHeaderRow}>
+            <Text style={styles.todayCardTitle}>{t(`preferences.${pref}`)}</Text>
+            {focusReading && <Text style={styles.todayRating}>{focusReading.rating}/10</Text>}
+          </View>
+
+          {focusReadings === null && <LoadingState message={t('common.loading')} />}
+
+          {focusReadings !== null && !focusReading && <Text style={styles.body}>{t('kundali.errorMessage')}</Text>}
+
+          {focusReading && (
+            <>
+              <View style={styles.tagsRow}>
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>{focusReading.theme}</Text>
+                </View>
+              </View>
+              <Text style={styles.body}>{focusReading.summary}</Text>
+            </>
+          )}
+        </Card>
+
+        {focusReading && (
+          <>
+            <Card>
+              <Text style={styles.focusSectionLabel}>{t('home.focusMeaningLabel')}</Text>
+              <Text style={styles.body}>{focusReading.meaning}</Text>
+            </Card>
+
+            <Card style={styles.avoidCard}>
+              <Text style={[styles.focusSectionLabel, styles.avoidLabel]}>{t('home.focusAvoidLabel')}</Text>
+              <Text style={styles.body}>{focusReading.avoidToday}</Text>
+            </Card>
+
+            <Card style={styles.doCard}>
+              <Text style={[styles.focusSectionLabel, styles.doLabel]}>{t('home.focusDoLabel')}</Text>
+              <Text style={styles.body}>{focusReading.focusToday}</Text>
+            </Card>
+
+            {focusReading.transitNote && (
+              <Card>
+                <Text style={styles.focusSectionLabel}>{t('horoscope.transitHighlightLabel')}</Text>
+                <Text style={styles.body}>{focusReading.transitNote}</Text>
+              </Card>
+            )}
+          </>
+        )}
+      </>
+    );
+  };
 
   const goToTab = (index: number) => {
     setActiveTab(index);
@@ -294,124 +413,32 @@ export default function HomeDashboardScreen() {
         </View>
       )}
 
-      <ScrollView
-        ref={pagerRef}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={handleMomentumEnd}
-        style={{ flex: 1 }}
-      >
-        <ScrollView style={{ width: SCREEN_WIDTH }} contentContainerStyle={styles.content}>
-          {readingError && !reading && (
-            <ErrorState
-              title={t('kundali.errorTitle')}
-              message={t('horoscope.errorMessage')}
-              onRetry={loadReading}
-            />
-          )}
-          {!reading && !readingError && <LoadingState message={t('horoscope.loadingMessage')} />}
-          {reading && identity && (
-            <Card style={styles.horoscopeHeaderCard}>
-              <Text style={styles.horoscopeHeaderTitle}>{t('horoscope.todaysHoroscopeTitle')}</Text>
-              <Text style={styles.horoscopeHeaderRashi}>
-                {t('horoscope.yourRashiLabel', {
-                  rashi: language === 'hi' ? identity.moonSign.signHi : identity.moonSign.signEn,
-                })}
-              </Text>
-            </Card>
-          )}
-          {reading && <DailyReadingSections reading={reading} />}
+      {isWide ? (
+        <WebPageContainer style={styles.webTabContent}>
+          <ScrollView contentContainerStyle={styles.content}>
+            {activeTab === 0 ? renderTodayContent() : renderPreferenceContent(preferences[activeTab - 1])}
+          </ScrollView>
+        </WebPageContainer>
+      ) : (
+        <ScrollView
+          ref={pagerRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={handleMomentumEnd}
+          style={{ flex: 1 }}
+        >
+          <ScrollView style={{ width: SCREEN_WIDTH }} contentContainerStyle={styles.content}>
+            {renderTodayContent()}
+          </ScrollView>
 
-          <View style={styles.quickActionsRow}>
-            {quickActions.map((action) => (
-              <Pressable
-                key={action.key}
-                onPress={action.onPress}
-                accessibilityRole="button"
-                accessibilityLabel={action.label}
-                style={({ pressed }) => [styles.quickAction, pressed && styles.quickActionPressed]}
-              >
-                <Ionicons name={action.icon} size={24} color={colors.primary} />
-                <Text style={styles.quickActionLabel} numberOfLines={2}>
-                  {action.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {nextOnboardingTopic && (
-            <Pressable onPress={() => navigation.navigate('FollowUpQuestions', { topic: nextOnboardingTopic })}>
-              <Card style={styles.followUpCard}>
-                <View style={styles.followUpRow}>
-                  <Ionicons name="chatbubble-ellipses-outline" size={22} color={colors.primary} />
-                  <Text style={styles.followUpText}>
-                    {t('home.followUpCardTitle', { topic: t(`onboardingTopics.${nextOnboardingTopic}`) })}
-                  </Text>
-                </View>
-              </Card>
-            </Pressable>
-          )}
-        </ScrollView>
-
-        {preferences.map((pref) => {
-          const areaKey = AREA_KEY_MAP[pref];
-          const focusReading = focusReadings?.find((r) => r.area === areaKey) ?? null;
-          return (
+          {preferences.map((pref) => (
             <ScrollView key={pref} style={{ width: SCREEN_WIDTH }} contentContainerStyle={styles.content}>
-              <Card style={styles.todayCard}>
-                <View style={styles.todayHeaderRow}>
-                  <Text style={styles.todayCardTitle}>{t(`preferences.${pref}`)}</Text>
-                  {focusReading && <Text style={styles.todayRating}>{focusReading.rating}/10</Text>}
-                </View>
-
-                {focusReadings === null && <LoadingState message={t('common.loading')} />}
-
-                {focusReadings !== null && !focusReading && (
-                  <Text style={styles.body}>{t('kundali.errorMessage')}</Text>
-                )}
-
-                {focusReading && (
-                  <>
-                    <View style={styles.tagsRow}>
-                      <View style={styles.tag}>
-                        <Text style={styles.tagText}>{focusReading.theme}</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.body}>{focusReading.summary}</Text>
-                  </>
-                )}
-              </Card>
-
-              {focusReading && (
-                <>
-                  <Card>
-                    <Text style={styles.focusSectionLabel}>{t('home.focusMeaningLabel')}</Text>
-                    <Text style={styles.body}>{focusReading.meaning}</Text>
-                  </Card>
-
-                  <Card style={styles.avoidCard}>
-                    <Text style={[styles.focusSectionLabel, styles.avoidLabel]}>{t('home.focusAvoidLabel')}</Text>
-                    <Text style={styles.body}>{focusReading.avoidToday}</Text>
-                  </Card>
-
-                  <Card style={styles.doCard}>
-                    <Text style={[styles.focusSectionLabel, styles.doLabel]}>{t('home.focusDoLabel')}</Text>
-                    <Text style={styles.body}>{focusReading.focusToday}</Text>
-                  </Card>
-
-                  {focusReading.transitNote && (
-                    <Card>
-                      <Text style={styles.focusSectionLabel}>{t('horoscope.transitHighlightLabel')}</Text>
-                      <Text style={styles.body}>{focusReading.transitNote}</Text>
-                    </Card>
-                  )}
-                </>
-              )}
+              {renderPreferenceContent(pref)}
             </ScrollView>
-          );
-        })}
-      </ScrollView>
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -420,6 +447,9 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  webTabContent: {
+    flex: 1,
   },
   hero: {
     paddingHorizontal: spacing.md,

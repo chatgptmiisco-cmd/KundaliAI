@@ -438,6 +438,124 @@ async def test_chat_reply_answers_hindi_career_question():
     assert reply == _CHAT_CONTEXT["house_verdict"][10]
 
 
+def test_house_technical_hint_names_the_real_sign_lord_and_placement():
+    from app.services.interpretation.templates import _house_technical_hint
+
+    context = {
+        "house_technical": {
+            10: {"house_sign": "Taurus", "planet_name": "Venus", "rules_houses": [4, 11], "placed_house": 4, "placed_sign": "Scorpio"},
+        }
+    }
+    hint = _house_technical_hint("career", context, hi=False)
+    assert hint == "Your 10th house is Taurus, ruled by Venus, currently placed in your 4th house (Scorpio)."
+
+
+def test_house_technical_hint_avoids_repeating_the_same_house_when_the_lord_sits_in_its_own_house():
+    from app.services.interpretation.templates import _house_technical_hint
+
+    context = {
+        "house_technical": {
+            10: {"house_sign": "Taurus", "planet_name": "Venus", "rules_houses": [10], "placed_house": 10, "placed_sign": "Taurus"},
+        }
+    }
+    hint = _house_technical_hint("career", context, hi=False)
+    assert hint == "Your 10th house is Taurus, and its ruler Venus sits right there too."
+    assert hint.count("10th house") == 1
+
+
+def test_house_technical_hint_applies_to_topics_with_no_timing_engine_too():
+    from app.services.interpretation.templates import _house_technical_hint
+
+    context = {"house_technical": {6: {"house_sign": "Aries", "planet_name": "Mars", "rules_houses": [1, 6], "placed_house": 6, "placed_sign": "Aries"}}}
+    assert _house_technical_hint("health", context, hi=False) is not None
+
+
+def test_house_technical_hint_is_none_without_data():
+    from app.services.interpretation.templates import _house_technical_hint
+
+    assert _house_technical_hint("career", {}, hi=False) is None
+
+
+async def test_chat_reply_career_topic_answer_includes_house_technical_facts():
+    context = {**_CHAT_CONTEXT, "house_technical": {
+        10: {"house_sign": "Taurus", "planet_name": "Venus", "rules_houses": [4, 11], "placed_house": 4, "placed_sign": "Scorpio"},
+    }}
+    reply = await interpreter.chat_reply(_history("How's my career looking this year?"), context, "en")
+    assert reply.startswith(_CHAT_CONTEXT["house_verdict"][10])
+    assert "Taurus" in reply and "Venus" in reply and "Scorpio" in reply
+
+
+def test_life_context_hint_surfaces_a_known_fact_for_the_matching_domain():
+    from app.services.interpretation.templates import _life_context_hint
+
+    context = {"life_context": {"career": {"employer_type": {"value": "works at a startup", "confidence": "high"}}}}
+    hint = _life_context_hint("career", context, hi=False)
+    assert hint == "Worth keeping in mind, from what you've shared before: works at a startup."
+
+
+def test_life_context_hint_is_none_without_a_matching_fact_or_domain_mapping():
+    from app.services.interpretation.templates import _life_context_hint
+
+    assert _life_context_hint("career", {"life_context": {}}, hi=False) is None
+    assert _life_context_hint("career", {"life_context": {"money": {"k": {"value": "x"}}}}, hi=False) is None
+    # "health" has no life_context domain mapping at all.
+    assert _life_context_hint("health", {"life_context": {"identity": {"k": {"value": "x"}}}}, hi=False) is None
+
+
+async def test_chat_reply_career_topic_answer_includes_a_known_life_context_fact():
+    context = {**_CHAT_CONTEXT, "life_context": {"career": {"employer_type": {"value": "works at a startup"}}}}
+    reply = await interpreter.chat_reply(_history("How's my career looking this year?"), context, "en")
+    assert reply.startswith(_CHAT_CONTEXT["house_verdict"][10])
+    assert "works at a startup" in reply
+
+
+def test_topic_timing_hint_appends_the_real_window_to_a_plain_topic_answer():
+    """The actual fix for "generic answer that shows nothing about the
+    question": chat.py already auto-fetches the topic's timing counterpart
+    windows in the background (see _TOPIC_TIMING_COUNTERPART) even for a
+    plain "how's my career looking" question — this locks in that the
+    template path now actually surfaces that already-computed data instead
+    of stopping at the bare mood-word verdict."""
+    from app.services.interpretation.templates import _topic_timing_hint
+
+    context = {
+        "career_timing_windows": [
+            {
+                "start_date": "2031-05-04", "end_date": "2033-11-21", "reason": "irrelevant here",
+                "antardasha_lord_name": "Mercury", "transit_corroborated": False,
+                "evidence_level": "house_lord_antardasha", "confidence": "strong",
+                "literal_event_plausible": True,
+            }
+        ],
+        "career_timing_direction": "future",
+    }
+    hint = _topic_timing_hint("career", context, hi=False)
+    assert hint is not None
+    assert "2031-05-04" in hint and "2033-11-21" in hint and "Mercury" in hint
+
+
+def test_topic_timing_hint_is_none_without_a_timing_counterpart_or_windows():
+    from app.services.interpretation.templates import _topic_timing_hint
+
+    # "health" has no entry in _TOPIC_TIMING_COUNTERPART at all.
+    assert _topic_timing_hint("health", {"health_timing_windows": [{"start_date": "x"}]}, hi=False) is None
+    # "career" has a counterpart, but nothing was actually fetched this turn.
+    assert _topic_timing_hint("career", {}, hi=False) is None
+
+
+async def test_chat_reply_career_topic_answer_includes_the_real_timing_window_when_available():
+    context = {**_CHAT_CONTEXT, "career_timing_windows": [
+        {
+            "start_date": "2031-05-04", "end_date": "2033-11-21", "reason": "irrelevant here",
+            "antardasha_lord_name": "Mercury", "transit_corroborated": False,
+            "evidence_level": "house_lord_antardasha", "confidence": "strong", "literal_event_plausible": True,
+        }
+    ], "career_timing_direction": "future"}
+    reply = await interpreter.chat_reply(_history("How's my career looking this year?"), context, "en")
+    assert reply.startswith(_CHAT_CONTEXT["house_verdict"][10])
+    assert "2031-05-04" in reply and "Mercury" in reply
+
+
 async def test_chat_reply_answers_dosha_question_with_real_findings():
     reply = await interpreter.chat_reply(_history("Am I manglik?"), _CHAT_CONTEXT, "en")
     assert "Manglik" in reply
