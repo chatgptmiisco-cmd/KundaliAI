@@ -19,6 +19,7 @@ app.services.voice.stt: any OpenAI failure here (quota, network, whatever)
 degrades to "no retrieved context this turn," never a broken reply."""
 import json
 import math
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -40,6 +41,50 @@ _DEFAULT_TOP_K = 3
 # closer to [0, 1] for same-domain text; below this, a "match" is closer
 # to noise than a genuine callback and is worse than saying nothing.
 _DEFAULT_MIN_SIMILARITY = 0.75
+
+
+async def retrieve_native_turns(db, user_id, categories, query_text, limit=3, exclude_ids=None):
+    """Cross-persona, user-scoped lexical retrieval with no embeddings required.
+
+    Searches user statements rather than reclassifying an assistant's astrology
+    as user knowledge. At most three short relevant quotes enter the response
+    context. Existing semantic retrieval remains available separately.
+
+    Three guards, all caught live off real transcripts: a past QUESTION
+    ("what does my kundli say about marriage?") is never a "situation" to
+    check back on — native_response.compose's callback wording only makes
+    sense for a stated fact, so a row matching native_understanding.
+    is_question is skipped outright rather than quoted back nonsensically.
+    A bare navigational reply ("relationship", "career" — picking a topic,
+    not stating a fact) is skipped the same way (is_navigational_reply).
+    `exclude_ids` (already-surfaced quote ids, tracked in ConversationState
+    by chat.py) keeps the same callback from resurfacing every single turn
+    the topic recurs — once shown, it's shown, not repeated forever."""
+    from app.services.native_understanding import detect_intents, is_navigational_reply, is_question
+    from app.services.chat_understanding import relevant_domains
+    domains = set(relevant_domains(categories))
+    if not domains:
+        return []
+    exclude_ids = exclude_ids or set()
+    words = set(re.findall(r"\w{3,}", query_text.lower())) - {"what", "when", "will", "should", "about", "with", "have", "that", "this", "does"}
+    scored = []
+    # Stream history in batches: bound response context, not the user's memory
+    # lifetime. No full transcript is sent to any provider.
+    result = await db.stream_scalars(select(ChatMessage).where(
+        ChatMessage.user_id == user_id, ChatMessage.role == "user"
+    ).order_by(ChatMessage.id.desc()).execution_options(yield_per=100))
+    async for row in result:
+        if row.id in exclude_ids or is_question(row.content) or is_navigational_reply(row.content):
+            continue
+        row_domains = set(relevant_domains(detect_intents(row.content)))
+        if not domains.intersection(row_domains):
+            continue
+        overlap = len(words & set(re.findall(r"\w{3,}", row.content.lower())))
+        scored.append((overlap, row.id, row))
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        del scored[limit:]
+    return [{"text": row.content[:360], "when": _relative_when(row.created_at), "source": "user_quote", "id": row.id}
+            for _, _, row in scored]
 
 
 def _turn_text(user_message: str, assistant_reply: str) -> str:

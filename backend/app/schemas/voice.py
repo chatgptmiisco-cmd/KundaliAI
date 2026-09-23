@@ -36,6 +36,7 @@ class ChatMessageIn(BaseModel):
     # against a fixed enum so an unrecognized/omitted id just falls back to
     # the old persona-agnostic universal router rather than erroring.
     rishi_id: str | None = None
+    engine_only: bool = False
 
 
 class ChatMessageOut(BaseModel):
@@ -47,3 +48,4 @@ class ChatMessageOut(BaseModel):
     # persona's replies can still be attributed to a real specialist (e.g.
     # "via Bhrigu"). None when the message didn't match a known category.
     answered_by_rishi_id: str | None = None
+    response_source: Literal["native", "native_styled"] = "native"

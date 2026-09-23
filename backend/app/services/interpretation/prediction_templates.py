@@ -689,17 +689,20 @@ def marriage_window_reason_text(
     reinterpretation = _reinterpretation_sentence("marriage", literal_event_plausible, hi)
     if reinterpretation is not None:
         mechanism += " " + reinterpretation
-    if already_married and tense == "future":
-        mechanism += " " + _already_married_sentence(marriage_date, hi)
     if tense == "past":
         mechanism = _apply_past_tense(mechanism, hi)
     weak_evidence = _weak_evidence_sentence("marriage", evidence_level, hi)
-    if weak_evidence is not None:
-        # Leads the whole reason, ahead of `effect` — see _weak_evidence_sentence's
-        # docstring for why a backdrop-only window's low-confidence framing
-        # must not be buried after an otherwise-confident-sounding paragraph.
-        return f"{weak_evidence} {effect} {mechanism}"
-    return f"{effect} {mechanism}"
+    reply = f"{weak_evidence} {effect} {mechanism}" if weak_evidence is not None else f"{effect} {mechanism}"
+    # Phase 9/10 — the already-married reframe changes the whole FRAME of
+    # the answer ("don't read this as marriage timing"), so it leads even
+    # ahead of weak_evidence's own low-confidence caveat, not buried at the
+    # end of `mechanism` after every other factor as it was before — the
+    # exact bug caught live: a married user asking about marriage got the
+    # right reframing sentence, just after several paragraphs of jargon
+    # they'd already stopped reading by.
+    if already_married and tense == "future":
+        return f"{_already_married_sentence(marriage_date, hi)} {reply}"
+    return reply
 
 
 # --- Life-event timing (career/wealth/children/foreign_travel) reason text -

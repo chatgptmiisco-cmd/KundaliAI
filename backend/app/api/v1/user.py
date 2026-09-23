@@ -23,6 +23,12 @@ from app.services.chat_understanding import extract_onboarding_context
 router = APIRouter(prefix="/user", tags=["user"])
 
 
+@router.get("/life-model")
+async def get_life_model(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.user_context_engine import life_model
+    return await life_model(db, user)
+
+
 @router.get("/profile", response_model=UserProfileOut)
 async def get_profile(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     return await user_service.get_user_profile(db, user)

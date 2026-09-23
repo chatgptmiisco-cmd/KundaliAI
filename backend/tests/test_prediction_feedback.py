@@ -150,12 +150,12 @@ async def test_chat_surfaces_the_resolution_verdict_into_context_for_the_reply(c
 
     captured = {}
 
-    async def _fake_chat_reply(self, history, context, language):
+    async def _fake_chat_reply(history, context, language):
         captured.update(context)
         return "ok"
 
     from app.services.interpretation.templates import TemplateInterpreter
-    monkeypatch.setattr(TemplateInterpreter, "chat_reply", _fake_chat_reply)
+    monkeypatch.setattr("app.services.native_response.compose", _fake_chat_reply)
 
     resp = await client.post(
         "/api/v1/chat/astro", headers=headers,

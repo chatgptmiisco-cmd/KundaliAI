@@ -1,10 +1,29 @@
-from functools import lru_cache
+from functools import lru_cache, wraps
+from contextvars import ContextVar
 
 from app.core.config import Settings, get_settings
 from app.services.interpretation.base import Interpreter
 from app.services.interpretation.claude_interpreter import ClaudeInterpreter
 from app.services.interpretation.openai_interpreter import OpenAIInterpreter
 from app.services.interpretation.templates import TemplateInterpreter
+
+_native_execution = ContextVar("native_interpretation", default=False)
+
+
+def native_chat(function):
+    """Request-local policy also covers nested chart/prediction service calls.
+
+    ContextVar avoids changing global settings for concurrent report requests.
+    Optional chat styling is separate and cannot author interpretation.
+    """
+    @wraps(function)
+    async def wrapped(*args, **kwargs):
+        token = _native_execution.set(True)
+        try:
+            return await function(*args, **kwargs)
+        finally:
+            _native_execution.reset(token)
+    return wrapped
 
 
 def _should_use_ai(settings: Settings) -> bool:
@@ -17,7 +36,7 @@ def _should_use_ai(settings: Settings) -> bool:
 
 
 @lru_cache
-def get_interpreter() -> Interpreter:
+def _configured_interpreter() -> Interpreter:
     settings = get_settings()
     if not _should_use_ai(settings):
         return TemplateInterpreter()
@@ -28,3 +47,9 @@ def get_interpreter() -> Interpreter:
     if settings.openai_api_key:
         return OpenAIInterpreter()
     return ClaudeInterpreter()
+
+
+def get_interpreter() -> Interpreter:
+    if _native_execution.get():
+        return TemplateInterpreter()
+    return _configured_interpreter()

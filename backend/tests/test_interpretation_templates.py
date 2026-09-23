@@ -438,6 +438,38 @@ async def test_chat_reply_answers_hindi_career_question():
     assert reply == _CHAT_CONTEXT["house_verdict"][10]
 
 
+async def test_marriage_timing_blocks_the_full_breakdown_for_an_already_married_user():
+    """Regression guard for a real, reproduced bug: an explicit, direct
+    "shaadi kab hogi" (when will marriage happen) from an ALREADY MARRIED
+    user got the FULL detailed first-marriage breakdown (dates, natal
+    strength, retrograde, D9, evidence level, age estimate) with only a
+    single reframe sentence buried inside — this eligibility check must be
+    enforced every time, not just the first time in a conversation (that's
+    conversation_engine's separate, one-time "marriage_clarified" gate,
+    which this does NOT depend on)."""
+    context = {
+        **_CHAT_CONTEXT, "detected_categories": ["marriage_timing"],
+        "life_state": {"marital_status": "married"},
+        "marriage_timing_direction": "future",
+        "marriage_timing_windows": [{
+            "start_date": "2025-10-31", "end_date": "2028-09-06", "mahadasha_lord_name": "Saturn",
+            "antardasha_lord_name": "Saturn", "score": 5, "evidence_level": "house_lord_antardasha",
+            "reason": "Saturn is running.", "transit_corroborated": False,
+        }],
+    }
+    reply = await interpreter.chat_reply(_history("shaadi kab hogi"), context, "en")
+    assert "already married" in reply.lower()
+    assert "2025-10-31" not in reply
+    assert "retrograde" not in reply.lower()
+    assert "evidence" not in reply.lower()
+
+    # A PAST marriage-timing question is still a sensible ask regardless of
+    # current status (e.g. "what led to my actual marriage") — not blocked.
+    past_context = {**context, "marriage_timing_direction": "past"}
+    past_reply = await interpreter.chat_reply(_history("meri shaadi kab hui thi"), past_context, "en")
+    assert "already married" not in past_reply.lower()
+
+
 def test_house_technical_hint_names_the_real_sign_lord_and_placement():
     from app.services.interpretation.templates import _house_technical_hint
 
@@ -476,12 +508,24 @@ def test_house_technical_hint_is_none_without_data():
     assert _house_technical_hint("career", {}, hi=False) is None
 
 
-async def test_chat_reply_career_topic_answer_includes_house_technical_facts():
+async def test_chat_reply_career_topic_answer_omits_house_technical_facts_by_default():
+    """Phase 12 — jargon control: house/sign/planet names only render when
+    the user actually asks a technical question (see wants_technical_detail).
+    A plain "how's my career looking" no longer gets "Taurus, ruled by
+    Venus" unasked-for — that was the exact live complaint."""
     context = {**_CHAT_CONTEXT, "house_technical": {
         10: {"house_sign": "Taurus", "planet_name": "Venus", "rules_houses": [4, 11], "placed_house": 4, "placed_sign": "Scorpio"},
     }}
     reply = await interpreter.chat_reply(_history("How's my career looking this year?"), context, "en")
     assert reply.startswith(_CHAT_CONTEXT["house_verdict"][10])
+    assert "Taurus" not in reply and "Venus" not in reply
+
+
+async def test_chat_reply_career_topic_answer_includes_house_technical_facts_when_asked():
+    context = {**_CHAT_CONTEXT, "house_technical": {
+        10: {"house_sign": "Taurus", "planet_name": "Venus", "rules_houses": [4, 11], "placed_house": 4, "placed_sign": "Scorpio"},
+    }}
+    reply = await interpreter.chat_reply(_history("Why is my career like this? Which house is it?"), context, "en")
     assert "Taurus" in reply and "Venus" in reply and "Scorpio" in reply
 
 
@@ -507,6 +551,100 @@ async def test_chat_reply_career_topic_answer_includes_a_known_life_context_fact
     reply = await interpreter.chat_reply(_history("How's my career looking this year?"), context, "en")
     assert reply.startswith(_CHAT_CONTEXT["house_verdict"][10])
     assert "works at a startup" in reply
+
+
+async def test_chat_reply_uses_age_band_lead_in_when_no_fact_is_known():
+    """Phase 13 (Stage 2) — Life Stage Awareness: with no known occupation or
+    business fact to ground a reframe, an age-appropriate framing still
+    leads the reply instead of a one-size-fits-all verdict for every age."""
+    context = {**_CHAT_CONTEXT, "user_age": 22}
+    reply = await interpreter.chat_reply(_history("How's my career looking this year?"), context, "en")
+    assert reply.startswith("At this stage, career questions are usually more about direction")
+    older_context = {**_CHAT_CONTEXT, "user_age": 55}
+    older_reply = await interpreter.chat_reply(_history("How's my career looking this year?"), older_context, "en")
+    assert older_reply.startswith("At this stage, career questions are more often about leadership")
+
+
+async def test_chat_reply_known_fact_still_takes_precedence_over_age_band():
+    """An age band is a real signal but weaker than an actual stated fact —
+    when both are available, only the fact-based reframe should lead, not
+    both stacked together."""
+    context = {
+        **_CHAT_CONTEXT, "user_age": 22,
+        "life_context": {"career": {"occupation": {"value": "developer", "source": "user_stated", "confidence": "high"}}},
+    }
+    reply = await interpreter.chat_reply(_history("How's my career looking this year?"), context, "en")
+    assert reply.startswith("Since you work as developer")
+    assert "At this stage, career questions" not in reply
+
+
+async def test_chat_reply_age_band_extends_to_a_previously_uncovered_topic():
+    """Stage 2 — the remaining 5 lower-traffic topics (health, education,
+    friends, travel, siblings) had zero context-aware framing before this;
+    age-banding is the mechanical fix that now reaches all of them."""
+    context = {**_CHAT_CONTEXT, "user_age": 22, "house_verdict": {**_CHAT_CONTEXT["house_verdict"], 6: "Your health may be fine at times and weak at other times."}}
+    reply = await interpreter.chat_reply(_history("How's my health looking?"), context, "en")
+    assert reply.startswith("At this age, health questions are usually about building good habits")
+
+
+async def test_chat_reply_relationship_conflict_references_the_actual_stated_concern():
+    """Regression guard for a real, reproduced bug: a distress/conflict
+    message got the exact same flat "your relationships may have good and
+    hard moments" line a neutral status check would — once the concern
+    itself is known (see conversation_engine's concern_type gate, asked
+    before this point is reached), the reply should name it directly
+    instead of staying generic, and never tack on an irrelevant marriage-
+    timing window."""
+    context = {
+        **_CHAT_CONTEXT, "detected_categories": ["relationship_conflict"],
+        "life_context": {"relationships": {"concern_type": {"value": "we keep having the same argument about money"}}},
+    }
+    reply = await interpreter.chat_reply(_history("main shaadi se dukhi hoon"), context, "en")
+    assert "we keep having the same argument about money" in reply
+    assert "may have both good and hard moments" not in reply
+    assert "window for marriage" not in reply
+
+
+async def test_chat_reply_relationship_conflict_pulls_in_real_chart_specific_content():
+    """Regression guard for a real, reproduced complaint: even after naming
+    the stated concern, the CLOSING line was itself a fixed template ("a
+    chart alone can't resolve this... good time for patience") with zero
+    actual chart content — exactly the "friend based on charts and
+    astrology, not a template" complaint. Must now pull in the SAME real,
+    planet-specific period content the "dasha" category already uses,
+    keyed by whichever planet is ACTUALLY running for this person — not a
+    fixed sentence regardless of their chart."""
+    context = {
+        **_CHAT_CONTEXT, "detected_categories": ["relationship_conflict"], "antardasha_lord_code": "Sa",
+        "life_context": {"relationships": {"concern_type": {"value": "we keep having the same fight"}}},
+    }
+    reply = await interpreter.chat_reply(_history("main shaadi se dukhi hoon"), context, "en")
+    assert "we keep having the same fight" in reply
+    # The real Saturn one_liner from _PERIOD_CONTENT_EN, not a generic close.
+    assert "grind, not a disaster" in reply
+    assert "a chart alone can't resolve" in reply  # acknowledgment stays, just no longer the ENTIRE content
+
+
+async def test_chat_reply_family_planning_framing_fires_from_the_category_alone():
+    """Regression guard for a real, reproduced bug: picking "family
+    planning" from the married-status menu (a category selection, not a
+    full sentence like "we are planning a family") still got the plain
+    "married life" reframe instead of a family-planning-aware one, because
+    the framing only checked for a separately-EXTRACTED historical fact —
+    the current question itself being family_planning is real evidence too."""
+    context = {**_CHAT_CONTEXT, "detected_categories": ["family_planning"], "life_state": {"marital_status": "married"}}
+    reply = await interpreter.chat_reply(_history("yes, Family planning"), context, "en")
+    assert "thinking about family planning" in reply.lower()
+    assert "family growth" in reply.lower()
+
+
+async def test_chat_reply_relationship_conflict_falls_back_honestly_without_a_known_concern():
+    """Without a known concern to reference, the honest fallback is the
+    plain verdict (still fronted by the sub-intent's own naming lead-in) —
+    never a fabricated concern."""
+    context = {**_CHAT_CONTEXT, "detected_categories": ["relationship_conflict"]}
+    reply = await interpreter.chat_reply(_history("main shaadi se dukhi hoon"), context, "en")
+    assert _CHAT_CONTEXT["house_verdict"][7] in reply
 
 
 def test_topic_timing_hint_appends_the_real_window_to_a_plain_topic_answer():
@@ -619,6 +757,51 @@ async def test_chat_reply_does_not_answer_life_theme_when_date_unresolvable():
     context = {**_CHAT_CONTEXT, "birth_year": 1990}  # no life_theme data attached — chat.py never fetched it
     reply = await interpreter.chat_reply(_history("Why did things feel so hard for me?"), context, "en")
     assert "Saturn Mahadasha" not in reply
+
+
+async def test_chat_reply_surfaces_past_event_candidate_as_a_question_not_a_fact():
+    """Regression guard for a real, reproduced bug: Product spec §13's Past
+    Event Mode (chat.py's _recent_past_candidate) was fully implemented on
+    the data-collection side but the rendering side was only ever written
+    for the old LLM-based openai_interpreter.py — this native, no-LLM path
+    (the primary one now) silently never turned that candidate into any
+    visible text, so an open-ended past question fell all the way through
+    to the generic Lagna-intro fallback instead of Product spec §13's
+    "did something happen around [dates]?" question."""
+    context = {
+        **_CHAT_CONTEXT, "birth_year": 1990,
+        "past_event_candidate": {
+            "domains": ["career"], "start_date": "2016-01-01", "end_date": "2017-06-01",
+            "reason": "irrelevant internal reasoning", "confidence": "medium",
+        },
+    }
+    reply = await interpreter.chat_reply(_history("What important happened in my past?"), context, "en")
+    assert "2016-01-01" in reply and "2017-06-01" in reply
+    assert "career" in reply
+    assert "don't want to guess" in reply.lower()
+
+
+def test_decision_signal_recognizes_common_hinglish_leave_job_for_business_phrasing():
+    """Regression guard for a real, reproduced bug: "Kya mujhe job chhodkar
+    business karna chahiye?" (a very common Hinglish decision-question
+    construction) matched neither the pure-English keywords (which require
+    "my job") nor the pure-Hindi ones (which require "naukri") — it fell
+    through to a plain career+money answer instead of gating on the
+    decision-critical questions DECISION_SLOTS asks before advising."""
+    from app.services.interpretation.templates import _detect_categories
+
+    categories = _detect_categories("kya mujhe job chhodkar business karna chahiye")
+    assert "job_change_decision" in categories
+    assert "business_start_decision" in categories
+
+
+def test_past_tense_recognizes_pichle_without_an_adjacent_kya_hua_phrase():
+    """Regression guard for a real, reproduced bug: "pichle kuch saalon mein
+    kya important hua" (in the past few years, what important happened) has
+    "kya" and "hua" separated by another word, so the existing "kya hua"
+    phrase keyword never matched, and "pichle" (past/previous) wasn't
+    recognized as a signal on its own."""
+    assert message_mentions_past_tense("meri life mein pichle kuch saalon mein kya important hua")
 
 
 async def test_chat_reply_word_boundary_matching_avoids_substring_false_positives():

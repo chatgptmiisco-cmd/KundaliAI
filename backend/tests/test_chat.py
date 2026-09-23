@@ -26,6 +26,26 @@ def _unlock_strategy_tier(monkeypatch):
     monkeypatch.setattr("app.api.deps.get_settings", lambda: Settings(all_features_free=True))
 
 
+async def test_chat_astro_mid_conversation_greeting_gets_a_short_nudge_not_the_generic_fallback(client, monkeypatch):
+    """Regression guard for a real, reproduced bug: a bare "hi" sent LATER
+    in an existing conversation (not the opening message) used to fall
+    through to native_response.compose's generic "I have noted what you
+    shared" fallback — worded for a stated fact with no matching category,
+    which makes no sense for a greeting, and reads even more nonsensical
+    once GPT-beautified into "Thanks for sharing that with me!" when
+    nothing was actually shared."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+    first = await client.post("/api/v1/chat/astro", headers=headers, json={"message": "How's my career looking?", "language": "en"})
+    assert first.status_code == 200, first.text
+
+    resp = await client.post("/api/v1/chat/astro", headers=headers, json={"message": "hi", "language": "en"})
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "noted what you shared" not in reply.lower()
+    assert "thanks for sharing" not in reply.lower()
+
+
 async def test_chat_astro_answers_a_real_question_and_persists_history(client, monkeypatch):
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
@@ -232,6 +252,12 @@ async def test_chat_astro_exposes_astrological_fingerprint_fields_in_context(cli
     receives by monkeypatching the interpreter's chat_reply."""
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
+    # Stage 3's career-clarification gate only fires when NOTHING career-
+    # related is known yet — irrelevant to what this test actually checks
+    # (fingerprint fields), so give it a known career_state to skip past it
+    # straight to a real answer, same as every other test below that uses
+    # this message.
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
 
     captured = {}
 
@@ -281,6 +307,7 @@ async def test_chat_astro_shows_stress_house_when_genuinely_afflicted(client, mo
     unafflicted chart)."""
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
 
     monkeypatch.setattr(chat_module, "compute_natal_insights", lambda *a, **k: _fake_natal_insights(debilitated_stress_planet=True))
 
@@ -305,6 +332,7 @@ async def test_chat_astro_shows_stress_house_when_genuinely_afflicted(client, mo
 async def test_chat_astro_omits_stress_house_when_not_afflicted(client, monkeypatch):
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
 
     monkeypatch.setattr(chat_module, "compute_natal_insights", lambda *a, **k: _fake_natal_insights(debilitated_stress_planet=False))
 
@@ -442,6 +470,10 @@ async def test_chat_astro_returns_answered_by_rishi_id_attribution(client, monke
     render a small "answered by X" corner label (see detect_answering_rishi)."""
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
+    # Skip Stage 3's career-clarification gate — orthogonal to what this
+    # test checks (attribution), and would otherwise intercept the career
+    # question below with a menu instead of a real, attributable answer.
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
 
     resp = await client.post(
         "/api/v1/chat/astro",
@@ -706,6 +738,46 @@ async def test_chat_astro_requires_birth_profile(client):
     assert resp.status_code == 400
 
 
+async def test_chat_astro_excludes_the_immediately_preceding_turn_from_quote_candidates(client, monkeypatch):
+    """Regression guard for a real, reproduced bug: a message from literally
+    the turn immediately before this one (seconds old) got surfaced as "in
+    an earlier related conversation you said..." — technically true but
+    absurd to a real person. The last couple of the user's own turns must
+    never be quote candidates, on top of the existing already-surfaced
+    exclusion."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
+
+    captured_exclude_ids = {}
+
+    async def _fake_retrieve(db, user_id, categories, query_text, exclude_ids=None):
+        captured_exclude_ids["value"] = exclude_ids
+        return []
+
+    monkeypatch.setattr(chat_module, "chat_memory_service", chat_memory_service)
+    monkeypatch.setattr(chat_memory_service, "retrieve_native_turns", _fake_retrieve)
+
+    first = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": "How's my career looking?", "language": "en"},
+    )
+    assert first.status_code == 200, first.text
+
+    from sqlalchemy import select
+    from app.db.base import AsyncSessionLocal
+    from app.db.models.chat import ChatMessage
+    async with AsyncSessionLocal() as db:
+        first_user_message_id = await db.scalar(
+            select(ChatMessage.id).where(ChatMessage.role == "user").order_by(ChatMessage.id.asc()).limit(1)
+        )
+
+    second = await client.post(
+        "/api/v1/chat/astro", headers=headers, json={"message": "How's my money looking?", "language": "en"},
+    )
+    assert second.status_code == 200, second.text
+    assert first_user_message_id in captured_exclude_ids["value"]
+
+
 async def test_chat_astro_surfaces_retrieved_history_into_context(client, monkeypatch):
     """See app.services.chat_memory_service — older conversation context
     that fell out of the raw history window must reach the reply-
@@ -714,13 +786,14 @@ async def test_chat_astro_surfaces_retrieved_history_into_context(client, monkey
     retrieved_history_line)."""
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
 
     canned = [{"text": "User: I work at a startup.\nAssistant: noted.", "when": "3 months ago"}]
 
     async def _fake_retrieve(*args, **kwargs):
         return canned
 
-    monkeypatch.setattr(chat_memory_service, "retrieve_relevant_turns", _fake_retrieve)
+    monkeypatch.setattr(chat_memory_service, "retrieve_native_turns", _fake_retrieve)
 
     captured = {}
 
@@ -739,11 +812,14 @@ async def test_chat_astro_surfaces_retrieved_history_into_context(client, monkey
 
 
 async def test_chat_astro_embeds_the_assistant_reply_when_embedding_succeeds(client, monkeypatch):
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "chat_semantic_memory_enabled", True)
     from app.db.models.chat import ChatMessage
     from sqlalchemy import select
 
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
 
     async def _fake_embed_turn(user_message, assistant_reply):
         return [0.1, 0.2, 0.3], f"User: {user_message}\nAssistant: {assistant_reply}"

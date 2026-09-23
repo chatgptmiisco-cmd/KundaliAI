@@ -246,5 +246,9 @@ async def delete_account(db: AsyncSession, user_id: str) -> None:
     The audit trail survives deletion (subject_user_id is a plain string, not
     a foreign key) so "who deleted what, when" remains provable."""
     db.add(AuditLog(actor_user_id=None, subject_user_id=user_id, action="account.delete"))
+    # Existing SQLite installations may not enforce foreign keys. Explicitly
+    # remove the new conversation state rather than leaving pending memory.
+    from app.db.models.conversation_state import ConversationState
+    await db.execute(delete(ConversationState).where(ConversationState.user_id == user_id))
     await db.execute(delete(User).where(User.id == user_id))
     await db.commit()

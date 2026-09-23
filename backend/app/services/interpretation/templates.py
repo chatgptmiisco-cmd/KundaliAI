@@ -444,7 +444,22 @@ def _fuzzy_max_distance(keyword_length: int) -> int:
 # plain "what dasha am I running" reply picked up an unrelated Manglik
 # dosha finding). Exact-only for all four, the same fix already applied to
 # "din"/"did"/"in" above.
-_NO_FUZZY_KEYWORDS = {"dasha", "dashas", "dosha", "doshas"}
+_NO_FUZZY_KEYWORDS = {
+    "dasha", "dashas", "dosha", "doshas",
+    # "rishta"/"rishte" (Hindi/Hinglish for relationship) fuzzy-matched the
+    # common English word "right" at distance 2 — caught live via a plain
+    # dasha question ("...running RIGHT now") wrongly also answering a
+    # relationship question no one asked. Exact-only, same fix as dasha/dosha.
+    "rishta", "rishte",
+    # "hiring" (career keyword) fuzzy-matched the extremely common word
+    # "having", and "behen" (Hindi for sister, siblings keyword) fuzzy-
+    # matched "been" — both caught live from one real free-text answer
+    # ("We keep having communication problems... it has been going on for
+    # six months") that got wrongly reclassified as a career/siblings
+    # question mid-conversation, overriding the pending slot it was
+    # actually answering. Same false-positive class as rishta/right above.
+    "hiring", "behen",
+}
 
 
 def _fuzzy_word_matches_keyword(word: str, keyword: str) -> bool:
@@ -538,7 +553,19 @@ _TOPIC_KEYWORDS: dict[str, list[str]] = {
     "marriage": [
         "marriage", "marriages", "marry", "married", "marrying", "shaadi", "vivah",
         "husband", "wife", "spouse", "partner", "engaged", "engagement", "fiance", "fiancé", "fiancée",
-        "शादी", "विवाह", "पति", "पत्नी", "जीवनसाथी", "सगाई",
+        # "rishta" (relationship) — caught live: "Mera rishta kaisa rahega"
+        # matched no keyword at all here (only English "relationship" is
+        # recognized elsewhere) and fell straight to the generic clarifying
+        # question, the exact same class of gap as "hafta"/week_ahead.
+        "rishta", "rishte", "relationship", "relationships",
+        # "relation ship" — caught live: a real user's message split the
+        # word into two ("I want to ask about relation ship"), which the
+        # single-token "relationship" keyword above can never match since it
+        # checks whole words. A phrase entry (space-separated) is matched via
+        # _fuzzy_contains_phrase, the same mechanism multi-word keywords
+        # elsewhere in this dict already rely on.
+        "relation ship",
+        "शादी", "विवाह", "पति", "पत्नी", "जीवनसाथी", "सगाई", "रिश्ता", "रिश्ते",
     ],
     "health": [
         # Deliberately NOT bare "ill" — it's a substring of the extremely
@@ -601,6 +628,13 @@ _DASHA_KEYWORDS = [
     "दशा", "महादशा", "अंतर्दशा",
 ]
 _TODAY_KEYWORDS = ["today", "todays", "today's", "aaj", "आज", "daily", "din"]
+# No dedicated week-scoped engine exists (only a single day's reading and a
+# multi-year outlook — see get_daily_reading/get_year_ahead) — rather than
+# inventing a new astrology computation, a week question reuses the SAME
+# daily reading as "today", with its own lead-in sentence disclosing that
+# scope honestly instead of silently answering as if it were a real 7-day
+# forecast. See _compute_answer_for_category's "week_ahead" branch.
+_WEEK_KEYWORDS = ["week", "weekly", "hafta", "haftey", "हफ्ता", "हफ्ते", "साप्ताहिक"]
 
 # "When will I get married" needs the actual Prediction Engine (real dasha/
 # transit windows), not the static 7th-house natal-placement fact the plain
@@ -777,11 +811,21 @@ _DECISION_SIGNAL_KEYWORDS = [
 _JOB_CHANGE_DECISION_KEYWORDS = [
     "switch jobs", "switch my job", "change jobs", "change my job", "quit my job", "leave my job",
     "naukri badal", "job badal",
-    "नौकरी बदल", "जॉब बदल",
+    # "job/naukri chhodkar" (leaving job to do something else) — caught
+    # live: a real Hinglish decision question ("kya mujhe job chhodkar
+    # business karna chahiye") used "job" (English noun) + "chhodkar"
+    # (Hindi verb) together, matching neither the pure-English keywords
+    # above (which need "my job") nor a pure-Hindi "naukri" keyword.
+    "job chhodkar", "naukri chhodkar", "job chhod", "naukri chhod",
+    "नौकरी बदल", "जॉब बदल", "नौकरी छोड़",
 ]
 _BUSINESS_START_DECISION_KEYWORDS = [
     "start a business", "start my own business", "start my business",
     "business shuru", "apna business shuru",
+    # "business karna" (without an explicit "start/shuru" verb) — same
+    # Hinglish gap as job_change above: "business karna chahiye" states
+    # the same intent without ever saying "start."
+    "business karna", "apna business karna", "khud ka business",
     "व्यवसाय शुरू", "बिज़नेस शुरू",
 ]
 
@@ -886,7 +930,13 @@ _PAST_TENSE_KEYWORDS = [
     "did i", "did my", "was there", "was my", "happened", "why did", "used to",
     "back then", "in the past", "ago",
     "hua tha", "hui thi", "pehle", "kya hua",
-    "क्या हुआ", "पहले", "हुआ था", "हुई थी",
+    # "pichle" (past/previous, as in "pichle kuch saalon mein" — "in the
+    # past few years") — caught live: a real open-ended past question used
+    # this word alone with no adjacent "kya hua"/"hua tha" phrase to match,
+    # and fell through to the generic clarifying question instead of
+    # Product-spec-§13's Past Event Mode.
+    "pichle", "pichhle",
+    "क्या हुआ", "पहले", "हुआ था", "हुई थी", "पिछले",
 ]
 
 
@@ -1151,10 +1201,13 @@ def _life_event_chat_answer(category: str, context: dict[str, Any], hi: bool) ->
 # exactly one Rishi so a reverse lookup (_CATEGORY_RISHI) is unambiguous.
 _RISHI_SPECIALTY: dict[str, set[str]] = {
     "vasishtha": {"education", "travel", "foreign_travel_timing", "relocation_decision"},
-    "parashara": {"dasha", "today", "year_ahead", "life_theme"},
+    "parashara": {"dasha", "today", "week_ahead", "year_ahead", "life_theme"},
     "gargi": {
         "marriage", "family", "friends", "siblings", "children", "marriage_timing", "children_timing",
         "marriage_decision",
+        # Relationship sub-intents (see native_understanding.py's
+        # _SUB_INTENT_PATTERNS) — same specialist, finer-grained questions.
+        "spouse_relationship", "relationship_conflict", "family_planning",
     },
     "agastya": {"dosha", "yoga", "health"},
     "bhrigu": {
@@ -1165,6 +1218,7 @@ _RISHI_SPECIALTY: dict[str, set[str]] = {
         "career_promotion_timing", "business_expansion_timing", "business_partnership_timing",
         "job_change_decision", "business_start_decision", "house_purchase_decision",
         "property_sale_intent", "property_inheritance_intent", "property_relocation_intent",
+        "workplace_problem", "career_confusion", "debt", "financial_stability",
     },
 }
 _CATEGORY_RISHI: dict[str, str] = {
@@ -1219,6 +1273,25 @@ _GREETING_REPLY_GENERAL = {
         "ke baare mein kuch bhi puchiye. Aapke mann mein kya hai?"
     ),
 }
+
+
+_RETURNING_GREETING_REPLY = {
+    "en": "Hi again! What would you like to explore — career, relationships, money, family, or something else?",
+    "hi": "नमस्ते! फिर से स्वागत है। आप क्या जानना चाहेंगे — करियर, रिश्ते, पैसा, परिवार या कुछ और?",
+    "hinglish": "Hi again! Aap kya jaanna chahenge — career, relationships, paisa, family ya kuch aur?",
+}
+
+
+def build_returning_greeting_reply(language: str) -> str:
+    """A greeting mid-conversation ("hi" again, not the opening message) —
+    caught live: falling through to the generic "I have noted what you
+    shared" fallback (see native_response.compose's final elif — worded for
+    a STATEMENT with no matching category) made no sense for a bare hello,
+    and reads even more nonsensical once beautified ("Thanks for sharing
+    that with me!" — nothing was shared). Short and warm, no persona
+    re-introduction — that's build_greeting_reply's job, only for the true
+    first message of a conversation."""
+    return _RETURNING_GREETING_REPLY.get(language, _RETURNING_GREETING_REPLY["en"])
 
 
 def build_greeting_reply(rishi_id: str | None, language: str) -> str:
@@ -1544,6 +1617,27 @@ def _topic_timing_hint(category: str, context: dict[str, Any], hi: bool) -> str 
     )
 
 
+# Phase 12 — jargon control: house/sign/planet names and dasha-lord names
+# were being appended to EVERY reply regardless of whether the user asked
+# for that level of detail — confirmed live, this is the exact "Your 7th
+# house is Aquarius, ruled by Saturn" complaint. Default mode now stays in
+# plain language; technical detail only renders when the user's own message
+# asks for it.
+_TECHNICAL_DETAIL_KEYWORDS = (
+    "house", "planet", "graha", "ghar", "dasha", "dosha", "nakshatra", "lagna",
+    "which house", "kaunsa ghar", "kaun sa ghar", "show my chart", "show chart",
+    "क्यों", "कौन सा भाव", "कौनसा घर", "ग्रह", "दशा",
+)
+
+
+def wants_technical_detail(message: str) -> bool:
+    text = message.lower()
+    return bool(
+        re.search(r"^(?:why|kyun|kyu)\b", text)
+        or any(kw in text for kw in _TECHNICAL_DETAIL_KEYWORDS)
+    )
+
+
 def _house_technical_hint(category: str, context: dict[str, Any], hi: bool) -> str | None:
     """The other half of "generic verdict, no real chart facts": backs the
     mood word with the actual sign/lord/placement for the house this topic
@@ -1607,6 +1701,309 @@ _TOPIC_LIFE_CONTEXT_DOMAIN: dict[str, str] = {
     "children": "family", "siblings": "family", "friends": "relationships", "travel": "preferences",
 }
 
+# Phase 2 — relationship/career/finance sub-intents native_understanding.py's
+# detect_intents() can now return. Each renders through the SAME real house
+# data as its base topic (no new astrology, no new calculation) — only the
+# opening framing differs, via _SUB_INTENT_HOUSE_ALIAS below, so "spouse
+# bonding" and "family planning" stop collapsing into the identical marriage-
+# timing-flavored house-7 answer a bare "relationship" question used to get.
+_SUB_INTENT_HOUSE_ALIAS: dict[str, str] = {
+    "spouse_relationship": "marriage",
+    "relationship_conflict": "marriage",
+    "family_planning": "marriage",
+    "workplace_problem": "career",
+    "career_confusion": "career",
+    "debt": "money",
+    "financial_stability": "money",
+}
+# Fallback opening line when _context_lead_in below has no known fact to
+# ground a reframe in (e.g. asking about spouse bonding before marital
+# status is on file) — still names the specific sub-intent instead of
+# silently answering as if the generic topic had been asked.
+_SUB_INTENT_LEAD_IN_EN: dict[str, str] = {
+    "spouse_relationship": "Looking at this as a question about your married life and connection with your partner:",
+    "relationship_conflict": "Looking at this as a relationship-tension question, not marriage timing:",
+    "family_planning": "Looking at this from a family-planning angle:",
+    "workplace_problem": "Looking at this as a workplace-relationship question, not career timing:",
+    "career_confusion": "Looking at this as career direction rather than timing:",
+    "debt": "Looking at this from a debt-repayment angle:",
+    "financial_stability": "Looking at this from an overall financial-stability angle, not a single timing window:",
+}
+_SUB_INTENT_LEAD_IN_HI: dict[str, str] = {
+    "spouse_relationship": "इसे आपके वैवाहिक जीवन और साथी से जुड़ाव के सवाल के रूप में देखते हुए:",
+    "relationship_conflict": "इसे रिश्ते में तनाव के सवाल के रूप में देखते हुए, विवाह के समय के रूप में नहीं:",
+    "family_planning": "इसे पारिवारिक योजना के नज़रिए से देखते हुए:",
+    "workplace_problem": "इसे कार्यस्थल के रिश्ते के सवाल के रूप में देखते हुए, करियर के समय के रूप में नहीं:",
+    "career_confusion": "इसे करियर की दिशा के रूप में देखते हुए, समय के रूप में नहीं:",
+    "debt": "इसे कर्ज़ चुकाने के नज़रिए से देखते हुए:",
+    "financial_stability": "इसे समग्र आर्थिक स्थिरता के नज़रिए से देखते हुए:",
+}
+
+
+# Phase 9/10/11 — the "acknowledge → reframe" step that leads a topic answer
+# when real known facts change the framing, generalizing the one existing
+# _already_married_sentence pattern (previously marriage-timing-only, buried
+# at the end of the reply) into something usable up front for any topic.
+# Returns None — never a guess — when nothing is actually known; the plain
+# verdict that follows is the honest answer in that case.
+def _context_lead_in(category: str, context: dict[str, Any], hi: bool) -> str | None:
+    life_state: dict[str, Any] = context.get("life_state") or {}
+    # native_response.compose() blanks the regular "life_context" key here to
+    # stop the older _life_context_hint mechanism repeating personal_context's
+    # blurb — it stashes the real facts under this key instead so this
+    # function still has them. Falls back to "life_context" directly when
+    # chat_reply is called outside compose() (e.g. tests, per its own
+    # docstring), where nothing blanks it.
+    facts: dict[str, dict] = context.get("_life_context_for_lead_in") or context.get("life_context") or {}
+    relationships, family, career, business = (facts.get(d, {}) for d in ("relationships", "family", "career", "business"))
+    married = life_state.get("marital_status") == "married"
+    # The CURRENT question being specifically "family_planning" is itself
+    # real evidence, even with no separately-extracted historical fact yet —
+    # caught live: picking "family planning" from the married-status menu
+    # (a category selection, not a full sentence like "we are planning a
+    # family") still got the plain "married life" reframe, not a
+    # family-planning-aware one, because it checked only for a stored fact.
+    planning_family = "planning_intent" in family or category == "family_planning"
+    spouse_name = relationships.get("spouse_name", {}).get("value")
+    spouse_en = f" with {spouse_name}" if spouse_name else ""
+    spouse_hi = f" {spouse_name} के साथ" if spouse_name else ""
+
+    if category in ("marriage", "spouse_relationship", "relationship_conflict", "family_planning"):
+        if married and planning_family:
+            return (
+                f"चूंकि आप पहले से विवाहित हैं और परिवार नियोजन के बारे में सोच रहे हैं, मैं इसे विवाह के समय के रूप में नहीं "
+                f"देखूंगा — यहां ध्यान आपके वैवाहिक जीवन{spouse_hi} और परिवार के विस्तार पर है।"
+                if hi else
+                f"Since you're already married and thinking about family planning, I won't read this as marriage "
+                f"timing — the relevant focus is your married life{spouse_en} and family growth."
+            )
+        if married:
+            return (
+                f"चूंकि आप पहले से विवाहित हैं, मैं इसे विवाह के समय के रूप में नहीं देखूंगा — अभी ध्यान आपके वैवाहिक जीवन"
+                f"{spouse_hi} पर है।"
+                if hi else
+                f"Since you're already married, I won't treat this as marriage timing — the relevant focus now is "
+                f"your married life{spouse_en}."
+            )
+        return None
+
+    if category == "family" and planning_family:
+        return (
+            "चूंकि आपने बताया कि आप परिवार नियोजन के बारे में सोच रहे हैं, आपकी कुंडली में यह क्षेत्र इस तरह दिखता है:"
+            if hi else
+            "Since you mentioned you're thinking about family planning, here's how this area of your chart reads:"
+        )
+
+    if category in ("career", "workplace_problem", "career_confusion"):
+        business_type = business.get("business_type", {}).get("value")
+        if business_type or life_state.get("business_state") in ("running", "considering"):
+            label = business_type or ("आपका व्यवसाय" if hi else "your business")
+            return (
+                f"चूंकि आपका ध्यान {label} पर है, यहां एक सामान्य करियर जवाब के बजाय यही पढ़ा जाता है:"
+                if hi else
+                f"Since you're focused on {label}, here's how that reads rather than a generic career answer:"
+            )
+        occupation = career.get("occupation", {}).get("value")
+        if occupation:
+            return (
+                f"चूंकि आप {occupation} के रूप में काम करते हैं, आपके लिए इसका यह मतलब है:"
+                if hi else
+                f"Since you work as {occupation}, here's what this means for you specifically:"
+            )
+        return None
+
+    if category in ("money", "debt", "financial_stability"):
+        money = facts.get("money", {})
+        if money.get("savings") or money.get("salary_range"):
+            return (
+                "आपने अपनी वित्तीय स्थिति के बारे में जो बताया है, उसे ध्यान में रखते हुए, यह इस तरह दिखता है:"
+                if hi else
+                "With what you've told me about your finances in mind, here's how this reads:"
+            )
+        return None
+
+    return None
+
+
+def _relationship_concern_sentence(context: dict[str, Any], hi: bool) -> str | None:
+    """Caught live TWICE: first, a distress message got the exact same flat
+    "your relationships may have good and hard moments" line a neutral
+    status check would; fixed by acknowledging the actual stated concern
+    instead. Then caught AGAIN, live, once the concern was known — the
+    "fix" itself turned out to be its OWN fixed template ("that's a real,
+    human issue a chart alone can't resolve... good time for patience and
+    honest talks") with zero actual chart content in it, which is exactly
+    the "friend based on charts and astrology, not a template" complaint.
+    Now pulls in the SAME real, planet-specific period content the "dasha"
+    category already uses (_PERIOD_CONTENT, keyed by the actual running
+    antardasha lord) instead of a canned closing line — varies by what's
+    actually running in THIS person's chart, not fixed regardless of it."""
+    facts: dict[str, dict] = context.get("_life_context_for_lead_in") or context.get("life_context") or {}
+    concern = (facts.get("relationships") or {}).get("concern_type", {}).get("value")
+    if not concern:
+        return None
+    acknowledgment = (
+        f"आपने बताया: {concern}। यह एक असली, इंसानी मसला है जिसे सिर्फ कुंडली हल नहीं कर सकती।"
+        if hi else
+        f"You mentioned: {concern}. That's a real, human issue a chart alone can't resolve."
+    )
+    # Real chart content, not a fixed closing line — see _PERIOD_CONTENT's
+    # own comment: one_liner is a plain-language, planet-specific read of
+    # what this stretch actually feels like, already proven for the "dasha"
+    # category above. antardasha_lord_code (the raw planet code, e.g. "Sa")
+    # is distinct from the antardasha_lord PARAMETER (its display name) —
+    # see the "dasha" branch's own comment for why both exist.
+    antardasha_code: str | None = context.get("antardasha_lord_code")
+    if antardasha_code:
+        content_pool = _PERIOD_CONTENT_HI if hi else _PERIOD_CONTENT_EN
+        effect = content_pool.get(antardasha_code, content_pool["Mo"])["one_liner"]
+        closing = (
+            f"आपकी मौजूदा दशा को देखते हुए — {effect} इसे ध्यान में रखते हुए इसे सीधे संबोधित करना बेहतर है, टालने के बजाय।"
+            if hi else
+            f"Given the period you're actually in right now — {effect} Worth keeping that in mind as you address "
+            f"this directly, rather than let it sit."
+        )
+    else:
+        closing = (
+            "इसे अभी सीधे संबोधित करना बेहतर है, टालने के बजाय।" if hi else
+            "It's worth addressing this directly rather than let it sit."
+        )
+    return f"{acknowledgment} {closing}"
+
+
+def _age_band(age: int | None) -> str | None:
+    if age is None:
+        return None
+    if age < 26:
+        return "early"
+    if age < 45:
+        return "building"
+    return "established"
+
+
+# Phase 13 — Life Stage Awareness: the SAME chart signal means something
+# different at 22 than at 55 (a "growth" period reads as direction-finding
+# early on, leadership/consolidation later) — this was a total gap before
+# Stage 2, not partial: nothing anywhere computed the user's current age or
+# varied phrasing by it (only a PREDICTED event's own age-plausibility was
+# ever checked, never the user's present age). Lowest-priority fallback,
+# used only when no real known fact already grounded a reframe above — an
+# age band is a real, always-known signal, but a stated fact is stronger.
+_AGE_BAND_LEAD_IN_EN: dict[str, dict[str, str]] = {
+    "career": {
+        "early": "At this stage, career questions are usually more about direction and building skills than a big leap.",
+        "building": "At this stage, career questions often carry real weight — growth, a transition, or more responsibility.",
+        "established": "At this stage, career questions are more often about leadership and stability than a fresh start.",
+    },
+    "money": {
+        "early": "At this stage, money questions are usually about building savings and earning capacity.",
+        "building": "At this stage, money questions often involve balancing bigger commitments with growing income.",
+        "established": "At this stage, money questions more often involve preserving and making the most of what you've already built.",
+    },
+    "marriage": {
+        "early": "At this age, relationship questions are often still about exploring readiness rather than an urgent decision.",
+        "building": "At this stage, relationship questions often carry real, practical urgency.",
+        "established": "At this stage, relationship questions are more often about depth and partnership than a first marriage.",
+    },
+    "health": {
+        "early": "At this age, health questions are usually about building good habits rather than managing an existing condition.",
+        "building": "At this stage, health questions often involve managing stress and energy alongside a busy life.",
+        "established": "At this stage, health questions more often involve staying ahead of age-related changes.",
+    },
+    "family": {
+        "early": "At this stage, family questions are usually more about your birth family and home life than starting your own.",
+        "building": "At this stage, family questions often involve building or expanding your own household.",
+        "established": "At this stage, family questions more often involve supporting grown children or aging parents.",
+    },
+    "education": {
+        "early": "At this stage, education questions are usually about current studies or exams.",
+        "building": "At this stage, education questions often involve further studies or upskilling alongside work.",
+        "established": "At this stage, education questions more often involve supporting someone else's studies than your own.",
+    },
+    "friends": {
+        "early": "At this stage, friendships often shift quickly as circles change with school or an early career.",
+        "building": "At this stage, friendships often compete with work and family for time and attention.",
+        "established": "At this stage, a smaller, steadier circle of friendships tends to matter more than a wide one.",
+    },
+    "travel": {
+        "early": "At this stage, travel is often tied to study or early career opportunities.",
+        "building": "At this stage, travel decisions often have to work around job and family commitments.",
+        "established": "At this stage, travel is more often a choice made for its own sake than tied to work or study.",
+    },
+    "children": {
+        "early": "At this age, questions about children are usually more hypothetical than immediate.",
+        "building": "At this stage, questions about children often carry real, immediate weight.",
+        "established": "At this stage, questions about children more often involve their growth and independence than having one.",
+    },
+    "siblings": {
+        "early": "At this stage, sibling relationships are often shaped mostly by shared home life.",
+        "building": "At this stage, sibling relationships often involve navigating separate, busy lives.",
+        "established": "At this stage, sibling relationships more often involve shared family responsibilities.",
+    },
+}
+_AGE_BAND_LEAD_IN_HI: dict[str, dict[str, str]] = {
+    "career": {
+        "early": "इस पड़ाव पर, करियर से जुड़े सवाल आमतौर पर दिशा तय करने और कौशल बनाने से जुड़े होते हैं, किसी बड़ी छलांग से नहीं।",
+        "building": "इस पड़ाव पर, करियर से जुड़े सवालों में अक्सर असली वज़न होता है — विकास, बदलाव या ज़्यादा जिम्मेदारी।",
+        "established": "इस पड़ाव पर, करियर से जुड़े सवाल अक्सर नई शुरुआत से ज़्यादा नेतृत्व और स्थिरता से जुड़े होते हैं।",
+    },
+    "money": {
+        "early": "इस पड़ाव पर, पैसों से जुड़े सवाल आमतौर पर बचत और कमाई बढ़ाने से जुड़े होते हैं।",
+        "building": "इस पड़ाव पर, पैसों से जुड़े सवाल अक्सर बड़ी जिम्मेदारियों और बढ़ती आय के बीच संतुलन से जुड़े होते हैं।",
+        "established": "इस पड़ाव पर, पैसों से जुड़े सवाल अक्सर जो बनाया है उसे सुरक्षित रखने और उसका सर्वोत्तम उपयोग करने से जुड़े होते हैं।",
+    },
+    "marriage": {
+        "early": "इस उम्र में, रिश्ते से जुड़े सवाल अक्सर तैयारी को समझने से जुड़े होते हैं, किसी तुरंत लिए जाने वाले फैसले से नहीं।",
+        "building": "इस पड़ाव पर, रिश्ते से जुड़े सवालों में अक्सर वास्तविक और व्यावहारिक ज़रूरत होती है।",
+        "established": "इस पड़ाव पर, रिश्ते से जुड़े सवाल अक्सर पहली शादी से ज़्यादा गहराई और साझेदारी से जुड़े होते हैं।",
+    },
+    "health": {
+        "early": "इस उम्र में, सेहत से जुड़े सवाल आमतौर पर अच्छी आदतें बनाने से जुड़े होते हैं, किसी मौजूदा समस्या को संभालने से नहीं।",
+        "building": "इस पड़ाव पर, सेहत से जुड़े सवाल अक्सर व्यस्त जीवन के साथ तनाव और ऊर्जा को संभालने से जुड़े होते हैं।",
+        "established": "इस पड़ाव पर, सेहत से जुड़े सवाल अक्सर उम्र से जुड़े बदलावों से आगे रहने से जुड़े होते हैं।",
+    },
+    "family": {
+        "early": "इस पड़ाव पर, पारिवारिक सवाल आमतौर पर अपने परिवार शुरू करने से ज़्यादा आपके जन्म के परिवार और घर के जीवन से जुड़े होते हैं।",
+        "building": "इस पड़ाव पर, पारिवारिक सवाल अक्सर अपने घर को बनाने या बढ़ाने से जुड़े होते हैं।",
+        "established": "इस पड़ाव पर, पारिवारिक सवाल अक्सर बड़े हो चुके बच्चों या बुज़ुर्ग माता-पिता का साथ देने से जुड़े होते हैं।",
+    },
+    "education": {
+        "early": "इस पड़ाव पर, शिक्षा से जुड़े सवाल आमतौर पर मौजूदा पढ़ाई या परीक्षाओं से जुड़े होते हैं।",
+        "building": "इस पड़ाव पर, शिक्षा से जुड़े सवाल अक्सर काम के साथ आगे की पढ़ाई या नए कौशल सीखने से जुड़े होते हैं।",
+        "established": "इस पड़ाव पर, शिक्षा से जुड़े सवाल अक्सर अपनी नहीं बल्कि किसी और की पढ़ाई में मदद से जुड़े होते हैं।",
+    },
+    "friends": {
+        "early": "इस पड़ाव पर, पढ़ाई या करियर की शुरुआत के साथ दोस्ती के दायरे अक्सर तेज़ी से बदलते हैं।",
+        "building": "इस पड़ाव पर, दोस्ती को अक्सर काम और परिवार के साथ समय और ध्यान के लिए प्रतिस्पर्धा करनी पड़ती है।",
+        "established": "इस पड़ाव पर, बड़े दायरे से ज़्यादा एक छोटा, स्थिर दोस्तों का समूह मायने रखता है।",
+    },
+    "travel": {
+        "early": "इस पड़ाव पर, यात्रा अक्सर पढ़ाई या करियर के शुरुआती अवसरों से जुड़ी होती है।",
+        "building": "इस पड़ाव पर, यात्रा के फैसलों को अक्सर काम और पारिवारिक जिम्मेदारियों के साथ तालमेल बिठाना पड़ता है।",
+        "established": "इस पड़ाव पर, यात्रा अक्सर काम या पढ़ाई से जुड़ी नहीं बल्कि अपनी इच्छा से की जाती है।",
+    },
+    "children": {
+        "early": "इस उम्र में, बच्चों से जुड़े सवाल आमतौर पर तुरंत के बजाय काल्पनिक ज़्यादा होते हैं।",
+        "building": "इस पड़ाव पर, बच्चों से जुड़े सवालों में अक्सर वास्तविक और तुरंत का महत्व होता है।",
+        "established": "इस पड़ाव पर, बच्चों से जुड़े सवाल अक्सर उनके बड़े होने और आत्मनिर्भर बनने से जुड़े होते हैं, नए बच्चे से नहीं।",
+    },
+    "siblings": {
+        "early": "इस पड़ाव पर, भाई-बहन के रिश्ते अक्सर साझा घरेलू जीवन से आकार लेते हैं।",
+        "building": "इस पड़ाव पर, भाई-बहन के रिश्तों में अक्सर अलग-अलग व्यस्त ज़िंदगियों को संभालना शामिल होता है।",
+        "established": "इस पड़ाव पर, भाई-बहन के रिश्ते अक्सर साझा पारिवारिक जिम्मेदारियों से जुड़े होते हैं।",
+    },
+}
+
+
+def _age_band_lead_in(house_category: str, context: dict[str, Any], hi: bool) -> str | None:
+    band = _age_band(context.get("user_age"))
+    if band is None:
+        return None
+    pool = _AGE_BAND_LEAD_IN_HI if hi else _AGE_BAND_LEAD_IN_EN
+    return pool.get(house_category, {}).get(band)
+
+    return None
+
 
 def _life_context_hint(category: str, context: dict[str, Any], hi: bool) -> str | None:
     domain = _TOPIC_LIFE_CONTEXT_DOMAIN.get(category)
@@ -1634,6 +2031,8 @@ def _detect_categories(message: str, birth_year: int | None = None) -> list[str]
     is rarely genuinely compound with something else."""
     if _asked_about(message, _TODAY_KEYWORDS):
         return ["today"]
+    if _asked_about(message, _WEEK_KEYWORDS):
+        return ["week_ahead"]
 
     found: list[str] = []
 
@@ -1701,12 +2100,22 @@ def _detect_categories(message: str, birth_year: int | None = None) -> list[str]
     # General "what was going on then" reflection — only when nothing more
     # specific already matched (a life-event category with past tense
     # already gets its own real past-direction answer; this is the fallback
-    # for a past question that isn't about one specific life area) AND the
-    # message actually resolves to a real date (never guessed).
+    # for a past question that isn't about one specific life area).
+    #
+    # Deliberately does NOT require resolve_past_reference to already
+    # succeed here — a real, reproduced bug: chat.py's own life_theme
+    # handling has two branches, "resolves to a real date" (compute a real
+    # reading) and "doesn't resolve" (Product spec §13's Past Event Mode —
+    # surface a real candidate as a falsifiable question, never a guess).
+    # Gating category detection itself on resolve_past_reference succeeding
+    # made that second branch dead code: chat.py can only reach it via
+    # `if "life_theme" in categories`, which never became true for exactly
+    # the open-ended messages ("what important happened in my past") that
+    # branch exists to handle. Whether a real date resolves is chat.py's own
+    # concern (it already branches on that); detection only needs to know
+    # this IS a past-tense question worth answering somehow.
     if not found and birth_year is not None and message_mentions_past_tense(message):
-        current_year = datetime.now(timezone.utc).year
-        if resolve_past_reference(message, birth_year, current_year) is not None:
-            add("life_theme")
+        add("life_theme")
 
     return found[:_MAX_CATEGORIES_PER_REPLY]
 
@@ -1719,6 +2128,7 @@ def _compute_answer_for_category(
     yogas: list[dict[str, str]],
     mahadasha_lord: str | None,
     antardasha_lord: str | None,
+    message: str = "",
 ) -> str | None:
     """The exact per-category answer logic chat_reply used to inline as one
     long if/elif chain — pulled out so it can be called once per detected
@@ -1730,9 +2140,53 @@ def _compute_answer_for_category(
             parts.append(f"आज {daily['festival']} है।" if hi else f"Today is {daily['festival']}.")
         return " ".join(p for p in parts if p) or None
 
+    if category == "week_ahead":
+        # Reuses the exact same daily reading "today" does above — no
+        # week-scoped engine exists (see _WEEK_KEYWORDS's comment) — the
+        # only difference is this lead-in, which says so honestly instead
+        # of quietly answering a week question with one day's data.
+        lead = (
+            "अभी के लिए मैं आज के दिन की सबसे सटीक जानकारी दे सकता/सकती हूं — पूरे हफ्ते का सही अंदाज़ा लेने के लिए "
+            "हर दिन दोबारा पूछें:"
+            if hi else
+            "Right now I can tell you today with real accuracy — for how the rest of the week unfolds, ask me "
+            "again each day:"
+        )
+        parts = [daily.get("rating_reason"), daily.get("brutal_truth")]
+        body = " ".join(p for p in parts if p)
+        return f"{lead} {body}" if body else None
+
     if category == "marriage_timing":
         windows: list[dict[str, Any]] = context.get("marriage_timing_windows") or []
         direction = context.get("marriage_timing_direction", "future")
+        # Prediction eligibility, always enforced — not gated behind the
+        # conversation's one-time "marriage_clarified" flag. Caught live: an
+        # already-married user's later, EXPLICIT "shaadi kab hogi" got the
+        # FULL detailed first-marriage breakdown (dates, natal strength,
+        # retrograde, D9, evidence level, age estimate) with only a single
+        # reframe sentence buried inside the top window's own reason text —
+        # the conversational gate only fires once per conversation, but this
+        # eligibility check is a fact about the person, not the
+        # conversation, so it must apply every single time regardless of
+        # what was already asked earlier. Only the FUTURE direction is
+        # blocked — asking about the PAST window that led to an actual
+        # marriage is still a sensible question either way (same "tense"
+        # distinction _already_married_sentence's own caller already makes).
+        already_married = (context.get("life_state") or {}).get("marital_status") == "married"
+        if already_married and direction == "future":
+            facts = context.get("_life_context_for_lead_in") or context.get("life_context") or {}
+            spouse = (facts.get("relationships") or {}).get("spouse_name", {}).get("value")
+            spouse_title = spouse.title() if spouse else None
+            spouse_en = f" with {spouse_title}" if spouse_title else ""
+            spouse_hi = f" {spouse_title} के साथ" if spouse_title else ""
+            return (
+                f"चूंकि आप पहले से विवाहित हैं, मैं इसे पहली शादी के समय के रूप में नहीं देखूंगा। इसके बजाय बताइए — क्या आप "
+                f"अपने वैवाहिक जीवन{spouse_hi}, किसी मौजूदा चिंता, या परिवार नियोजन के बारे में पूछ रहे हैं?"
+                if hi else
+                f"Since you're already married, I won't give you a first-marriage timing breakdown for this. "
+                f"Tell me instead — are you asking about your married life{spouse_en}, a current concern, or "
+                f"family planning?"
+            )
         label = "विवाह या किसी गंभीर साझेदारी" if hi else "marriage or a serious partnership"
         reply = _format_timing_reply(windows, label, direction, context.get("birth_year"), hi)
         pattern_sentence = _personal_pattern_sentence(category, context, hi)
@@ -1762,7 +2216,21 @@ def _compute_answer_for_category(
 
     if category == "life_theme":
         theme_data: dict[str, Any] | None = context.get("life_theme")
-        return theme_data.get("theme") if theme_data else None
+        if theme_data:
+            return theme_data.get("theme")
+        # Product spec §13 — Past Event Mode: a genuinely open-ended "what
+        # happened in my past" question (no specific date/age given) never
+        # states a guessed event as fact — it surfaces the real candidate
+        # window chat.py already computed (_recent_past_candidate) as a
+        # falsifiable question instead. This was ORIGINALLY written only for
+        # openai_interpreter.py's LLM prompt (see its own "past_event_
+        # candidate fact" instructions) and silently never ported when this
+        # native, no-LLM path became the primary one — chat.py has collected
+        # this data all along, nothing ever rendered it.
+        candidate = context.get("past_event_candidate")
+        if candidate:
+            return _past_event_candidate_question(candidate, hi)
+        return None
 
     if category == "year_ahead":
         year_ahead: dict[str, Any] | None = context.get("year_ahead")
@@ -1863,35 +2331,99 @@ def _compute_answer_for_category(
             "chart — plenty of strong charts don't carry one either."
         )
 
-    if category in _TOPIC_HOUSE:
+    house_category = _SUB_INTENT_HOUSE_ALIAS.get(category, category)
+    if house_category in _TOPIC_HOUSE:
         # A plain good/bad/mixed verdict, not the detailed planet-by-planet
         # explanation (house_breakdown above) — chat answers a "what does my
         # chart say about X" question with a direct, jargon-free statement
         # about that life area, not a chart-reading lesson. See
-        # chart_explanation_service._VERDICT_BY_HOUSE_EN/HI.
+        # chart_explanation_service._VERDICT_BY_HOUSE_EN/HI. Sub-intents
+        # (spouse_relationship, family_planning, etc.) render through this
+        # SAME real house data via house_category above — no new astrology,
+        # only the framing around it differs (see _context_lead_in below).
         house_verdict: dict[int, str] = context.get("house_verdict", {})
-        verdict = house_verdict.get(_TOPIC_HOUSE[category])
+        verdict = house_verdict.get(_TOPIC_HOUSE[house_category])
         if verdict is None:
             return None
+        # Phase 9/10 — acknowledge/reframe leads the answer when a real known
+        # fact changes the framing (e.g. already married, already running a
+        # business); a sub-intent with nothing fact-based to ground it in
+        # still gets an honest opening naming the specific angle instead of
+        # silently answering as if the generic topic had been asked.
+        parts = []
+        lead_in = _context_lead_in(category, context, hi)
+        if lead_in is None and category in _SUB_INTENT_HOUSE_ALIAS:
+            lead_in = (_SUB_INTENT_LEAD_IN_HI if hi else _SUB_INTENT_LEAD_IN_EN).get(category)
+        # Phase 13 (Stage 2) — last-resort fallback: an age band is a real,
+        # always-known signal, but weaker than an actual stated fact, so it
+        # only fires when nothing above already grounded a reframe. Covers
+        # every _TOPIC_HOUSE topic, including the 5 that had no context-aware
+        # framing at all before Stage 2 (health/education/friends/travel/
+        # siblings, plus children).
+        if lead_in is None:
+            lead_in = _age_band_lead_in(house_category, context, hi)
+        if lead_in:
+            parts.append(lead_in)
+        # A distress/conflict question ("main shaadi se dukhi hoon") getting
+        # the exact same flat "your relationships may have good and hard
+        # moments" line anyone would get is the single most generic-feeling
+        # sentence a real complaint called out — once the concern itself is
+        # known (see DECISION_SLOTS' concern_type gate above, asked before
+        # this point is ever reached), reference it directly instead.
+        concern_sentence = _relationship_concern_sentence(context, hi) if category == "relationship_conflict" else None
+        parts.append(concern_sentence or verdict)
         # Backs the mood word with real, already-computed chart facts
         # instead of stopping at a generic verdict: the house's actual
         # sign/lord/placement (_house_technical_hint, every topic) and,
         # where a timing engine exists for it (career/money/marriage/
         # children/travel), the real forward-looking window too
-        # (_topic_timing_hint).
-        parts = [verdict]
-        tech_hint = _house_technical_hint(category, context, hi)
-        if tech_hint:
-            parts.append(tech_hint)
-        timing_hint = _topic_timing_hint(category, context, hi)
+        # (_topic_timing_hint). Phase 12 — jargon only when actually asked for.
+        if wants_technical_detail(message):
+            tech_hint = _house_technical_hint(house_category, context, hi)
+            if tech_hint:
+                parts.append(tech_hint)
+        # Naming a forward marriage-timing window right after telling a
+        # married user "I won't treat this as marriage timing" would
+        # directly contradict the reframe above — caught live. Suppressed
+        # for the marriage house when already married, and always for a
+        # relationship-conflict question (a timing window is irrelevant to
+        # "what should I do about this concern").
+        already_married = (context.get("life_state") or {}).get("marital_status") == "married"
+        suppress_timing = house_category == "marriage" and (already_married or category == "relationship_conflict")
+        timing_hint = None if suppress_timing else _topic_timing_hint(house_category, context, hi)
         if timing_hint:
             parts.append(timing_hint)
-        memory_hint = _life_context_hint(category, context, hi)
+        memory_hint = _life_context_hint(house_category, context, hi)
         if memory_hint:
             parts.append(memory_hint)
         return " ".join(parts)
 
     return None
+
+
+_PAST_EVENT_DOMAIN_LABEL_EN = {"career": "career", "relationships": "relationship", "family": "family life"}
+_PAST_EVENT_DOMAIN_LABEL_HI = {"career": "करियर", "relationships": "रिश्ते", "family": "पारिवारिक जीवन"}
+
+
+def _past_event_candidate_question(candidate: dict[str, Any], hi: bool) -> str:
+    """Deterministic replacement for openai_interpreter.py's LLM-phrased
+    version of the same fact (see that module's own docstring for the exact
+    same instruction: never state a guessed event as fact, ask a specific,
+    falsifiable question using the real dates/domain instead)."""
+    labels = [(_PAST_EVENT_DOMAIN_LABEL_HI if hi else _PAST_EVENT_DOMAIN_LABEL_EN).get(d, d) for d in candidate.get("domains", [])]
+    domain_text = (" या " if hi else " or ").join(labels) if labels else ("जीवन" if hi else "life")
+    start, end = candidate["start_date"], candidate["end_date"]
+    if hi:
+        return (
+            f"मैं बेतरतीब घटनाओं का अंदाज़ा नहीं लगाना चाहता। आपकी कुंडली के अनुसार {start} से {end} के आसपास "
+            f"आपके {domain_text} में एक उल्लेखनीय दौर दिखता है। क्या उस समय के आसपास कोई बड़ा बदलाव या घटना हुई थी? "
+            f"बताइए, ताकि मैं इसे आगे की व्याख्या को ज़्यादा सटीक बनाने में इस्तेमाल कर सकूं।"
+        )
+    return (
+        f"I don't want to guess at random events. Looking at your chart, there's a notable period around "
+        f"{start} to {end} in your {domain_text}. Did something significant happen or change around then? "
+        f"Let me know so I can use that to make future readings more accurate."
+    )
 
 
 _MULTI_TOPIC_CONNECTOR_EN = " Also, "
@@ -2297,7 +2829,7 @@ class TemplateInterpreter(Interpreter):
         answered: list[tuple[str, str]] = [
             (c, a)
             for c in categories
-            if (a := _compute_answer_for_category(c, context, hi, daily, yogas, mahadasha_lord, antardasha_lord))
+            if (a := _compute_answer_for_category(c, context, hi, daily, yogas, mahadasha_lord, antardasha_lord, message))
         ]
 
         if answered:

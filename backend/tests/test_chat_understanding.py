@@ -86,7 +86,7 @@ def test_compute_out_of_domain_redirects_uses_hindi_names_for_hindi_language():
 
 def test_relevant_domains_deduplicates_across_categories():
     result = relevant_domains(["career", "money"])
-    assert result == ["career", "goals", "money"]
+    assert result == ["career", "business", "goals", "money"]
 
 
 def test_relevant_domains_empty_for_pure_astrology_categories():
@@ -95,7 +95,7 @@ def test_relevant_domains_empty_for_pure_astrology_categories():
 
 def test_relevant_domains_wide_for_decision_categories():
     result = relevant_domains(["job_change_decision"])
-    assert set(result) == {"career", "money", "family", "relationships", "goals"}
+    assert set(result) == {"career", "business", "money", "family", "goals"}
 
 
 def test_relevant_domains_wide_for_relocation_decision():

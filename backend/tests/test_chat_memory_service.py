@@ -141,3 +141,54 @@ async def test_retrieve_relevant_turns_is_scoped_to_the_same_rishi(client, monke
             db, user_id, "bhrigu", "anything", exclude_ids_below=highest_id + 1,
         )
     assert result == []
+
+
+async def test_retrieve_native_turns_never_surfaces_a_past_question_as_a_fact(client):
+    """Regression guard for a real, reproduced bug: a past QUESTION ("What
+    does my kundli say about marriage and partner?") was retrieved and
+    quoted back exactly like a stated fact, wrapped in "if that situation
+    has changed" phrasing that only makes sense for an actual fact."""
+    headers = await _signup_and_set_birth_data(client)
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    user_id = profile.json()["id"]
+
+    async with AsyncSessionLocal() as db:
+        db.add(ChatMessage(
+            user_id=user_id, role="user",
+            content="What does my kundli say about marriage and partner?",
+            language="en", rishi_id="gargi",
+        ))
+        db.add(ChatMessage(
+            user_id=user_id, role="user", content="I am already thinking about marriage seriously.",
+            language="en", rishi_id="gargi",
+        ))
+        await db.commit()
+
+        result = await chat_memory_service.retrieve_native_turns(db, user_id, ["marriage"], "marriage")
+    assert all("?" not in item["text"] for item in result)
+    assert any("thinking about marriage" in item["text"] for item in result)
+
+
+async def test_retrieve_native_turns_excludes_already_surfaced_quotes(client):
+    """Regression guard: the same past statement resurfaced as a callback
+    on every subsequent turn the topic recurred, since nothing tracked what
+    had already been shown once (see chat.py's surfaced_quote_ids)."""
+    headers = await _signup_and_set_birth_data(client)
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    user_id = profile.json()["id"]
+
+    async with AsyncSessionLocal() as db:
+        row = ChatMessage(
+            user_id=user_id, role="user", content="I am already thinking about marriage seriously.",
+            language="en", rishi_id="gargi",
+        )
+        db.add(row)
+        await db.commit()
+
+        first = await chat_memory_service.retrieve_native_turns(db, user_id, ["marriage"], "marriage")
+        assert len(first) == 1
+
+        second = await chat_memory_service.retrieve_native_turns(
+            db, user_id, ["marriage"], "marriage", exclude_ids={row.id},
+        )
+    assert second == []

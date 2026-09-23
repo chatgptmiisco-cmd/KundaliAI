@@ -59,6 +59,7 @@ _DECISION_TYPE_BY_CATEGORY = {
     # call backed a decision, only its category<->type mapping.
     "house_purchase_decision": "house_purchase",
     "marriage_decision": "marriage",
+    "investment_decision": "investment",
 }
 CATEGORY_BY_DECISION_TYPE = {v: k for k, v in _DECISION_TYPE_BY_CATEGORY.items()}
 
@@ -145,7 +146,7 @@ async def get_active_context(
     confidence returned here is the DECAYED one (see effective_confidence),
     since this is what actually reaches the LLM prompt."""
     stmt = select(LifeContextItem).where(LifeContextItem.user_id == user_id, LifeContextItem.status == "active")
-    if domains:
+    if domains is not None:
         stmt = stmt.where(LifeContextItem.domain.in_(domains))
     result = await db.execute(stmt)
     out: dict[str, dict[str, dict]] = {}

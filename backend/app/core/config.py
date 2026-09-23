@@ -49,12 +49,26 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-5"
     # OpenAI is preferred over Claude when both keys are set (see
     # app.services.interpretation.factory.get_interpreter) — gpt-4o-mini is
-    # the default for cost, since chat now makes two small calls per message
-    # (understand the question, then explain the real computed answer)
-    # rather than one big one.
+    # the default for existing report narration and optional chat styling.
+    # Chat understanding and interpretation never use this provider.
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     use_ai_interpretation: bool = False
+    # Chat understanding, memory and interpretation are always native.
+    # This separate opt-in permits only validated presentation edits.
+    chat_beautification_enabled: bool = False
+    chat_beautification_timeout_seconds: float = 4.0
+    chat_semantic_memory_enabled: bool = False
+    # GPT Mediator Layer (app.services.chat_gpt_mediator) — a deliberate,
+    # explicitly-approved widening of GPT's role beyond chat_beautification_
+    # enabled's 3-substitution allowlist: full free-form answer paraphrase
+    # (token-preservation checked, fail-closed) plus pre-classification
+    # input cleanup (polarity-preservation checked, fail-closed). See that
+    # module's own docstring for the safety rails and the accepted residual
+    # risk — this is NOT the same safety guarantee as the substitution-only
+    # mechanism above, by design, per explicit product decision.
+    chat_gpt_mediator_enabled: bool = False
+    chat_gpt_mediator_timeout_seconds: float = 4.0
     # Chat memory retrieval (see app.services.chat_memory_service) — reuses
     # openai_api_key above, no separate key needed. text-embedding-3-small
     # is cheap (~$0.02/1M tokens) and more than accurate enough for

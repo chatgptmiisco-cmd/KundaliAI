@@ -12,6 +12,7 @@ from app.db.models.cache import (
     UsageCounter,
 )
 from app.db.models.chat import ChatMessage
+from app.db.models.conversation_state import ConversationState
 from app.db.models.important_date import ImportantDate
 from app.db.models.life_context import LifeContextItem, LifeDecision, LifeEvent
 from app.db.models.life_state import LifeState
@@ -31,6 +32,7 @@ __all__ = [
     "PeriodAnalysisCache",
     "UsageCounter",
     "ChatMessage",
+    "ConversationState",
     "ImportantDate",
     "LifeContextItem",
     "LifeDecision",
