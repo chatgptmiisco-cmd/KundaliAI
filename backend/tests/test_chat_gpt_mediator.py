@@ -8,11 +8,52 @@ running engine_only. The actual provider round-trip is exercised only by
 live, manual verification (see the plan file), never by the automated suite."""
 import pytest
 
-from app.services.chat_gpt_mediator import _fact_tokens, _polarity_signature, normalize_input
+from app.services.chat_gpt_mediator import (
+    _KNOWN_CATEGORIES, _fact_tokens, _polarity_signature, answer_unmapped, classify_unmapped_intent, normalize_input,
+)
 
 
 async def test_normalize_input_returns_message_unchanged_when_disabled():
     assert await normalize_input("elation ship", "en") == "elation ship"
+
+
+async def test_classify_unmapped_intent_returns_none_when_disabled():
+    assert await classify_unmapped_intent("is there any solution", ["relationship_conflict"], "en") is None
+
+
+async def test_classify_unmapped_intent_skips_the_provider_entirely_when_no_api_key(monkeypatch):
+    import openai
+    from app.core.config import Settings
+
+    monkeypatch.setattr(
+        "app.services.chat_gpt_mediator.get_settings",
+        lambda: Settings(chat_gpt_mediator_enabled=True, openai_api_key=""),
+    )
+    monkeypatch.setattr(openai, "AsyncOpenAI", lambda **kw: pytest.fail("provider must not run"))
+    assert await classify_unmapped_intent("is there any solution", [], "en") is None
+
+
+async def test_answer_unmapped_returns_none_when_disabled():
+    assert await answer_unmapped("just wanted to say thanks", "en") is None
+
+
+async def test_answer_unmapped_skips_the_provider_entirely_when_no_api_key(monkeypatch):
+    import openai
+    from app.core.config import Settings
+
+    monkeypatch.setattr(
+        "app.services.chat_gpt_mediator.get_settings",
+        lambda: Settings(chat_gpt_mediator_enabled=True, openai_api_key=""),
+    )
+    monkeypatch.setattr(openai, "AsyncOpenAI", lambda **kw: pytest.fail("provider must not run"))
+    assert await answer_unmapped("just wanted to say thanks", "en") is None
+
+
+def test_known_categories_never_includes_none_as_a_real_choice():
+    """"none" is the explicit escape hatch in the prompt (see
+    _INTENT_RESCUE_SYSTEM_PROMPT) — it must never be a category the rest of
+    the pipeline could mistake for a real, engine-recognized one."""
+    assert "none" not in _KNOWN_CATEGORIES
 
 
 async def test_normalize_input_skips_the_provider_entirely_when_engine_only(monkeypatch):

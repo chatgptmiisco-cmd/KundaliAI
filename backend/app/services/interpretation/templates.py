@@ -95,6 +95,31 @@ _DIGNITY_QUALIFIER_HI = {
     "neutral": "सामान्य, साधारण स्थिति में है",
 }
 
+# A one-line plain-language "why" that chart_explanation_service.
+# build_house_breakdown appends after ITS OWN per-house verdict sentence —
+# same reason text regardless of which house/topic, since the underlying
+# cause is always the same shape (strong support / real strain / no strong
+# pull either way). Lives here (not in chart_explanation_service, which
+# already imports several _XXX constants from this module) so
+# _compute_answer_for_category below can recognize and strip it: caught
+# live as the single most generic-feeling sentence in the whole app —
+# "There's no strong push in either direction right now, so a lot depends
+# on your own effort and choices" is IDENTICAL word for word whether the
+# question was about career, money, or marriage. Kept as the real fallback
+# reason when nothing better is available, but dropped in favor of real,
+# current-dasha-specific content whenever that's available instead (see
+# the "mixed" case in _compute_answer_for_category).
+_VERDICT_REASON_EN: dict[str, str] = {
+    "favorable": "There's a strong, positive push behind this right now, so things are likely to work in your favor.",
+    "unfavorable": "There's real strain behind this right now, so expect some extra effort or difficulty.",
+    "mixed": "There's no strong push in either direction right now, so a lot depends on your own effort and choices.",
+}
+_VERDICT_REASON_HI: dict[str, str] = {
+    "favorable": "अभी इसके पीछे एक मज़बूत, सकारात्मक ताकत है, इसलिए चीज़ें आपके पक्ष में जाने की संभावना है।",
+    "unfavorable": "अभी इसके पीछे वास्तविक दबाव है, इसलिए थोड़ी ज़्यादा मेहनत या मुश्किल की उम्मीद रखें।",
+    "mixed": "अभी इसके पीछे कोई मज़बूत ताकत नहीं है, इसलिए काफ़ी कुछ आपकी अपनी मेहनत और चुनाव पर निर्भर करता है।",
+}
+
 # Per-lord period content: honest, specific, no hedging — the immediate
 # (antardasha) lord drives risks/opportunities/one-liner; the mahadasha lord
 # only sets the broader backdrop named in `theme`.
@@ -459,6 +484,15 @@ _NO_FUZZY_KEYWORDS = {
     # question mid-conversation, overriding the pending slot it was
     # actually answering. Same false-positive class as rishta/right above.
     "hiring", "behen",
+    # "will" (the "will i"/"will my" timing-hint phrase) fuzzy-matched the
+    # extremely common word "well" at distance 1 — caught live: "I am not
+    # sure about my career AS WELL" was wrongly treated as a WHEN-will-my-
+    # career-improve timing question (via the "will i"/"will my" phrase
+    # match) and answered with job-change dates instead of recognizing the
+    # actual career_confusion sub-intent. "well" appears constantly in
+    # ordinary sentences, making this an unusually high-collision case even
+    # for this list.
+    "will",
 }
 
 
@@ -806,7 +840,13 @@ def message_mentions_business_partnership_timing(message: str) -> bool:
 # prediction_service.get_decision instead of a timing window scan.
 _DECISION_SIGNAL_KEYWORDS = [
     "should i", "should we", "is it a good idea", "is this a good idea",
-    "क्या मुझे", "kya mujhe",
+    # "What is best for me — stay on job or switch to business?" has no
+    # "should i" anywhere, so this whole decision question fell through to a
+    # plain career reading (a real, reproduced gap) despite the message
+    # already naming both a job-change AND a comparison — caught live.
+    "what is best for me", "what's best for me", "which is better for me",
+    "what should i do", "better for me to",
+    "क्या मुझे", "kya mujhe", "mere liye kya behtar",
 ]
 _JOB_CHANGE_DECISION_KEYWORDS = [
     "switch jobs", "switch my job", "change jobs", "change my job", "quit my job", "leave my job",
@@ -2371,7 +2411,56 @@ def _compute_answer_for_category(
         # known (see DECISION_SLOTS' concern_type gate above, asked before
         # this point is ever reached), reference it directly instead.
         concern_sentence = _relationship_concern_sentence(context, hi) if category == "relationship_conflict" else None
-        parts.append(concern_sentence or verdict)
+        # Naming a forward marriage-timing window right after telling a
+        # married user "I won't treat this as marriage timing" would
+        # directly contradict the reframe above — caught live. Suppressed
+        # for the marriage house when already married, and always for a
+        # relationship-conflict question (a timing window is irrelevant to
+        # "what should I do about this concern").
+        already_married = (context.get("life_state") or {}).get("marital_status") == "married"
+        suppress_timing = house_category == "marriage" and (already_married or category == "relationship_conflict")
+        timing_hint = None if suppress_timing else _topic_timing_hint(house_category, context, hi)
+        # The single most common case — neutral natal dignity, nothing else
+        # to ground the answer in — otherwise left the reply as just the
+        # flat, house-generic verdict sentence, near-identical in shape
+        # across every domain ("may have good and hard moments" / "good and
+        # hard phases" / "both gains and losses") — a real, reproduced
+        # complaint: "if there's no push either way, why do I need an
+        # astrologer?" Reuses the SAME real, plain-language, per-
+        # antardasha-lord content _relationship_concern_sentence above
+        # already proven safe — genuinely current and person-specific
+        # (changes with their actual dasha), unlike the house verdict text,
+        # which barely varies person to person once dignity is neutral.
+        # Computed here (before verdict is appended below) whenever timing_
+        # hint/concern_sentence haven't already supplied real content, so
+        # the redundant generic "reason" clause can be stripped from the
+        # verdict text itself, not just piled underneath it.
+        period_effect = None
+        if not timing_hint and not concern_sentence:
+            antardasha_code: str | None = context.get("antardasha_lord_code")
+            if antardasha_code:
+                content_pool = _PERIOD_CONTENT_HI if hi else _PERIOD_CONTENT_EN
+                period_effect = content_pool.get(antardasha_code, content_pool["Mo"])["one_liner"]
+        verdict_text = verdict
+        if period_effect or timing_hint:
+            # chart_explanation_service.build_house_breakdown tacks the SAME
+            # fixed "why" clause onto every house's verdict (_VERDICT_REASON_
+            # EN/HI) — "there's no strong push either way, so a lot depends
+            # on your own effort and choices" is IDENTICAL regardless of
+            # house/topic, and reads as pure hedging right before something
+            # real and specific. Drop it here — real content replaces it,
+            # rather than sitting awkwardly alongside it. Originally only
+            # checked period_effect — caught live: a bare "career" question
+            # (timing_hint present, so period_effect stays None per the
+            # guard above) still printed the generic reason sentence
+            # immediately before the real, specific timing window, directly
+            # contradicting it ("no strong push either way... the strongest
+            # window for a career shift is 2025-07-03 to 2027-11-29").
+            # timing_hint is exactly as real/specific as period_effect, so it
+            # earns the same strip.
+            for reason in (_VERDICT_REASON_HI if hi else _VERDICT_REASON_EN).values():
+                verdict_text = verdict_text.replace(f" {reason}", "").strip()
+        parts.append(concern_sentence or verdict_text)
         # Backs the mood word with real, already-computed chart facts
         # instead of stopping at a generic verdict: the house's actual
         # sign/lord/placement (_house_technical_hint, every topic) and,
@@ -2382,20 +2471,13 @@ def _compute_answer_for_category(
             tech_hint = _house_technical_hint(house_category, context, hi)
             if tech_hint:
                 parts.append(tech_hint)
-        # Naming a forward marriage-timing window right after telling a
-        # married user "I won't treat this as marriage timing" would
-        # directly contradict the reframe above — caught live. Suppressed
-        # for the marriage house when already married, and always for a
-        # relationship-conflict question (a timing window is irrelevant to
-        # "what should I do about this concern").
-        already_married = (context.get("life_state") or {}).get("marital_status") == "married"
-        suppress_timing = house_category == "marriage" and (already_married or category == "relationship_conflict")
-        timing_hint = None if suppress_timing else _topic_timing_hint(house_category, context, hi)
         if timing_hint:
             parts.append(timing_hint)
         memory_hint = _life_context_hint(house_category, context, hi)
         if memory_hint:
             parts.append(memory_hint)
+        if period_effect:
+            parts.append(period_effect)
         return " ".join(parts)
 
     return None

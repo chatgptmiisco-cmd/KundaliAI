@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { getUserProfile, login, requestOtp, resetPassword, signup, verifyOtp } from '../api/client';
+import KeyboardAvoidingWrapper from '../components/KeyboardAvoidingWrapper';
 import PrimaryButton from '../components/PrimaryButton';
 import { useUserStore } from '../store/useUserStore';
 import { colors, radius, spacing, typography } from '../theme/theme';
@@ -190,7 +191,8 @@ export default function AuthScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <KeyboardAvoidingWrapper>
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>{t('onboarding.authTitle')}</Text>
       <Text style={styles.subtitle}>
         {mode === 'signup' ? t('onboarding.authSubtitleSignup') : t('onboarding.authSubtitleLogin')}
@@ -428,6 +430,7 @@ export default function AuthScreen() {
         </>
       )}
     </ScrollView>
+    </KeyboardAvoidingWrapper>
   );
 }
 

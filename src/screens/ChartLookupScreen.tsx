@@ -5,6 +5,7 @@ import { lookupChart } from '../api/client';
 import BirthDataFields from '../components/BirthDataFields';
 import Card from '../components/Card';
 import ErrorState from '../components/ErrorState';
+import KeyboardAvoidingWrapper from '../components/KeyboardAvoidingWrapper';
 import LoadingState from '../components/LoadingState';
 import NorthIndianChart from '../components/NorthIndianChart';
 import PlanetPositionsTable from '../components/PlanetPositionsTable';
@@ -73,13 +74,15 @@ export default function ChartLookupScreen() {
   if (!chart) {
     return (
       <WebPageContainer style={styles.webContainer}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <KeyboardAvoidingWrapper>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.subtitle}>{t('chartLookup.formSubtitle')}</Text>
         <Card>
           <BirthDataFields value={person} onChange={setPerson} />
         </Card>
         <PrimaryButton label={t('chartLookup.viewButton')} onPress={handleView} disabled={!canSubmit} />
       </ScrollView>
+      </KeyboardAvoidingWrapper>
       </WebPageContainer>
     );
   }

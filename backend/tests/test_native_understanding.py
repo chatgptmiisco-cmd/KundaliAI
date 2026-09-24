@@ -17,7 +17,7 @@ from app.services.native_understanding import (
 
 
 def facts_for(message):
-    facts, state, events, deadline = extract_knowledge(message)
+    facts, state, events, deadline, retractions = extract_knowledge(message)
     return {(f.domain, f.key): f.value for f in facts}, state, events
 
 
@@ -31,6 +31,40 @@ def test_explicit_knowledge_not_questions_hypotheticals_or_other_people():
         facts, state, _ = facts_for(message)
         assert ("career", "occupation") not in facts
         assert state is None or state.marital_status != "married"
+
+
+def test_business_retraction_clears_business_state_and_flags_facts_for_retraction():
+    """Caught live: "i dont have business it was just an idea" — a direct
+    contradiction of an already-stored business.stage="has_customers" fact
+    from an earlier turn — extracted nothing at all, so the stale fact kept
+    being echoed back verbatim on every later reply even after the user
+    said otherwise. extract_knowledge now flags the 3 business facts that
+    only mean something if a business is real for retraction (chat.py
+    applies life_context_service.retract_fact for each), and resets the
+    life-state gate the same way the existing pregnancy negation does."""
+    facts, state, events, deadline, retractions = extract_knowledge("i dont have business it was just an idea")
+    assert facts == []
+    assert state.business_state == "none"
+    assert set(retractions) == {
+        ("business", "stage"), ("business", "transition_intent"), ("business", "business_type"),
+    }
+
+
+def test_business_retraction_variant_phrasings():
+    for message in (
+        "i don't have a business",
+        "i do not own a business",
+        "my business was just an idea",
+    ):
+        _, state, _, _, retractions = extract_knowledge(message)
+        assert state.business_state == "none", message
+        assert ("business", "stage") in retractions, message
+
+
+def test_no_business_retraction_for_an_unrelated_message():
+    _, state, _, _, retractions = extract_knowledge("I already have paying customers for my business.")
+    assert retractions == []
+    assert state.business_state == "running"
 
 
 async def test_credentials_cannot_enable_remote_understanding(monkeypatch):
@@ -249,6 +283,59 @@ def test_career_and_finance_sub_intents_are_detected():
     assert "workplace_problem" in detect_intents("I have a conflict with my boss at work")
     assert "career_confusion" in detect_intents("I am confused about my career direction")
     assert "financial_stability" in detect_intents("I want financial stability")
+
+
+def test_dont_get_along_is_recognized_as_relationship_conflict_with_no_other_keyword():
+    """Regression guard for a real, reproduced bug: "We both do not get
+    along" has no "fight"/"conflict"/"unhappy" word at all, so it matched
+    ZERO categories — not even the generic "marriage" catch-all — and fell
+    straight to the fully generic "what do you want to talk about"
+    clarifying question, even when this immediately followed an active
+    relationship topic. "get along" is also a _TOPIC_KEYWORDS["friends"]
+    phrase, so the bare "friends" catch-all must be suppressed here the
+    same way family_planning already suppresses bare "family"."""
+    for message in ("we both do not get along", "we dont get along", "i dont get along with him", "hum dono nahi bante"):
+        assert detect_intents(message) == ["relationship_conflict"]
+
+
+def test_not_sure_about_career_is_confusion_not_a_timing_question():
+    """Regression guard for two real, reproduced bugs in one message: (1)
+    "not sure" wasn't recognized as a career_confusion trigger at all (only
+    "confused"/"unsure"/"lost" were), so this fell through to the plain
+    "career" topic; (2) worse, the word "well" (as in "as well") fuzzy-
+    matched the "will i"/"will my" timing-hint phrase at edit-distance 1,
+    wrongly making it look like a WHEN-will-my-career-improve timing
+    question and returning job-change dates instead of recognizing career
+    confusion. Caught live via chat_reasoning_trace showing detected_intent
+    ["career_timing"] for this exact message."""
+    categories = detect_intents("I am not sure about my career as well")
+    assert categories == ["career_confusion"]
+    assert "career_timing" not in categories
+
+
+def test_business_typo_is_still_recognized_by_detect_intents():
+    """Regression guard for a real, reproduced bug: "buisness" (a common
+    transposition typo) matched none of detect_intents' plain regex checks
+    (the decision patterns and the bare "business" catch-all both matched
+    against the RAW message, only extract_knowledge's fact extraction used
+    the typo-corrected text) — so "I want to switch to buisness" was tagged
+    bare "career" only and answered with stale job-change timing content,
+    even though the identically-intentioned correctly-spelled message
+    resolved fine."""
+    assert detect_intents("i want to switch to buisness") == detect_intents("i want to switch to business")
+    assert "business" in detect_intents("i want to switch to buisness")
+
+
+def test_switch_to_business_is_recorded_as_a_transition_fact():
+    """Regression guard: the business-transition fact pattern only
+    recognized "start/build/launch" verbs, so "I want to switch to
+    business" recorded nothing at all — meaning business_state never left
+    None/considering, and the bare-career intent-menu gate kept re-firing
+    on every later career-related message even after the user had already
+    given a clear, specific answer."""
+    facts, state, _ = facts_for("I want to switch to business")
+    assert facts["business", "transition_intent"] == "start a business"
+    assert state.business_state == "considering"
 
 
 def test_spouse_name_is_extracted():

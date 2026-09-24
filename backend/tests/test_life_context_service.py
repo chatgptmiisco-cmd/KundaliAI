@@ -32,6 +32,7 @@ async def test_upsert_fact_creates_a_new_active_fact(client):
         assert active == {
             "career": {
                 "occupation": {
+                    "id": item.id, "relevance": "ACTIVE",
                     "value": "Software Engineer", "confidence": "high", "source": "user_stated",
                     "last_confirmed_at": active["career"]["occupation"]["last_confirmed_at"],
                 }
@@ -101,6 +102,33 @@ async def test_delete_fact_returns_false_for_wrong_user_or_missing_id(client):
     async with AsyncSessionLocal() as db:
         assert await life_context_service.delete_fact(db, user_id, 999999) is False
         assert await life_context_service.delete_fact(db, "not-a-real-user", 1) is False
+
+
+async def test_retract_fact_marks_the_active_fact_inactive_by_domain_and_key(client):
+    """The engine's own retraction path (see native_understanding.
+    extract_knowledge's retractions list, applied in chat.py) — looked up
+    by (domain, key) since the chat pipeline never has a fact id, unlike
+    deactivate_fact's UI-driven equivalent. Caught live: a stale business.
+    stage fact kept being echoed back after the user said "I don't have a
+    business" — retract_fact is what chat.py now calls to stop that."""
+    user_id = await _real_user_id(client)
+    async with AsyncSessionLocal() as db:
+        await life_context_service.upsert_fact(db, user_id, "business", "stage", "has_customers", "high", "user_stated")
+
+        await life_context_service.retract_fact(db, user_id, "business", "stage")
+
+        active = await life_context_service.get_active_context(db, user_id, ["business"])
+        assert "business" not in active
+
+        history = await life_context_service.get_fact_history(db, user_id, "business", "stage")
+        assert [h["status"] for h in history] == ["inactive"]
+
+
+async def test_retract_fact_is_a_no_op_when_nothing_active_is_on_record(client):
+    user_id = await _real_user_id(client)
+    async with AsyncSessionLocal() as db:
+        await life_context_service.retract_fact(db, user_id, "business", "stage")  # must not raise
+        assert await life_context_service.get_active_context(db, user_id, ["business"]) == {}
 
 
 async def test_upsert_decision_creates_then_updates_the_same_open_decision(client):

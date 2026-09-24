@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import { useTranslation } from 'react-i18next';
 import { correctLifeContextFact, deleteLifeContextFact, getMyLifeTwin, LifeContextFact, MyLifeTwin } from '../api/client';
 import GlassSurface from '../components/GlassSurface';
+import KeyboardAvoidingWrapper from '../components/KeyboardAvoidingWrapper';
 import { colors, radius, spacing, typography } from '../theme/theme';
 import { showAlert } from '../utils/crossPlatformAlert';
 
@@ -79,7 +80,8 @@ export default function MyLifeTwinScreen() {
   }) : [];
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <KeyboardAvoidingWrapper>
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.subtitle}>{t('lifeTwin.subtitle')}</Text>
 
       <Pressable
@@ -143,6 +145,7 @@ export default function MyLifeTwinScreen() {
         </GlassSurface>
       ))}
     </ScrollView>
+    </KeyboardAvoidingWrapper>
   );
 }
 

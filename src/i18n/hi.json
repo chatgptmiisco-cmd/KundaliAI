@@ -189,6 +189,9 @@
   },
   "common": {
     "appName": "कुंडलीAI",
+    "checkingForUpdates": "अपडेट जाँचे जा रहे हैं...",
+    "downloadingUpdate": "अपडेट डाउनलोड हो रहा है...",
+    "updateReadyRestarting": "अपडेट तैयार है! फिर से शुरू हो रहा है...",
     "listenToThisSection": "यह भाग सुनें",
     "listenToFullExplanation": "पूरी जानकारी सुनें",
     "listenToThisAnalysis": "यह विश्लेषण सुनें",

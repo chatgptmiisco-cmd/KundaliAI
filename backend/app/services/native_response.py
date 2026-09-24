@@ -1,4 +1,6 @@
 """Personalized interpretation of computed facts, before optional styling."""
+import re
+
 from app.services.interpretation.templates import TemplateInterpreter
 from app.services.native_understanding import choose
 
@@ -22,9 +24,42 @@ def _has_marital_reframe(context) -> bool:
     )
 
 
+_RAW_TOKEN_RE = re.compile(r"^[a-z]+(?:_[a-z]+)+$")
+
+
+def _humanize_raw_token(value: str) -> str:
+    """Safety net for a real, reproduced leak: some facts are written as
+    internal enum-style tokens for GATING purposes only (e.g. business.stage
+    = "has_customers"/"early_revenue" — see native_understanding.
+    extract_knowledge), never meant to be shown verbatim. A free-text value
+    the user actually typed is a sentence with spaces, never a pure
+    underscore-joined token, so this only ever fires on the internal-enum
+    case — turns "has_customers" into "has customers" rather than leaking
+    database-looking text into the reply."""
+    return value.replace("_", " ") if _RAW_TOKEN_RE.match(value) else value
+
+
+# Keys that only mean something in the context of ONE specific decision
+# flow (both written exclusively by job_change_decision's own DECISION_
+# SLOTS questions — see conversation_engine.QUESTIONS) — caught live: once
+# stated, these kept echoing on EVERY later career-domain reply, including
+# a plain bare "career" mention that had nothing to do with the earlier
+# job-change conversation ("your reason for changing: stress; your
+# alternative: I already have another offer" showing up on an unrelated
+# "career" question days — or even one turn — later). A fact being
+# recently stated (not yet stale) is a different thing from it being
+# relevant to what's being asked RIGHT NOW; personal_context had no notion
+# of the latter at all. Scoped to the one category they actually answer.
+_DECISION_SCOPED_KEYS = {
+    "change_reason": "job_change_decision",
+    "alternative_opportunity": "job_change_decision",
+}
+
+
 def personal_context(context, language):
     facts = context.get("life_context", {})
     skip_relationship_status = _has_marital_reframe(context)
+    active_categories = set(context.get("detected_categories") or ())
     pieces = []
     labels = {
         "occupation": ("your work", "आपका काम", "aapka kaam"),
@@ -43,6 +78,7 @@ def personal_context(context, language):
         "spouse_name": ("your spouse", "आपके जीवनसाथी", "aapke spouse"),
     }
     seen = set()
+    seen_labels = set()
     for domain, values in facts.items():
         for key, fact in values.items():
             # Rendered separately below from goal_history instead — a single
@@ -53,15 +89,42 @@ def personal_context(context, language):
                 continue
             if key == "relationship_status" and skip_relationship_status:
                 continue
+            required_category = _DECISION_SCOPED_KEYS.get(key)
+            if required_category and required_category not in active_categories:
+                continue
             value = str(fact["value"])
             # Captured lowercase like every other free-text extraction (see
             # native_understanding.py's extract_knowledge) — a proper noun
             # reads as personal, not as a data-entry glitch, when displayed.
-            display_value = value.title() if key == "spouse_name" else value
+            display_value = value.title() if key == "spouse_name" else _humanize_raw_token(value)
             if fact.get("source") not in ("user_stated", "user_confirmed") or fact.get("confidence") == "low" or value in seen:
                 continue
+            # Caught live, reproducing the exact leak this function exists to
+            # prevent: DECISION_SLOTS writes free-text answers under internal
+            # slot keys ("goal", "funding", "customer_supplier_contacts"...)
+            # that were never given a friendly label below. The old fallback
+            # rendered them anyway via `key.replace("_", " ")` — a literal
+            # internal field name shown to the user ("goal: clothing and
+            # yes i have customers,; funding: ..."), exactly what "never
+            # expose field names" means. Those keys already get real
+            # natural-language synthesis (_named_facts_sentence) — an
+            # unlabeled key is skipped here rather than raw-dumped.
+            if key not in labels:
+                continue
+            label = choose(language, *labels[key])
+            # A single statement ("I want to switch to business") can write
+            # the SAME key under two different domains with two slightly
+            # different literal values (career.transition_intent="business",
+            # business.transition_intent="start a business" — see
+            # native_understanding.extract_knowledge) — caught live: this
+            # rendered the identical label twice back to back ("your
+            # intended transition: start a business; your intended
+            # transition: business."). The value-only `seen` check above
+            # doesn't catch it since the values differ; dedupe by label too.
+            if label in seen_labels:
+                continue
             seen.add(value)
-            label = choose(language, *labels[key]) if key in labels else key.replace("_", " ")
+            seen_labels.add(label)
             pieces.append(f"{label}: {display_value}")
     # Stage 2 — goals as a list: up to 3 most recent DISTINCT goals ever
     # stated (oldest-to-newest history, deduped case-insensitively), not
@@ -83,95 +146,119 @@ def personal_context(context, language):
     return choose(language, "From what you've shared, ", "आपने जो बताया है, उसके अनुसार — ", "Aapne jo bataya hai, uske mutabik — ") + "; ".join(pieces[:5]) + "."
 
 
+_SELF_REFERENCE_PREFIX_RE = re.compile(
+    r"^(?:yes,?\s+)?(?:i(?:'m| am)?\s+)?(?:already\s+)?(?:i\s+)?(?:have|has|had|got|want to|plan to|am)\s+",
+    re.IGNORECASE,
+)
+
+
+def _as_clause(value: str) -> str:
+    """A DECISION_SLOTS answer is free text the user typed in their own
+    first-person voice ("I already have another offer") — interpolating it
+    as-is into a sentence that supplies its OWN "you already have {value}"
+    framing produces an awkward double self-reference ("you already have I
+    already have another offer"). Strips a leading self-referential phrase
+    so the value reads as a plain noun clause instead; falls back to the
+    untouched original if nothing recognizable is found, so real content is
+    never lost. Display-only — the stored fact value is never touched."""
+    stripped = _SELF_REFERENCE_PREFIX_RE.sub("", value.strip(), count=1).strip()
+    return stripped or value
+
+
 def _named_facts_sentence(category, facts, language):
-    """Phase 14 — the interpretation should reference the SPECIFIC facts
-    conversation_engine's DECISION_SLOTS already collected for this category,
-    not only a generic caveat that never repeats back what the user actually
-    said. No astrology calculation changes: prediction_service's verdict is
-    untouched, this only enriches the interpretation text around it with
-    values already sitting in context["life_context"]."""
+    """Turns the SPECIFIC facts conversation_engine's DECISION_SLOTS already
+    collected for this category into one connected, forward-moving
+    sentence — not a flat "your X is A; your Y is B" restatement (a real,
+    reproduced complaint: repeating back what the user just said, with no
+    synthesis, "doesn't add much"). Where a genuinely meaningful
+    combination exists (e.g. a stated reason together with an offer in
+    hand), draws the same kind of inference a person would, instead of
+    just listing both. No astrology calculation changes: prediction_
+    service's verdict is untouched, this only shapes the prose around it
+    from values already sitting in context["life_context"]."""
     career, money, business, relationships = (
         facts.get(d, {}) for d in ("career", "money", "business", "relationships")
     )
 
     def val(bucket, key):
-        return bucket.get(key, {}).get("value")
+        value = bucket.get(key, {}).get("value")
+        return _humanize_raw_token(value) if value else value
 
     if category == "job_change_decision":
         reason, offer, runway = val(career, "change_reason"), val(career, "alternative_opportunity"), val(money, "savings")
-        known = [v for v in (reason, offer, runway) if v]
-        if not known:
+        if not any((reason, offer, runway)):
             return None
-        pieces_en = [p for p in (
-            f"your stated reason is {reason}" if reason else None,
-            f"your situation is: {offer}" if offer else None,
-            f"your savings runway is {runway}" if runway else None,
-        ) if p]
-        pieces_hi = [p for p in (
-            f"आपकी बताई वजह है: {reason}" if reason else None,
-            f"आपकी स्थिति है: {offer}" if offer else None,
-            f"आपकी बचत रनवे है: {runway}" if runway else None,
-        ) if p]
-        return choose(language,
-            f"Specifically, {'; '.join(pieces_en)} — weigh the timing below against that, not a generic scenario.",
-            f"विशेष रूप से, {'; '.join(pieces_hi)} — नीचे के समय को इसी के आधार पर तौलें, किसी सामान्य स्थिति के आधार पर नहीं।")
-    if category == "business_start_decision":
+        has_offer = bool(offer) and not any(t in offer.lower() for t in ("no offer", "no job offer", "none", "नहीं"))
+        offer_clause = _as_clause(offer) if offer and has_offer else offer
+        if reason and offer:
+            lead = choose(language,
+                f"{reason.capitalize()} is what's driving this, and you already have {offer_clause} — so it's not "
+                f"just about wanting out, there's something concrete pulling you too." if has_offer else
+                f"{reason.capitalize()} is driving this, but {offer} — so the real question right now is timing "
+                f"and readiness, not just whether to look.",
+                f"{reason} ही असली वजह है, और आपके पास {offer_clause} भी है — यानी सिर्फ छोड़ने की बात नहीं, एक ठोस विकल्प भी है।"
+                if has_offer else
+                f"{reason} वजह है, लेकिन {offer} — इसलिए असली सवाल समय और तैयारी का है, सिर्फ तलाश का नहीं।")
+        elif reason:
+            lead = choose(language, f"{reason.capitalize()} is what's actually driving this.", f"{reason} ही असली वजह है।")
+        elif offer:
+            lead = choose(language, f"You mentioned: {offer}.", f"आपने बताया: {offer}।")
+        else:
+            lead = None
+        if not runway:
+            return lead
+        tail = choose(language,
+            f"With {runway} to fall back on, there's real room to plan this properly rather than rush it.",
+            f"{runway} होने से इसे जल्दबाज़ी में नहीं, ठीक से योजना बनाकर करने की गुंजाइश है।")
+        return f"{lead} {tail}" if lead else tail
+    # "business" (bare, e.g. "I want to switch to business" mid a career
+    # conversation) reuses business_start_decision's exact same DECISION_
+    # SLOTS/goal/funding keys (see conversation_engine.DECISION_SLOTS'
+    # "business" entry) but was never added here — caught live: personal_
+    # context() had no friendly label for "goal"/"funding" either, so a
+    # plain "business" turn fell all the way through to a raw internal-key
+    # dump ("goal: clothing...; funding: ...") instead of this synthesized
+    # sentence. Same facts, same synthesis, just the other category name.
+    if category in ("business_start_decision", "business"):
         goal, funding = val(business, "goal"), val(business, "funding")
-        known = [v for v in (goal, funding) if v]
-        if not known:
+        if not any((goal, funding)):
             return None
-        pieces_en = [p for p in (f"your plan is: {goal}" if goal else None, f"your funding is: {funding}" if funding else None) if p]
-        pieces_hi = [p for p in (f"आपकी योजना है: {goal}" if goal else None, f"आपका धन स्रोत है: {funding}" if funding else None) if p]
-        return choose(language,
-            f"Specifically, {'; '.join(pieces_en)} — weigh the timing below against that.",
-            f"विशेष रूप से, {'; '.join(pieces_hi)} — नीचे के समय को इसी के आधार पर तौलें।")
+        funding_clause = _as_clause(funding) if funding else funding
+        if goal and funding:
+            return choose(language,
+                f"You're thinking {goal}, funded by {funding_clause} — that's the actual combination worth "
+                f"weighing against the timing below, not a generic business question.",
+                f"आप {goal} सोच रहे हैं, {funding_clause} के सहारे — नीचे के समय को इसी संयोजन के आधार पर देखना चाहिए, किसी "
+                f"सामान्य व्यवसाय सवाल के आधार पर नहीं।")
+        if goal:
+            return choose(language, f"You're thinking: {goal}.", f"आप यह सोच रहे हैं: {goal}।")
+        return choose(language, f"You mentioned funding this through {funding_clause}.", f"आपने बताया कि इसे {funding_clause} से फंड करेंगे।")
     if category == "marriage_decision":
         constraints = val(relationships, "marriage_constraints")
         if not constraints:
             return None
         return choose(language,
-            f"Specifically, you mentioned: {constraints} — that concern doesn't disappear just because the timing looks supportive.",
-            f"विशेष रूप से, आपने बताया: {constraints} — समय अनुकूल दिखने से यह चिंता खत्म नहीं हो जाती।")
+            f"You mentioned: {constraints} — that's worth weighing directly, alongside the timing, not instead of it.",
+            f"आपने बताया: {constraints} — इसे समय के साथ-साथ सीधे तौर पर भी देखना ज़रूरी है, सिर्फ समय के आधार पर नहीं।")
     return None
 
 
 def practical_framing(context, language):
+    """Only ever surfaces a sentence built from what the person actually
+    said (_named_facts_sentence) — never a fixed, decision-framework
+    paragraph identical for every user asking about the same category. A
+    "Compare staying, accepting a concrete offer, and resigning without
+    one... A supportive chart window is not a job offer" disclaimer used to
+    live here, one hardcoded paragraph per decision type, unconditionally,
+    for every single reply — exactly the internal "decision-framework
+    explanation" language a real astrologer wouldn't recite out loud.
+    Removed per direct, explicit feedback; the actual substance (comparing
+    options, the chart not replacing real-world information) belongs in
+    conversation only when it's genuinely relevant to what THIS person
+    described, which is what _named_facts_sentence already does."""
     categories = context.get("detected_categories", [])
     facts = context.get("life_context", {})
-    career, business = facts.get("career", {}), facts.get("business", {})
-    alternative = career.get("alternative_opportunity", {}).get("value", "").lower()
-    if "job_change_decision" in categories and any(term in alternative for term in ("no offer", "no job offer", "none", "नहीं")):
-        return choose(language,
-            "You have said there is no offer yet. Compare staying while applying or testing the business with a planned career break funded by your savings. The chart window cannot supply the missing income plan.",
-            "आपने बताया कि अभी प्रस्ताव नहीं है। नौकरी करते हुए आवेदन या व्यवसाय का परीक्षण करने और बचत से नियोजित विराम लेने की तुलना करें। कुंडली आय की योजना का विकल्प नहीं है।")
-    if any(c in categories for c in ("career", "job_change_decision", "business_start_decision", "business")) and ("transition_intent" in career or "business_type" in business):
-        return choose(language,
-            "This is a job-versus-business transition, so compare keeping your income while testing customer demand with leaving for the venture. The timing below is relevant to that transition; it does not establish whether the business can cover your commitments.",
-            "यह नौकरी और व्यवसाय के बीच बदलाव का प्रश्न है। आय जारी रखते हुए ग्राहकों की मांग परखने और नौकरी छोड़कर व्यवसाय करने की तुलना करें। नीचे का समय इस बदलाव से संबंधित है; इससे व्यवसाय की आय की गारंटी नहीं मिलती।",
-            "Yeh job-versus-business transition hai. Current income rakhkar customer demand test karne aur job chhodne ko compare karein. Neeche ki timing transition se judi hai; business income ki guarantee nahi hai.")
-    rules = {
-        "job_change_decision": (
-            "Compare staying, accepting a concrete offer, and resigning without one against the goal and savings you described. A supportive chart window is not a job offer or a replacement for income.",
-            "अपने लक्ष्य और बचत के अनुसार रुकने, ठोस प्रस्ताव स्वीकारने और बिना प्रस्ताव नौकरी छोड़ने की तुलना करें। अनुकूल समय नौकरी या आय का विकल्प नहीं है।"),
-        "business_start_decision": (
-            "Use your customer evidence, funding and ongoing commitments to decide the size of a trial before committing fully. The chart timing supports planning; it cannot establish demand or profit.",
-            "पूरी प्रतिबद्धता से पहले ग्राहकों की मांग, धन और जिम्मेदारियों के आधार पर छोटा परीक्षण तय करें। कुंडली का समय मांग या मुनाफा सिद्ध नहीं करता।"),
-        "relocation_decision": (
-            "Separate the travel window from the practical choice: compare work or visa eligibility, housing costs and the reason for moving before choosing a date.",
-            "यात्रा के समय से व्यावहारिक निर्णय अलग रखें: तारीख चुनने से पहले काम, वीज़ा, घर का खर्च और स्थान बदलने की वजह की तुलना करें।"),
-        "house_purchase_decision": (
-            "Match the property timing to your stated purpose, down payment and affordable repayments. Ownership indicators cannot establish affordability or legal suitability.",
-            "संपत्ति के समय को अपने उद्देश्य, डाउन पेमेंट और वहनीय किस्त से जोड़ें। कुंडली वहनीयता या कानूनी उपयुक्तता तय नहीं करती।"),
-        "marriage_decision": (
-            "Use the timing alongside your relationship readiness, shared expectations and responsibilities. Your chart alone cannot establish compatibility with a particular partner.",
-            "समय के साथ रिश्ते की तैयारी, साझा अपेक्षाएं और जिम्मेदारियां देखें। केवल आपकी कुंडली किसी खास साथी से अनुकूलता तय नहीं कर सकती।"),
-        "investment_decision": (
-            "Your financial goal, time horizon, emergency savings and ability to absorb loss determine which options are realistic. Astrology cannot estimate investment returns or recommend a security; the wealth indicators below are only a timing reflection.",
-            "वित्तीय लक्ष्य, समय सीमा, आपात बचत और नुकसान सहने की क्षमता से विकल्प तय होंगे। ज्योतिष निवेश का रिटर्न या प्रतिभूति नहीं चुन सकता; नीचे के धन संकेत केवल समय पर विचार हैं।"),
-    }
-    base = "\n\n".join(choose(language, *rules[c]) for c in categories if c in rules)
-    named = "\n\n".join(s for c in categories if (s := _named_facts_sentence(c, facts, language)))
-    return "\n\n".join(p for p in (base, named) if p)
+    return "\n\n".join(s for c in categories if (s := _named_facts_sentence(c, facts, language)))
 
 
 async def compose(history, context, language):
@@ -228,6 +315,29 @@ async def compose(history, context, language):
             parts.append(choose(language,
                 f"In an earlier related conversation you said: “{quote['text']}”. If that situation has changed, tell me so I can use your current circumstances.",
                 f"पिछली संबंधित बातचीत में आपने कहा था: “{quote['text']}”। यदि स्थिति बदल गई है तो बताएं।"))
-    if context.get("decision_missing"):
-        parts.append(choose(language, "The practical details are still incomplete, so treat this as conditional guidance rather than a recommendation to act.", "व्यावहारिक जानकारी अभी अधूरी है; इसे सशर्त मार्गदर्शन मानें, कदम उठाने की सलाह नहीं।"))
+    if context.get("follow_up_questions"):
+        parts.append(context["follow_up_questions"])
+    # context["decision_missing"] used to append a fixed caveat here
+    # ("...treat this as conditional guidance rather than a recommendation
+    # to act") on every incomplete decision, regardless of the person or
+    # question — internal reasoning about the engine's own confidence,
+    # not something a human astrologer would say out loud by default. Per
+    # direct, explicit feedback: keep this internal. The still-missing
+    # slots are already visible as the numbered follow-up question above
+    # when there is one; that already does the real work of asking for
+    # what's needed, without a separate disclaimer sentence.
     return "\n\n".join(parts)
+
+
+# problem_next_steps and decision_next_steps used to live here — a fixed,
+# generic checklist ("Compare three options: ... Next steps: speak with
+# potential customers and suppliers...") appended to EVERY problem/decision
+# reply regardless of the specific person, verbatim identical for anyone
+# with the same category. Removed per direct, explicit feedback: this is
+# exactly the "extra text which should not be there" complaint, and the
+# same "would this apply to a million people?" test this session has
+# already used to justify removing other generic filler. The real,
+# person-specific guidance (DECISION_SLOTS' own questions, the computed
+# timing window, prediction_service's own reasoning text) already carries
+# the actual content; this block added length and templated-sounding
+# checklist prose without adding anything specific to the person asking.

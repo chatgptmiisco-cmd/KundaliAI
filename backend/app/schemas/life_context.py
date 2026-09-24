@@ -13,6 +13,7 @@ class LifeContextFactOut(BaseModel):
     confidence: str
     source: str
     last_confirmed_at: str | None
+    relevance: str = "ACTIVE"
 
 
 class LifeDecisionOut(BaseModel):

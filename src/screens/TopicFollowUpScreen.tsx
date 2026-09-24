@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { submitOnboardingContext } from '../api/client';
 import CosmicBackground from '../components/CosmicBackground';
 import GlassSurface from '../components/GlassSurface';
+import KeyboardAvoidingWrapper from '../components/KeyboardAvoidingWrapper';
 import PrimaryButton from '../components/PrimaryButton';
 import { ONBOARDING_TOPICS, OnboardingTopic, TOPIC_SLUG } from '../data/onboardingTopics';
 import { useUserStore } from '../store/useUserStore';
@@ -61,6 +62,7 @@ export default function TopicFollowUpScreen() {
 
   return (
     <CosmicBackground style={styles.screen}>
+      <KeyboardAvoidingWrapper>
       <View style={styles.content}>
         <View style={styles.progressRow}>
           {topic.questionKeys.map((_, i) => (
@@ -94,6 +96,7 @@ export default function TopicFollowUpScreen() {
           </Text>
         </View>
       </View>
+      </KeyboardAvoidingWrapper>
     </CosmicBackground>
   );
 }

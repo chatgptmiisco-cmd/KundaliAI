@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.models.chat import ChatMessage
+from app.db.models.life_context import LifeContextItem
 
 _logger = get_logger("chat_memory_service")
 
@@ -62,10 +63,26 @@ async def retrieve_native_turns(db, user_id, categories, query_text, limit=3, ex
     the topic recurs — once shown, it's shown, not repeated forever."""
     from app.services.native_understanding import detect_intents, is_navigational_reply, is_question
     from app.services.chat_understanding import relevant_domains
-    domains = set(relevant_domains(categories))
+    # "goals" sits in almost every category's domain tuple in
+    # _CATEGORY_DOMAINS (career, money, business, career_confusion,
+    # debt...) — a deliberately inclusive default for FACT retrieval
+    # (user_context_engine.retrieve), where surfacing a stated goal across
+    # topics is reasonable. But it makes "goals" alone a false-positive
+    # relevance signal for THIS callback specifically — caught live: a bare
+    # "money" question resurfaced "there is no growth in my job" (a career
+    # statement) as "an earlier related conversation", purely because
+    # career's and money's domain tuples both happen to include "goals".
+    # Excluded here only, not from _CATEGORY_DOMAINS itself, so fact
+    # retrieval elsewhere is unaffected.
+    domains = set(relevant_domains(categories)) - {"goals"}
     if not domains:
         return []
     exclude_ids = exclude_ids or set()
+    inactive_values = [value.casefold() for value in (await db.scalars(
+        select(LifeContextItem.value).where(
+            LifeContextItem.user_id == user_id, LifeContextItem.status == "inactive",
+        )
+    )).all() if value]
     words = set(re.findall(r"\w{3,}", query_text.lower())) - {"what", "when", "will", "should", "about", "with", "have", "that", "this", "does"}
     scored = []
     # Stream history in batches: bound response context, not the user's memory
@@ -74,9 +91,11 @@ async def retrieve_native_turns(db, user_id, categories, query_text, limit=3, ex
         ChatMessage.user_id == user_id, ChatMessage.role == "user"
     ).order_by(ChatMessage.id.desc()).execution_options(yield_per=100))
     async for row in result:
+        if any(value in row.content.casefold() for value in inactive_values):
+            continue
         if row.id in exclude_ids or is_question(row.content) or is_navigational_reply(row.content):
             continue
-        row_domains = set(relevant_domains(detect_intents(row.content)))
+        row_domains = set(relevant_domains(detect_intents(row.content))) - {"goals"}
         if not domains.intersection(row_domains):
             continue
         overlap = len(words & set(re.findall(r"\w{3,}", row.content.lower())))

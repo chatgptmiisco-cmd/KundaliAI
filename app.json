@@ -40,7 +40,7 @@
     },
     "owner": "miiscoorg",
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "updates": {
       "url": "https://u.expo.dev/d4f9edfc-66e9-4f87-af97-0a76445baed8"

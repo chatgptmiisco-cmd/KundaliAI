@@ -5,7 +5,11 @@ import { useTranslation } from 'react-i18next';
 import CosmicBackground from '../components/CosmicBackground';
 import { colors, typography } from '../theme/theme';
 
-export default function SplashScreen() {
+type Props = {
+  statusText?: string | null;
+};
+
+export default function SplashScreen({ statusText }: Props) {
   const { t } = useTranslation();
   return (
     <CosmicBackground style={styles.wrap}>
@@ -15,6 +19,9 @@ export default function SplashScreen() {
           "Astrolabe Glass" direction anyway. */}
       <Ionicons name="sparkles" size={40} color={colors.primary} />
       <Text style={styles.wordmark}>{t('common.appName')}</Text>
+      {/* Reserves its space even when empty so the wordmark doesn't jump
+          the instant a status line appears/disappears during boot. */}
+      <Text style={styles.status}>{statusText ?? ' '}</Text>
     </CosmicBackground>
   );
 }
@@ -29,5 +36,10 @@ const styles = StyleSheet.create({
   wordmark: {
     ...typography.display,
     color: colors.textInverse,
+  },
+  status: {
+    ...typography.caption,
+    color: colors.textInverse,
+    opacity: 0.7,
   },
 });

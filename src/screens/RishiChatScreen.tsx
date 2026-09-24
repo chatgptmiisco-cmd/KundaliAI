@@ -21,6 +21,7 @@ import {
 } from 'expo-audio';
 import { useTranslation } from 'react-i18next';
 import { postChatMessage, transcribeAudio } from '../api/client';
+import KeyboardAvoidingWrapper from '../components/KeyboardAvoidingWrapper';
 import PremiumModal from '../components/PremiumModal';
 import RishiSwitcher from '../components/RishiSwitcher';
 import TypingIndicator from '../components/TypingIndicator';
@@ -254,6 +255,7 @@ export default function RishiChatScreen() {
 
   return (
     <CosmicBackground style={styles.screen}>
+      <KeyboardAvoidingWrapper>
       <View style={styles.rishiHeader}>
         <RishiSwitcher activeId={rishi.id} onSelect={setActiveRishiId} />
         <View style={styles.creditsPill}>
@@ -374,6 +376,7 @@ export default function RishiChatScreen() {
           </LinearGradient>
         </Pressable>
       </View>
+      </KeyboardAvoidingWrapper>
 
       <PremiumModal
         visible={lockVisible}

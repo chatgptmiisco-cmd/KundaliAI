@@ -1,4 +1,5 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as Updates from 'expo-updates';
 import React, { useEffect, useState } from 'react';
 import i18n from '../i18n/i18n';
 import { useTranslation } from 'react-i18next';
@@ -38,6 +39,8 @@ export default function RootNavigator() {
 
   const [timerDone, setTimerDone] = useState(false);
   const [hydrated, setHydrated] = useState(useUserStore.persist.hasHydrated());
+  const [updateChecked, setUpdateChecked] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setTimerDone(true), MIN_SPLASH_MS);
@@ -54,8 +57,46 @@ export default function RootNavigator() {
     }
   }, [hydrated]);
 
-  if (!timerDone || !hydrated) {
-    return <SplashScreen />;
+  // OTA update check — runs once on boot, alongside the min-splash timer
+  // and store hydration above. `Updates.isEnabled` is false in Expo Go and
+  // any dev/development-client build (no channel to check against), so
+  // this is a silent no-op there instead of the "not supported in
+  // development" throw checkForUpdateAsync would otherwise raise.
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!Updates.isEnabled) {
+        if (!cancelled) setUpdateChecked(true);
+        return;
+      }
+      try {
+        setUpdateStatus(i18n.t('common.checkingForUpdates'));
+        const update = await Updates.checkForUpdateAsync();
+        if (cancelled) return;
+        if (update.isAvailable) {
+          setUpdateStatus(i18n.t('common.downloadingUpdate'));
+          await Updates.fetchUpdateAsync();
+          if (cancelled) return;
+          setUpdateStatus(i18n.t('common.updateReadyRestarting'));
+          await Updates.reloadAsync();
+          return; // App reloads — nothing left to update in this instance.
+        }
+      } catch (updateError) {
+        console.log('Update check failed:', updateError);
+      }
+      if (!cancelled) {
+        setUpdateStatus(null);
+        setUpdateChecked(true);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!timerDone || !hydrated || !updateChecked) {
+    return <SplashScreen statusText={updateStatus} />;
   }
 
   return (

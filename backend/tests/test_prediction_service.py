@@ -493,6 +493,32 @@ def test_is_currently_dusthana_afflicted_false_outside_every_mahadasha():
     assert _is_currently_dusthana_afflicted([maha], far_future, {"Ju"}) is False
 
 
+def test_decision_reason_text_hides_dusthana_mechanics_by_default():
+    """Regression guard for a real, explicit feedback item: naming the
+    Antardasha lord and "dusthana (6th/8th/12th, the classical difficulty
+    houses)" is HOW the chart arrives at the risk signal, not WHAT it means
+    for the person — this should only surface when the user actually asks
+    "why"/"which planet"/"what is my dasha", matching the same
+    wants_technical_detail() convention already used elsewhere in this app.
+    The real signal itself must still show up when asked; only the
+    mechanical narration is gated."""
+    from app.services.interpretation.prediction_templates import decision_reason_text
+
+    hidden = decision_reason_text(
+        "job_change", "unfavorable", "en", current_period_lord="Sa", dusthana_afflicted=True,
+        better_window_start=None, history_nudge=None, history_dates=[],
+    )
+    assert "dusthana" not in hidden.lower()
+    assert "antardasha" not in hidden.lower()
+
+    shown = decision_reason_text(
+        "job_change", "unfavorable", "en", current_period_lord="Sa", dusthana_afflicted=True,
+        better_window_start=None, history_nudge=None, history_dates=[], include_mechanics=True,
+    )
+    assert "dusthana" in shown.lower()
+    assert "saturn" in shown.lower()
+
+
 def test_current_period_score_scores_the_antardasha_covering_now():
     birth_dt = datetime(1990, 1, 1, tzinfo=timezone.utc)
     maha = _mahadasha("Sa", birth_dt, 19, ["Sa", "Me", "Ke", "Ve", "Su", "Mo", "Ma", "Ra", "Ju"])

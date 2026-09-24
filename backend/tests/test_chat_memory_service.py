@@ -169,6 +169,28 @@ async def test_retrieve_native_turns_never_surfaces_a_past_question_as_a_fact(cl
     assert any("thinking about marriage" in item["text"] for item in result)
 
 
+async def test_retrieve_native_turns_does_not_cross_pollinate_via_the_shared_goals_domain(client):
+    """Regression guard for a real, reproduced bug: a bare "money" question
+    resurfaced "there is no growth in my job" (a career statement) as "an
+    earlier related conversation you said" — purely because _CATEGORY_
+    DOMAINS["career"] and _CATEGORY_DOMAINS["money"] both include "goals",
+    a deliberately broad catch-all meant for fact retrieval elsewhere, not a
+    genuine relevance signal for this narrative callback."""
+    headers = await _signup_and_set_birth_data(client)
+    profile = await client.get("/api/v1/user/profile", headers=headers)
+    user_id = profile.json()["id"]
+
+    async with AsyncSessionLocal() as db:
+        db.add(ChatMessage(
+            user_id=user_id, role="user", content="there is no growth in my job",
+            language="en", rishi_id="bhrigu",
+        ))
+        await db.commit()
+
+        result = await chat_memory_service.retrieve_native_turns(db, user_id, ["money"], "money")
+    assert result == []
+
+
 async def test_retrieve_native_turns_excludes_already_surfaced_quotes(client):
     """Regression guard: the same past statement resurfaced as a callback
     on every subsequent turn the topic recurred, since nothing tracked what

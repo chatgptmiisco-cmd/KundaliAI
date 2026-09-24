@@ -189,6 +189,9 @@
   },
   "common": {
     "appName": "KundaliAI",
+    "checkingForUpdates": "Checking for updates...",
+    "downloadingUpdate": "Downloading update...",
+    "updateReadyRestarting": "Update ready! Restarting...",
     "listenToThisSection": "Listen to this section",
     "listenToFullExplanation": "Listen to full explanation",
     "listenToThisAnalysis": "Listen to this analysis",

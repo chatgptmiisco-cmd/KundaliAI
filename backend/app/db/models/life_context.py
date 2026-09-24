@@ -42,7 +42,7 @@ class LifeContextItem(Base):
 
     confidence: Mapped[str] = mapped_column(String(16))  # high | medium | low
     source: Mapped[str] = mapped_column(String(24))  # user_stated | user_confirmed | inferred
-    status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")  # active | superseded | deleted
+    status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")  # active | inactive | superseded | deleted
 
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # Bumped whenever the same fact is re-stated/re-confirmed without the

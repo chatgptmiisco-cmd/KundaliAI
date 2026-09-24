@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { getPersonalizationScore, getSubscription } from '../api/client';
 import BirthDataFields from '../components/BirthDataFields';
 import Card from '../components/Card';
+import KeyboardAvoidingWrapper from '../components/KeyboardAvoidingWrapper';
 import LanguageToggle from '../components/LanguageToggle';
 import PrimaryButton from '../components/PrimaryButton';
 import { useUserStore } from '../store/useUserStore';
@@ -86,7 +87,8 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <KeyboardAvoidingWrapper>
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Card>
         <View style={styles.headerRow}>
           <Text style={styles.cardTitle}>{t('profile.birthDetailsTitle')}</Text>
@@ -171,6 +173,7 @@ export default function ProfileScreen() {
         />
       </Card>
     </ScrollView>
+    </KeyboardAvoidingWrapper>
   );
 }
 

@@ -1024,6 +1024,7 @@ def decision_reason_text(
     better_window_start: str | None,
     history_nudge: Literal["favorable", "unfavorable"] | None,
     history_dates: list[str],
+    include_mechanics: bool = False,
 ) -> str:
     hi = language == "hi"
     labels = _DECISION_LABEL_HI if hi else _DECISION_LABEL_EN
@@ -1032,7 +1033,18 @@ def decision_reason_text(
 
     sentences = [headlines[verdict].format(decision=decision_label)]
 
-    if dusthana_afflicted and current_period_lord is not None:
+    # The dusthana/Antardasha-lord explanation names planets and classical
+    # house terminology (WHY/HOW the chart says this) rather than WHAT it
+    # means for the person — caught live, direct feedback: this should only
+    # surface when actually asked ("why", "which planet", "what is my
+    # dasha"), matching the exact same wants_technical_detail() convention
+    # already used for topic answers elsewhere in this app (see templates.
+    # py's _house_technical_hint). The underlying risk signal itself isn't
+    # lost — a real astrologer would still weigh it, just not narrate the
+    # mechanism unprompted. include_mechanics defaults False so every
+    # existing caller that hasn't been updated to pass it stays exactly as
+    # conservative as before (jargon hidden, never suddenly exposed).
+    if dusthana_afflicted and current_period_lord is not None and include_mechanics:
         names = PLANET_NAMES_HI if hi else PLANET_NAMES_EN
         template = _DUSTHANA_WARNING_HI if hi else _DUSTHANA_WARNING_EN
         sentences.append(template.format(lord=names[current_period_lord]))

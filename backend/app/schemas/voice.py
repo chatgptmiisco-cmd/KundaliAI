@@ -49,3 +49,4 @@ class ChatMessageOut(BaseModel):
     # "via Bhrigu"). None when the message didn't match a known category.
     answered_by_rishi_id: str | None = None
     response_source: Literal["native", "native_styled"] = "native"
+    question_type: Literal["information", "prediction", "decision", "problem", "confirmation", "clarification"] = "information"

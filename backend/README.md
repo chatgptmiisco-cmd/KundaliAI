@@ -123,7 +123,34 @@ alembic upgrade head
 
 ## Frontend integration
 
-Not wired up yet in this pass — the React Native app (`../src/api/client.ts`)
-still talks to its own mock layer. Swapping that for real HTTP calls against
-this backend is a follow-up; the API shapes here were designed to map onto
-the same data the frontend already expects (see `app/schemas/`).
+The React Native app uses `../src/api/client.ts` and `httpClient.ts` to call
+these HTTP endpoints. Chat response metadata is additive, so existing clients
+can continue rendering the `reply` field.
+
+## Memory relevance and response strategy
+
+`question_strategy.py` separates the current question from remembered facts.
+Broad topics with remembered concerns ask for the user's current focus before
+using that concern. Numbered replies resolve through persisted conversation
+state. Choosing another focus excludes the old concern from current advice;
+explicitly rejecting it marks its fact record inactive without deleting history.
+
+Relevance is derived from `status` and `last_confirmed_at`: ACTIVE through seven
+days, RECENT through thirty days, HISTORICAL thereafter or when no confirmation
+date exists, and INACTIVE for records no longer active. This is separate from
+confidence. Explicit reconfirmation refreshes the date. A conversational focus
+expires after 24 hours; asking a broad topic again checks the focus again.
+
+Chat responses expose `question_type`: information, prediction, decision,
+problem, confirmation, or clarification. Decision responses combine existing
+calculated timing with current facts, practical options, risks, next steps,
+and missing-information questions. Business transitions collect market,
+customer/supplier contacts, funding, and side-job versus full-time plans.
+Problem responses include an actionable first step while collecting context.
+These changes do not modify astrology calculations and work with `engine_only`.
+
+The native classifier uses bounded rules and supported categories; it is not
+an unrestricted natural-language reasoner. Unknown requests ask for clarification.
+Regression coverage is in `tests/test_question_strategy.py` alongside existing
+chat, memory, and conversation tests. No schema migration is required for these
+relevance changes: status and last-confirmation fields already exist.

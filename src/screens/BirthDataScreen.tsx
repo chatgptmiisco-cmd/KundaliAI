@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import BirthDataFields from '../components/BirthDataFields';
 import CosmicBackground from '../components/CosmicBackground';
 import GlassSurface from '../components/GlassSurface';
+import KeyboardAvoidingWrapper from '../components/KeyboardAvoidingWrapper';
 import PrimaryButton from '../components/PrimaryButton';
 import { useUserStore } from '../store/useUserStore';
 import { BirthData } from '../types/kundali';
@@ -46,7 +47,8 @@ export default function BirthDataScreen() {
 
   return (
     <CosmicBackground>
-      <ScrollView contentContainerStyle={styles.content}>
+      <KeyboardAvoidingWrapper>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <GlassSurface style={styles.headerCard}>
           <Text style={styles.title}>{t('onboarding.birthDataTitle')}</Text>
           <Text style={styles.subtitle}>{t('onboarding.birthDataSubtitle')}</Text>
@@ -63,6 +65,7 @@ export default function BirthDataScreen() {
           onPress={handleSubmit}
         />
       </ScrollView>
+      </KeyboardAvoidingWrapper>
     </CosmicBackground>
   );
 }

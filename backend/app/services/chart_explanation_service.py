@@ -40,6 +40,8 @@ from app.services.interpretation.templates import (
     _LIFE_FRAMING_HI,
     _TONE_BY_LORD_EN,
     _TONE_BY_LORD_HI,
+    _VERDICT_REASON_EN,
+    _VERDICT_REASON_HI,
     _a_or_an,
     _hindi_house,
     _ordinal,
@@ -176,23 +178,6 @@ _VERDICT_BY_HOUSE_HI: dict[int, dict[str, str]] = {
         "mixed": "आराम और चीज़ों को छोड़ने का यह अनुभव कभी आसान तो कभी मुश्किल हो सकता है।",
     },
 }
-
-# A one-line plain-language "why" that follows the verdict above — same
-# reason text regardless of which house/topic, since the underlying cause is
-# always the same shape (strong support / real strain / no strong pull
-# either way). Deliberately still no planet names or astrology terms, so the
-# verdict doesn't read as an unexplained, arbitrary label.
-_VERDICT_REASON_EN: dict[str, str] = {
-    "favorable": "There's a strong, positive push behind this right now, so things are likely to work in your favor.",
-    "unfavorable": "There's real strain behind this right now, so expect some extra effort or difficulty.",
-    "mixed": "There's no strong push in either direction right now, so a lot depends on your own effort and choices.",
-}
-_VERDICT_REASON_HI: dict[str, str] = {
-    "favorable": "अभी इसके पीछे एक मज़बूत, सकारात्मक ताकत है, इसलिए चीज़ें आपके पक्ष में जाने की संभावना है।",
-    "unfavorable": "अभी इसके पीछे वास्तविक दबाव है, इसलिए थोड़ी ज़्यादा मेहनत या मुश्किल की उम्मीद रखें।",
-    "mixed": "अभी इसके पीछे कोई मज़बूत ताकत नहीं है, इसलिए काफ़ी कुछ आपकी अपनी मेहनत और चुनाव पर निर्भर करता है।",
-}
-
 
 def _dignity_bucket(dignities: list[str | None]) -> str:
     """Collapses one or more planets' classical dignity into a single plain

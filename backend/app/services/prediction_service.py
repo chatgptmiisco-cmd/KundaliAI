@@ -1765,6 +1765,7 @@ async def get_decision(
     db: AsyncSession, profile: BirthProfile, birth: BirthDataOut,
     decision_type: Literal["job_change", "business_start", "house_purchase"],
     language: Language,
+    include_mechanics: bool = False,
 ) -> DecisionResponse:
     """Answers "should I do X now?" with a verdict (favorable/unfavorable/
     wait_for_better_window/neutral), not a list of windows — see the
@@ -1892,6 +1893,7 @@ async def get_decision(
         better_window_start=better_window.start.date().isoformat() if better_window else None,
         history_nudge=history_nudge,
         history_dates=history_dates,
+        include_mechanics=include_mechanics,
     )
 
     await log_prediction_query(
@@ -1910,6 +1912,7 @@ async def get_decision(
 
 async def get_marriage_decision(
     db: AsyncSession, profile: BirthProfile, birth: BirthDataOut, language: Language,
+    include_mechanics: bool = False,
 ) -> DecisionResponse:
     """"Should I get married now" — deliberately NOT routed through
     get_decision's generic `_DECISION_EVENT_TYPE`/`_DECISION_HOUSE` machinery
@@ -1986,6 +1989,7 @@ async def get_marriage_decision(
         better_window_start=better_window_out["start_date"].isoformat() if better_window_out else None,
         history_nudge=history_nudge,
         history_dates=history_dates,
+        include_mechanics=include_mechanics,
     )
 
     await log_prediction_query(

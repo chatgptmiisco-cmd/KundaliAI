@@ -251,6 +251,16 @@ class ChatUnderstanding:
     # structuring" convention as outcome_report above. Only meaningfully
     # set when a check-in is actually pending.
     important_date_outcome: str | None = None
+    # Caught live: a user directly contradicting an already-stored fact
+    # ("I don't have a business, it was just an idea") had nowhere to go —
+    # extract_knowledge only ever ADDS/supersedes facts, so the stale
+    # business.stage="has_customers" row kept being echoed back on every
+    # later turn even after the user said otherwise. (domain, key) pairs
+    # here get the SAME "no longer current" treatment life_context_service.
+    # deactivate_fact already gives a user-deleted fact — status="inactive",
+    # dropped from get_active_context — just triggered by the engine
+    # recognizing a retraction instead of a UI click.
+    retracted_facts: list[tuple[str, str]] = field(default_factory=list)
 
 
 async def classify_message(
@@ -275,7 +285,7 @@ async def extract_onboarding_context(topic: str, qa_pairs: list[tuple[str, str]]
     from app.services.native_understanding import extract_knowledge
     facts = {}
     for question, answer in qa_pairs:
-        updates, _, _, _ = extract_knowledge(answer)
+        updates, _, _, _, _ = extract_knowledge(answer)
         for update in updates:
             facts[update.domain, update.key] = update
         # A bounded answer to an explicit onboarding question is structured

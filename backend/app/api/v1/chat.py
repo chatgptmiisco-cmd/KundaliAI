@@ -22,7 +22,7 @@ from app.services.chart_service import get_chart
 from app.services.chat_understanding import classify_message, compute_out_of_domain_redirects, relevant_domains
 from app.services.daily_reading_service import get_daily_reading
 from app.services.dasha_service import get_current_dasha
-from app.services import conversation_engine, user_context_engine, native_response, chat_beautifier, chat_gpt_mediator
+from app.services import conversation_engine, user_context_engine, native_response, chat_beautifier, chat_gpt_mediator, question_strategy
 from app.core.config import get_settings
 from app.services.interpretation.factory import native_chat
 from app.services.interpretation.templates import (
@@ -291,23 +291,29 @@ def _log_reasoning(
     *, user_id: str, rishi_id: str | None, message: str, detected_intent: list[str],
     life_state: dict, life_context: dict, response_type: str,
     blocked_predictions: list[str] | None = None, selected_interpretation: list[str] | None = None,
+    previous_intent: list[str] | None = None, used_intent_rescue: bool = False,
 ) -> None:
     """One log line per turn naming exactly what a debugging session needs:
     what was asked, what the engine knew, what got blocked and why, and what
     it decided to answer with instead — so a wrong-looking reply can be
     diagnosed from the logs directly instead of needing to be reported back
-    and reproduced from scratch each time."""
+    and reproduced from scratch each time. previous_intent (the prior turn's
+    conversation_state["categories"], captured before resume() overwrites
+    it) makes an intent switch — or a stale topic wrongly persisting —
+    readable straight off the logs instead of reconstructed by hand."""
     logger.info(
         "chat_reasoning_trace",
         extra={
             "user_id": user_id,
             "rishi_id": rishi_id,
             "user_question": message[:200],
+            "previous_intent": previous_intent if previous_intent is not None else detected_intent,
             "detected_intent": detected_intent,
             "user_context_used": _context_used_summary(life_state, life_context),
             "blocked_predictions": blocked_predictions or [],
             "selected_interpretation": selected_interpretation or detected_intent,
             "final_response_type": response_type,
+            "used_intent_rescue": used_intent_rescue,
         },
     )
 
@@ -661,7 +667,17 @@ async def chat_astro(
     )
 
     _, conversation_state = await conversation_engine.load_state(db, user.id, body.rishi_id)
-    understanding = conversation_engine.resume(understanding, classification_message, conversation_state, body.language)
+    # Captured before resume() mutates conversation_state in place — logged
+    # alongside the new categories below so an intent switch (or a stale
+    # topic wrongly persisting) can be read straight off the logs instead of
+    # reconstructed by hand from a bug report.
+    previous_intent = list(conversation_state.get("categories", []))
+    had_focus = bool(conversation_state.get("focus_pending"))
+    confirmed, inactive = question_strategy.resolve_focus(understanding, body.message, conversation_state, body.language)
+    for fact in inactive:
+        await life_context_service.deactivate_fact(db, user.id, fact["id"])
+    if not (had_focus and (confirmed or inactive or conversation_state.get("focus_confirmed"))):
+        understanding = conversation_engine.resume(understanding, classification_message, conversation_state, body.language)
     categories = understanding.categories
     # Deterministic fallback for a plain yes/no reply to the career-
     # employment gate question this endpoint itself may have just asked
@@ -700,11 +716,67 @@ async def chat_astro(
         db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id))
         await db.commit()
         return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=None)
+    # Intent Rescue Layer — last resort before the fully generic "what do
+    # you want to talk about" clarifying question, tried only once every
+    # deterministic path (detect_intents, topic continuation, pending
+    # menus/slots, domain words) has already come up with NOTHING. GPT picks
+    # from a fixed, engine-known category list (see chat_gpt_mediator.
+    # _KNOWN_CATEGORIES) — it classifies only, never answers, and a failed
+    # or out-of-list result changes nothing: the existing generic fallback
+    # still fires exactly as before. Skipped for engine_only / when the
+    # mediator is disabled, same gating as every other GPT call in this file.
+    used_intent_rescue = False
+    if understanding.needs_clarification and not categories and not body.engine_only:
+        rescued = await chat_gpt_mediator.classify_unmapped_intent(body.message, previous_intent, body.language)
+        if rescued:
+            categories = [rescued]
+            understanding.categories = categories
+            understanding.needs_clarification = False
+            understanding.clarifying_question = None
+            conversation_state["categories"] = categories
+            used_intent_rescue = True
+        else:
+            # Even the category rescue above found nothing — the
+            # deterministic engine genuinely has no template or category
+            # for this message. Rather than fall back to the fully generic
+            # "what do you want to talk about" question forever, let GPT
+            # give a short, honest, plain-language reply instead (see
+            # chat_gpt_mediator.answer_unmapped's own docstring for why
+            # this can't become a channel for a fabricated astrology
+            # claim). Whatever the user actually stated is still captured
+            # as a fact the normal way — understanding.context_updates
+            # (from extract_knowledge, run on every message regardless of
+            # category) gets persisted a few lines below either way.
+            unmapped_reply = await chat_gpt_mediator.answer_unmapped(body.message, body.language)
+            if unmapped_reply:
+                # Retractions applied BEFORE the upsert loop below (and
+                # here) so a same-turn re-assertion of the same fact still
+                # wins — upsert_fact only supersedes a currently-active row,
+                # so retracting first just means a fresh one gets inserted.
+                for domain, key in understanding.retracted_facts:
+                    await life_context_service.retract_fact(db, user.id, domain, key)
+                for update in understanding.context_updates:
+                    await life_context_service.upsert_fact(
+                        db, user.id, update.domain, update.key, update.value, update.confidence, update.source
+                    )
+                db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
+                db.add(ChatMessage(user_id=user.id, role="assistant", content=unmapped_reply, language=body.language, rishi_id=body.rishi_id))
+                await conversation_engine.save_state(db, user.id, body.rishi_id, conversation_state)
+                await db.commit()
+                return ChatMessageOut(reply=unmapped_reply, language=body.language, answered_by_rishi_id=None)
     # Set inside the life_theme branch below when a vague-past-event
     # candidate is surfaced; the actual PredictionFeedback row is only
     # created once `reply` (the interpreter's real phrasing) exists — see
     # that assignment.
     pending_past_event_candidate = None
+    # Caught live: "I don't have a business, it was just an idea" had no
+    # effect at all on the already-stored business.stage fact from an
+    # earlier turn — it kept being echoed back verbatim turn after turn.
+    # Applied BEFORE the upsert loop below so a same-turn re-assertion of
+    # the same fact still wins (upsert_fact only supersedes a currently-
+    # active row, so retracting first just means a fresh one gets inserted).
+    for domain, key in understanding.retracted_facts:
+        await life_context_service.retract_fact(db, user.id, domain, key)
     # Every extracted fact gets recorded as structured Life Context (see
     # app.services.life_context_service) — never as a bare "confirmed"
     # fact when the model only inferred it; confidence/source travel with
@@ -811,16 +883,25 @@ async def chat_astro(
     # facts stated in the same message. Refresh after writes for same-turn use.
     native_context = await user_context_engine.retrieve(db, user.id, categories)
     context.update(native_context)
+    context["question_type"] = question_strategy.question_type(body.message, categories)
+    relevance_prompt = None if inactive else question_strategy.relevance_question(
+        body.message, categories, context, conversation_state, body.language, understanding.context_updates,
+    )
+    context["life_context"] = question_strategy.usable_facts(context, conversation_state, understanding.context_updates)
+    # Historical goals remain available for explicit recall, not current advice.
+    if categories != ["memory_recall"]:
+        context["goal_history"] = []
     for category in categories:
         if category in conversation_engine.DECISION_SLOTS and not understanding.decision_update:
             await life_context_service.upsert_decision(db, user.id, category, body.message)
-    gap_question = conversation_engine.questions_for(
+    gap_question = None if relevance_prompt or inactive else conversation_engine.questions_for(
         categories, context["life_context"], context["life_state"], conversation_state, body.language,
     )
     await conversation_engine.save_state(db, user.id, body.rishi_id, conversation_state)
-    clarification = (
+    context["follow_up_questions"] = gap_question if context["question_type"] == "decision" else None
+    clarification = relevance_prompt or (
         understanding.clarifying_question if understanding.needs_clarification else
-        understanding.decision_gap_question or gap_question
+        understanding.decision_gap_question or (gap_question if context["question_type"] != "decision" else None)
     )
     if clarification:
         # GPT Mediator Layer (app.services.chat_gpt_mediator), when enabled —
@@ -830,9 +911,9 @@ async def chat_astro(
         # position, never by re-parsing this displayed text (see that
         # module's own docstring), and simplify_question fails closed to
         # the original wording if the option count doesn't match exactly.
-        if not body.engine_only:
+        if not body.engine_only and not relevance_prompt:
             clarification = await chat_gpt_mediator.simplify_question(clarification, body.language)
-        prefix = native_response.personal_context(context, body.language)
+        prefix = "" if relevance_prompt else native_response.personal_context(context, body.language)
         reply = (prefix + "\n\n" if prefix else "") + clarification
         if conversation_state.get("pending_intent_menu"):
             response_type = "clarification_menu"
@@ -846,12 +927,13 @@ async def chat_astro(
         _log_reasoning(
             user_id=user.id, rishi_id=body.rishi_id, message=body.message, detected_intent=categories,
             life_state=context["life_state"], life_context=context["life_context"],
-            response_type=response_type, blocked_predictions=blocked,
+            response_type=response_type, blocked_predictions=blocked, previous_intent=previous_intent,
+            used_intent_rescue=used_intent_rescue,
         )
         db.add(ChatMessage(user_id=user.id, role="user", content=body.message, language=body.language, rishi_id=body.rishi_id))
         db.add(ChatMessage(user_id=user.id, role="assistant", content=reply, language=body.language, rishi_id=body.rishi_id, used_personalization=bool(prefix)))
         await db.commit()
-        return ChatMessageOut(reply=reply, language=body.language)
+        return ChatMessageOut(reply=reply, language=body.language, question_type="clarification" if relevance_prompt else context["question_type"])
     context["decision_missing"] = any(
         not conversation_engine.known_slot(slot, context["life_context"])
         for category in categories for slot in conversation_engine.DECISION_SLOTS.get(category, ())
@@ -901,7 +983,10 @@ async def chat_astro(
     # reasoning, not a list of windows. See prediction_service.get_decision.
     for decision_type, category in _DECISION_CHECKS:
         if category in categories:
-            decision = await prediction_service.get_decision(db, profile, birth, decision_type, body.language)
+            decision = await prediction_service.get_decision(
+                db, profile, birth, decision_type, body.language,
+                include_mechanics=wants_technical_detail(body.message),
+            )
             context[f"{decision_type}_decision"] = {
                 "verdict": decision.verdict,
                 "reasoning": decision.reasoning,
@@ -957,7 +1042,9 @@ async def chat_astro(
     # marriage-timing computation that could disagree with the one
     # marriage_timing_windows already relies on.
     if "marriage_decision" in categories:
-        marriage_decision = await prediction_service.get_marriage_decision(db, profile, birth, body.language)
+        marriage_decision = await prediction_service.get_marriage_decision(
+            db, profile, birth, body.language, include_mechanics=wants_technical_detail(body.message),
+        )
         context["marriage_decision"] = {
             "verdict": marriage_decision.verdict,
             "reasoning": marriage_decision.reasoning,
@@ -1131,6 +1218,12 @@ async def chat_astro(
             exclude_ids_below=min(r.id for r in history_rows) if len(history_rows) >= _HISTORY_LIMIT else 0,
         )
         context["retrieved_history"].extend(semantic)
+    if categories != ["memory_recall"]:
+        dismissed = conversation_state.get("dismissed_memory_values", [])
+        context["retrieved_history"] = [] if conversation_state.get("focus_confirmed") else [
+            quote for quote in context["retrieved_history"]
+            if not any(value.casefold() in quote.get("text", "").casefold() for value in dismissed)
+        ]
     native_reply = await native_response.compose(history, context, body.language)
     reply = await chat_beautifier.beautify(native_reply, body.language, body.engine_only)
     # Product spec fix — a past QUESTION is filtered out of retrieved_history
@@ -1195,7 +1288,8 @@ async def chat_astro(
         user_id=user.id, rishi_id=body.rishi_id, message=body.message, detected_intent=categories,
         life_state=context["life_state"], life_context=context["life_context"],
         response_type="native_styled" if reply != native_reply else "native",
-        selected_interpretation=categories,
+        selected_interpretation=categories, previous_intent=previous_intent,
+        used_intent_rescue=used_intent_rescue,
     )
 
     # Embeds THIS turn for future retrieval (see chat_memory_service) — a
@@ -1217,4 +1311,5 @@ async def chat_astro(
     await db.commit()
 
     return ChatMessageOut(reply=reply, language=body.language, answered_by_rishi_id=answered_by_rishi_id,
+                          question_type=context["question_type"],
                           response_source="native_styled" if reply != native_reply else "native")

@@ -135,6 +135,42 @@ def effective_confidence(confidence: str, last_confirmed_at: datetime | None) ->
     return _CONFIDENCE_BY_RANK[rank]
 
 
+def memory_relevance(status: str, last_confirmed_at: datetime | None, now: datetime | None = None) -> str:
+    """Relevance is not confidence: a true old plan need not be today's intent."""
+    if status != "active":
+        return "INACTIVE"
+    if last_confirmed_at is None:
+        return "HISTORICAL"
+    confirmed = last_confirmed_at.replace(tzinfo=timezone.utc) if last_confirmed_at.tzinfo is None else last_confirmed_at
+    days = ((now or datetime.now(timezone.utc)) - confirmed).days
+    return "ACTIVE" if days <= 7 else "RECENT" if days <= 30 else "HISTORICAL"
+
+
+async def deactivate_fact(db: AsyncSession, user_id: str, item_id: int) -> None:
+    item = await db.scalar(select(LifeContextItem).where(
+        LifeContextItem.id == item_id, LifeContextItem.user_id == user_id,
+        LifeContextItem.status == "active"))
+    if item:
+        item.status = "inactive"
+        await db.commit()
+
+
+async def retract_fact(db: AsyncSession, user_id: str, domain: str, key: str) -> None:
+    """Same "no longer current" treatment as deactivate_fact (status=
+    "inactive", dropped from get_active_context) — just triggered by the
+    engine itself recognizing a retraction in what the user typed (see
+    native_understanding.extract_knowledge's retractions list) rather than
+    a UI delete click, so it's looked up by (domain, key) instead of a
+    fact id the chat pipeline never has. A no-op when nothing active is on
+    record for that key — nothing to retract is not an error."""
+    item = await db.scalar(select(LifeContextItem).where(
+        LifeContextItem.user_id == user_id, LifeContextItem.domain == domain,
+        LifeContextItem.key == key, LifeContextItem.status == "active"))
+    if item:
+        item.status = "inactive"
+        await db.commit()
+
+
 async def get_active_context(
     db: AsyncSession, user_id: str, domains: list[str] | None = None
 ) -> dict[str, dict[str, dict]]:
@@ -152,10 +188,12 @@ async def get_active_context(
     out: dict[str, dict[str, dict]] = {}
     for row in result.scalars().all():
         out.setdefault(row.domain, {})[row.key] = {
+            "id": row.id,
             "value": row.value,
             "confidence": effective_confidence(row.confidence, row.last_confirmed_at),
             "source": row.source,
             "last_confirmed_at": row.last_confirmed_at.isoformat() if row.last_confirmed_at else None,
+            "relevance": memory_relevance(row.status, row.last_confirmed_at),
         }
     return out
 

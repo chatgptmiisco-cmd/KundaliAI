@@ -168,6 +168,13 @@ _SUB_INTENT_PATTERNS = (
      r"|\b(?:dukhi|pareshan|udaas|naraz)\b.*\b(?:shaadi|rishte|partner|pati|patni)\b"
      r"|\b(?:shaadi|rishte)\b.*\b(?:dukhi|pareshan|udaas)\b"
      r"|\b(?:unhappy|upset|sad|struggling|miserable) (?:in|with|about) (?:my )?(?:marriage|relationship)\b"
+     # "We both don't get along" — caught live: no "fight"/"conflict"/
+     # "unhappy" word at all, so this fell through to zero categories
+     # entirely (not even the generic "marriage" catch-all), landing on the
+     # fully generic "what do you want to talk about" clarifying question
+     # even immediately after a relationship topic was already the subject.
+     r"|\b(?:we|i) (?:both )?(?:do not|don't|dont|doesn't|doesnt|does not) get along\b"
+     r"|\bnot getting along\b|nahi bante\b|nahi bantee\b|nahi patt rahi\b|नहीं बनती\b|नहीं बनते\b"
      r"|दुखी.*शादी|शादी.*दुखी|परेशान.*शादी|शादी.*परेशान",
      "relationship_conflict"),
     (r"\b(?:bonding|connection|compatibility|understanding) with (?:my )?(?:spouse|wife|husband|partner)\b"
@@ -179,7 +186,7 @@ _SUB_INTENT_PATTERNS = (
     (r"\b(?:problem|issue|conflict|fight) (?:at|with) (?:work|office|my boss|my colleague|my manager)"
      r"|workplace.*(?:problem|issue|conflict)|office mein.*problem|ऑफिस में.*समस्या",
      "workplace_problem"),
-    (r"\b(?:confused|unsure|lost|don't know what to do) about (?:my )?career"
+    (r"\b(?:confused|unsure|not sure|lost|don't know what to do) about (?:my )?career"
      r"|career (?:confusion|direction)\b|career.*samajh nahi|करियर.*समझ नहीं",
      "career_confusion"),
     (r"\b(?:my )?(?:loan|debt|karza|कर्ज़|कर्ज)\b.*\b(?:pay|repay|clear|chukana)\b|\bhow (?:do i|to) (?:pay off|clear) (?:my )?(?:loan|debt)\b",
@@ -196,17 +203,31 @@ _SUB_INTENT_PATTERNS = (
 # and got answered as two separate, concatenated templates.
 _SUB_INTENT_ALSO_SUPPRESSES: dict[str, tuple[str, ...]] = {
     "family_planning": ("family",),
+    # "get along" (the relationship_conflict trigger above) is ALSO a
+    # _TOPIC_KEYWORDS["friends"] phrase — caught live: "we don't get along"
+    # matched both, same double-template-concatenation risk as
+    # family_planning/family above.
+    "relationship_conflict": ("friends",),
 }
 
 
 def detect_intents(message, birth_year=None):
     text = message.lower()
-    # Typo-corrected copy, used only for the sub-intent patterns below —
+    # Typo-corrected copy, used for every plain-regex check below (decision
+    # patterns, sub-intent patterns, the business/marriage catch-alls) —
     # caught live: "shhadi" (typo for "shaadi") went uncorrected and a real
     # distress message matched only the generic "marriage" topic, missing
-    # the relationship_conflict signal entirely. Scoped narrowly (not
-    # applied to `text` itself) to avoid changing any other already-tuned
-    # detection path in this function.
+    # the relationship_conflict signal entirely. Also caught live: "I want
+    # to switch to buisness" (a common transposition typo) matched NONE of
+    # these plain regexes (only literal "business"), even though
+    # extract_knowledge's fact extraction already correctly recognized it
+    # via this same normalization — so the message got tagged bare
+    # "career" only and answered with stale job-change timing instead of
+    # ever being recognized as a business-transition message. Deliberately
+    # NOT applied to `_detect_categories(text, ...)` below — that function
+    # already does its own, separately-tuned per-keyword fuzzy matching
+    # across a much larger keyword surface, and layering this correction on
+    # top of it is unverified/out of scope here.
     normalized_text = _fuzzy_normalize(text)
     categories = _detect_categories(text, birth_year)
     if re.search(r"what (?:do you know|do you remember|have i told you) about me|मेरे बारे में.*याद|mere baare.*yaad", text):
@@ -218,7 +239,7 @@ def detect_intents(message, birth_year=None):
         (r"(?:should|shall|can) i (?:invest|buy stocks)|invest kar|निवेश कर", "investment_decision"),
         (r"(?:should|shall|can) i (?:move|relocate).*?(?:abroad|country)|videsh.*(?:ja|shift)|विदेश.*जा", "relocation_decision"),
     ):
-        if re.search(pattern, text):
+        if re.search(pattern, normalized_text):
             additions.append(category)
     for pattern, category in _SUB_INTENT_PATTERNS:
         if category in additions or not re.search(pattern, normalized_text):
@@ -231,10 +252,10 @@ def detect_intents(message, birth_year=None):
         if category in _RELATIONSHIP_CATEGORIES and any(c in _RELATIONSHIP_CATEGORIES for c in categories + additions):
             continue
         additions.append(category)
-    if re.search(r"\b(?:business|company|customers|ecommerce|entrepreneur)\b|व्यवसाय|व्यापार", text) and not any("business" in c for c in categories + additions):
+    if re.search(r"\b(?:business|company|customers|ecommerce|entrepreneur)\b|व्यवसाय|व्यापार", normalized_text) and not any("business" in c for c in categories + additions):
         additions.append("business")
     if (
-        re.search(r"\b(?:relationship|spouse|wife|husband|partner)\b", text)
+        re.search(r"\b(?:relationship|spouse|wife|husband|partner)\b", normalized_text)
         and not any(c in _RELATIONSHIP_CATEGORIES or "marriage" in c for c in categories + additions)
     ):
         additions.append("marriage")
@@ -275,6 +296,7 @@ def extract_knowledge(message):
     text = re.sub(r"\bim\b", "i am", text)
     facts = {}
     state = {}
+    retractions: list[tuple[str, str]] = []
 
     def put(domain, key, value):
         value = str(value).strip(" .,;:")[:240]
@@ -354,7 +376,7 @@ def extract_knowledge(message):
             clause,
         ):
             put("family", "planning_intent", "considering family planning")
-        if re.search(r"\bi (?:want|plan|hope|am planning|am thinking) (?:to |about )?(?:start|starting|build|building|launch|launching).*?(?:business|company)|\bi am thinking about leaving.*and starting.*(?:business|company)|business shuru karna|व्यवसाय शुरू करना", clause):
+        if re.search(r"\bi (?:want|plan|hope|am planning|am thinking) (?:to |about )?(?:start|starting|build|building|launch|launching|switch|switching|shift|shifting) (?:to |into )?.*?(?:business|company)|\bi am thinking about leaving.*and starting.*(?:business|company)|business shuru karna|व्यवसाय शुरू करना", clause):
             put("business", "transition_intent", "start a business")
             put("career", "transition_intent", "business")
             state["business_state"] = "considering"
@@ -363,14 +385,50 @@ def extract_knowledge(message):
             state["business_state"] = "running"
         if re.search(r"\bi (?:run|own) (?:a |an |my )?.*?(?:business|company|shop)\b", clause):
             state["business_state"] = "running"
+        # Caught live: "i dont have business it was just an idea" — a direct
+        # retraction of an already-stored business.stage="has_customers"
+        # fact from an earlier turn — extracted nothing at all, so the stale
+        # fact kept being echoed back turn after turn even after the user
+        # said otherwise. Checked AFTER the "has customers"/"run business"
+        # patterns above so an explicit negation always wins if a single
+        # message somehow matches both. Same "no longer current" signal as
+        # the pregnancy_status negation above, plus the 3 business facts
+        # that only ever mean something if a business is actually real.
+        if re.search(
+            r"\bi (?:don't|do not|dont)(?: actually)? (?:have|run|own) (?:a |my |any )?(?:business|company)\b"
+            r"|\b(?:business|company)\b.{0,25}\b(?:was|is) (?:just|only) an idea\b",
+            clause,
+        ):
+            state["business_state"] = "none"
+            retractions.extend((
+                ("business", "stage"), ("business", "transition_intent"), ("business", "business_type"),
+            ))
         if "ecommerce" in clause or "e-commerce" in clause:
             if re.search(r"\bi\b|\bmy\b", clause) and not re.search(r"\b(?:not|don't|never)\b", clause):
                 put("business", "business_type", "ecommerce")
+        product = re.search(r"\bi (?:want|plan|am planning|am thinking).*?(?:business (?:selling|in|of)|sell(?:ing) )\s*(.+?)(?=\band i\b|$)", clause)
+        if product and not re.search(r"\b(?:don't|do not|no longer)\b", clause):
+            put("business", "business_type", product[1])
+        if re.search(r"\bmy job has no growth|\bi (?:am|'m) (?:stuck|stressed) (?:at|with|in) (?:my )?(?:job|work)\b|job mein growth nahi|नौकरी में.*विकास नहीं", clause):
+            put("career", "main_concern", "lack of job growth" if "growth" in clause or "विकास" in clause else "work stress")
+        if re.search(r"\b(?:my partner and i|we) (?:fight|are fighting)\b", clause):
+            put("relationships", "main_concern", "relationship conflict")
+        if re.search(r"\bi (?:am struggling|have trouble) (?:with|paying|repaying).*?loan", clause):
+            put("money", "main_concern", "loan repayment pressure")
         for pattern, domain, key in (
             (r"\bi work (?:at|for) ([\w &-]+?)(?=,|\band\b|$)", "career", "employer"),
             (r"\bi have (\d+ years?)(?: of)? experience", "career", "experience"),
             (r"\b(?:my salary is|i earn) ([\w ₹$€,.]+?)(?=\band\b|$)", "money", "salary_range"),
-            (r"\bi have ([\w ₹$€,-]+?) (?:in savings|of savings|savings)", "money", "savings"),
+            # Caught live: "...yes i have customers, 2 i have some savings and
+            # i'll do this business parttime" (a numbered reply typed without
+            # periods) had the lazy capture group span straight through the
+            # SECOND "i have", since digits/commas/spaces are all valid class
+            # members — capturing "customers, 2 i have some" as the "savings"
+            # value. The negative lookahead stops the capture the instant it
+            # would swallow another "i have", without narrowing what a
+            # genuine single savings answer ("six months", "50000 rupees") can
+            # contain.
+            (r"\bi have ((?:(?!\bi have\b)[\w ₹$€,-])+?) (?:in savings|of savings|savings)", "money", "savings"),
             (r"\bi (?:support|am responsible for) (my [\w ]+?)(?=,|\band\b|$)", "family", "financial_responsibilities"),
             (r"\bmy (?:career )?goal is (.+)", "goals", "top_goal"),
             (r"\bi prefer (.+)", "preferences", "communication_preference"),
@@ -422,7 +480,7 @@ def extract_knowledge(message):
                 deadline = ImportantDateUpdate("goals", message[:240], target.isoformat())
         except ValueError:
             pass
-    return list(facts.values()), LifeStateUpdate(**state) if state else None, events, deadline
+    return list(facts.values()), LifeStateUpdate(**state) if state else None, events, deadline, retractions
 
 
 # Phase 8 — Answer Capability Resolver, deliberately minimal: a general,
@@ -469,7 +527,10 @@ def understand(history, birth_year, language, open_decisions=None,
         return result
     categories = detect_intents(message, birth_year)
     result = ChatUnderstanding(categories=categories)
-    result.context_updates, result.life_state_update, result.events, result.important_date_update = extract_knowledge(message)
+    (
+        result.context_updates, result.life_state_update, result.events,
+        result.important_date_update, result.retracted_facts,
+    ) = extract_knowledge(message)
     previous = history[-2]["content"] if len(history) > 1 and history[-2]["role"] == "assistant" else ""
     yes = message_is_affirmative_reply(message) or message.strip().startswith(("हाँ", "हां"))
     no = message_is_negative_reply(message) or message.strip().startswith("नहीं")

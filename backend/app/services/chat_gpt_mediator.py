@@ -221,3 +221,132 @@ async def simplify_question(question_text: str, language: str) -> str:
         return simplified
     except Exception:
         return question_text
+
+
+# --- D. Unknown-message intent rescue (classification only, never an answer) --
+
+# The exact category strings the deterministic engine already knows how to
+# handle (DECISION_SLOTS / native_understanding.detect_intents /
+# templates._detect_categories) — kept short and curated on purpose. GPT
+# picks ONE of these, or "none"; it can never invent a category the rest of
+# the pipeline wouldn't recognize. Extend this list only when a new engine
+# category is added elsewhere, never as a one-off patch for a single phrase
+# (that's what native_understanding.py's own patterns are for).
+_KNOWN_CATEGORIES = (
+    "career", "career_confusion", "career_promotion_timing", "job_change_decision",
+    "business", "business_start_decision",
+    "marriage", "marriage_timing", "relationship_conflict", "spouse_relationship", "family_planning",
+    "money", "wealth_timing", "debt", "financial_stability", "investment_decision",
+    "family", "children", "siblings", "friends",
+    "relocation_decision", "house_purchase_decision", "property_sale_intent",
+    "week_ahead", "year_ahead", "travel", "foreign_travel_timing",
+)
+
+_INTENT_RESCUE_SYSTEM_PROMPT = (
+    "You classify a short astrology-chat message into EXACTLY ONE of a fixed list of category "
+    "IDs — you are not answering the message, only picking the closest matching category, so "
+    "never include astrology content, advice, or a greeting in your response. You are given the "
+    "conversation's previously active category (may be null) and the user's new message. If the "
+    "message continues the previous topic (e.g. asking for a solution, changing a stated plan, a "
+    "short follow-up with no topic word of its own), pick whichever category best fits that "
+    "CONTINUED topic. If the message clearly starts a different topic, pick whichever category "
+    "matches THAT instead. If truly nothing fits, return \"none\". Return only JSON matching "
+    "{\"category\": \"...\"}, where the value is EXACTLY one of: " + ", ".join((*_KNOWN_CATEGORIES, "none"))
+)
+
+
+async def classify_unmapped_intent(message: str, previous_categories: list[str], language: str) -> str | None:
+    """Last-resort rescue for a message native_understanding.detect_intents
+    and conversation_engine's topic-continuation heuristics both found
+    NOTHING for (see app.api.v1.chat) — called only once every deterministic
+    path has already failed, never in place of them or before them. GPT
+    picks from the FIXED _KNOWN_CATEGORIES list above; a returned value
+    outside that list (or "none", or any error/timeout) is treated exactly
+    like a failure — the caller falls back to the existing generic "what do
+    you want to talk about" question, never guesses further. Classification
+    only: GPT never sees astrology content and never writes the actual
+    answer — the rescued category still goes through the full deterministic
+    engine, identically to a category native_understanding found on its
+    own."""
+    settings = get_settings()
+    if not settings.chat_gpt_mediator_enabled or not settings.openai_api_key or not message.strip():
+        return None
+    from openai import AsyncOpenAI
+    try:
+        async with AsyncOpenAI(
+            api_key=settings.openai_api_key, max_retries=0,
+            timeout=settings.chat_gpt_mediator_timeout_seconds,
+        ) as client:
+            response = await asyncio.wait_for(client.chat.completions.create(
+                model=settings.openai_model, max_tokens=30,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": _INTENT_RESCUE_SYSTEM_PROMPT},
+                    {"role": "user", "content": json.dumps({
+                        "previous_category": previous_categories[0] if previous_categories else None,
+                        "message": message, "language": language,
+                    })},
+                ],
+            ), timeout=settings.chat_gpt_mediator_timeout_seconds)
+        category = json.loads(response.choices[0].message.content).get("category")
+        return category if category in _KNOWN_CATEGORIES else None
+    except Exception:
+        return None
+
+
+# --- E. Genuinely unanswerable fallback (direct GPT reply, no astrology) ---
+
+_UNANSWERABLE_SYSTEM_PROMPT = (
+    "You are a short, warm conversational fallback for an astrology-chat app, used ONLY after the "
+    "app's own engine and its category classifier both found nothing that matches the user's message. "
+    "Reply in the SAME language and script the message is written in (English, Hindi, or Hindi written "
+    "in Latin script). Use simple, everyday words. You have NO chart data and MUST NOT make any "
+    "astrological claim, prediction, or mention of planets, houses, dasha, or timing — never invent "
+    "one. If the message is a normal conversational remark, respond warmly and briefly like a person "
+    "would. If it seems to need real chart-based insight, say honestly that you'd need to know more, "
+    "and suggest naming a specific area — career, relationships, money, or family. Keep it to 1-3 "
+    "short sentences. Return only JSON matching {\"reply\": \"...\"}."
+)
+
+
+async def answer_unmapped(message: str, language: str) -> str | None:
+    """Last resort AFTER classify_unmapped_intent has ALSO failed to place
+    the message into any known category (see app.api.v1.chat) — at this
+    point the deterministic engine genuinely has nothing to offer, and the
+    only alternative left is the fully generic "what do you want to talk
+    about" question forever. This lets GPT give a short, honest, plain-
+    language reply instead — explicitly forbidden from inventing any
+    astrological content, so it can only ever be conversational filler or
+    an honest "tell me more," never a fabricated chart claim. Whatever the
+    user stated in their own message is still captured as a fact the
+    normal way: native_understanding.extract_knowledge already runs on
+    every message regardless of category and persists via the same
+    upsert_fact path — this function does not need its own storage step."""
+    settings = get_settings()
+    if not settings.chat_gpt_mediator_enabled or not settings.openai_api_key or not message.strip():
+        return None
+    from openai import AsyncOpenAI
+    try:
+        async with AsyncOpenAI(
+            api_key=settings.openai_api_key, max_retries=0,
+            timeout=settings.chat_gpt_mediator_timeout_seconds,
+        ) as client:
+            response = await asyncio.wait_for(client.chat.completions.create(
+                model=settings.openai_model, max_tokens=150,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": _UNANSWERABLE_SYSTEM_PROMPT},
+                    {"role": "user", "content": json.dumps({"message": message, "language": language})},
+                ],
+            ), timeout=settings.chat_gpt_mediator_timeout_seconds)
+        reply = json.loads(response.choices[0].message.content).get("reply")
+        if not isinstance(reply, str) or not reply.strip():
+            return None
+        # Fail closed: this function must never be the channel a fabricated
+        # astrology claim slips through — same forbidden-term check as a
+        # last-line defense on top of the system prompt's own instruction.
+        if re.search(r"\b(?:planet|planets|house|houses|dasha|nakshatra|yoga|transit|retrograde)\b", reply.lower()):
+            return None
+        return reply
+    except Exception:
+        return None

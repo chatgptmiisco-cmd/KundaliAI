@@ -82,6 +82,7 @@ async def get_my_life_twin(user: User = Depends(get_current_user), db: AsyncSess
                 # confirmed yesterday.
                 confidence=life_context_service.effective_confidence(f.confidence, f.last_confirmed_at),
                 source=f.source,
+                relevance=life_context_service.memory_relevance(f.status, f.last_confirmed_at),
                 last_confirmed_at=f.last_confirmed_at.isoformat() if f.last_confirmed_at else None,
             )
         )

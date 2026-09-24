@@ -46,6 +46,96 @@ async def test_chat_astro_mid_conversation_greeting_gets_a_short_nudge_not_the_g
     assert "thanks for sharing" not in reply.lower()
 
 
+async def test_chat_astro_intent_rescue_routes_an_unmapped_message_via_the_returned_category(client, monkeypatch):
+    """Regression guard for a real, requested feature: a message with no
+    keyword match at all (not short enough for topic continuation either)
+    used to always fall to the fully generic "what do you want to talk
+    about" question, even when it was an obvious continuation of an active
+    topic. classify_unmapped_intent (mocked here — no real GPT call, per
+    this project's "no GPT in tests" rule) is the last-resort rescue; a
+    category it returns must flow through the exact same DECISION_SLOTS/
+    answer pipeline as a natively-detected one, not just get logged."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    async def _fake_rescue(message, previous_categories, language):
+        return "relationship_conflict"
+
+    monkeypatch.setattr(chat_module.chat_gpt_mediator, "classify_unmapped_intent", _fake_rescue)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "I really do not know what more there is I can even try here", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    reply = resp.json()["reply"]
+    assert "what do you want to talk about" not in reply.lower()
+    assert "concern" in reply.lower()
+
+
+async def test_chat_astro_intent_rescue_is_skipped_for_engine_only(client, monkeypatch):
+    """The rescue must never fire in engine_only mode — same gating as every
+    other GPT call in this file."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    def _fail_if_called(message, previous_categories, language):
+        pytest.fail("intent rescue must not run in engine_only mode")
+
+    monkeypatch.setattr(chat_module.chat_gpt_mediator, "classify_unmapped_intent", _fail_if_called)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "I really do not know what more there is I can even try here", "language": "en", "engine_only": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_chat_astro_falls_back_to_a_direct_gpt_reply_when_even_the_rescue_fails(client, monkeypatch):
+    """Regression guard for a real, explicitly requested feature: when the
+    deterministic engine has no category AND classify_unmapped_intent (the
+    rescue) also can't place the message, the app used to show the fully
+    generic "what do you want to talk about" question forever. answer_
+    unmapped (mocked here — no real GPT call, per this project's "no GPT in
+    tests" rule) should now be tried as a genuine last resort, and its
+    reply used directly instead of the generic fallback."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    async def _fake_rescue_fails(message, previous_categories, language):
+        return None
+
+    async def _fake_direct_answer(message, language):
+        return "That's sweet of you to say — happy to keep chatting whenever you like."
+
+    monkeypatch.setattr(chat_module.chat_gpt_mediator, "classify_unmapped_intent", _fake_rescue_fails)
+    monkeypatch.setattr(chat_module.chat_gpt_mediator, "answer_unmapped", _fake_direct_answer)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "thanks so much, you are really helpful", "language": "en"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["reply"] == "That's sweet of you to say — happy to keep chatting whenever you like."
+
+
+async def test_chat_astro_direct_gpt_fallback_is_skipped_for_engine_only(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    def _fail_if_called(message, language):
+        pytest.fail("direct GPT fallback must not run in engine_only mode")
+
+    monkeypatch.setattr(chat_module.chat_gpt_mediator, "classify_unmapped_intent", lambda *a, **k: pytest.fail("must not run"))
+    monkeypatch.setattr(chat_module.chat_gpt_mediator, "answer_unmapped", _fail_if_called)
+
+    resp = await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "thanks so much, you are really helpful", "language": "en", "engine_only": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+
 async def test_chat_astro_answers_a_real_question_and_persists_history(client, monkeypatch):
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
@@ -747,7 +837,11 @@ async def test_chat_astro_excludes_the_immediately_preceding_turn_from_quote_can
     exclusion."""
     _unlock_strategy_tier(monkeypatch)
     headers = await _signup_and_set_birth_data(client)
-    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed"})
+    # business_state also satisfies questions_for's money-menu gate (see
+    # conversation_engine.py) — set so "How's my money looking?" below
+    # answers directly instead of being intercepted by that menu, which
+    # isn't what this test is exercising.
+    await client.put("/api/v1/user/profile/life-state", headers=headers, json={"career_state": "employed", "business_state": "running"})
 
     captured_exclude_ids = {}
 

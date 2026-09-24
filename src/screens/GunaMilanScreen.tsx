@@ -5,6 +5,7 @@ import { getGunaMilan } from '../api/client';
 import BirthDataFields from '../components/BirthDataFields';
 import Card from '../components/Card';
 import ErrorState from '../components/ErrorState';
+import KeyboardAvoidingWrapper from '../components/KeyboardAvoidingWrapper';
 import LoadingState from '../components/LoadingState';
 import PrimaryButton from '../components/PrimaryButton';
 import { toContentLanguage } from '../i18n/contentLanguage';
@@ -105,13 +106,15 @@ export default function GunaMilanScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <KeyboardAvoidingWrapper>
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.subtitle}>{t('gunaMilan.formSubtitle')}</Text>
       <Card>
         <BirthDataFields value={partner} onChange={setPartner} />
       </Card>
       <PrimaryButton label={t('gunaMilan.matchButton')} onPress={handleMatch} disabled={!canSubmit} />
     </ScrollView>
+    </KeyboardAvoidingWrapper>
   );
 }
 

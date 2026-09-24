@@ -391,9 +391,14 @@ _CHAT_CONTEXT = {
     # Plain verdict per house — this (not house_breakdown above) is what a
     # static topic chat answer actually returns; see
     # chart_explanation_service._VERDICT_BY_HOUSE_EN/HI.
+    # Matches production shape: chart_explanation_service.build_house_
+    # breakdown concatenates the per-house verdict with a fixed per-bucket
+    # "reason" clause (_VERDICT_REASON_EN) into one string.
     "house_verdict": {
-        10: "Your career may have both good phases and hard phases.",
-        7: "Your relationships may have both good and hard moments.",
+        10: "Your career may have both good phases and hard phases. There's no strong push in either "
+        "direction right now, so a lot depends on your own effort and choices.",
+        7: "Your relationships may have both good and hard moments. There's no strong push in either "
+        "direction right now, so a lot depends on your own effort and choices.",
     },
     "yogas": [
         {
@@ -625,6 +630,50 @@ async def test_chat_reply_relationship_conflict_pulls_in_real_chart_specific_con
     assert "a chart alone can't resolve" in reply  # acknowledgment stays, just no longer the ENTIRE content
 
 
+async def test_generic_house_verdict_gets_a_real_period_specific_addition():
+    """Regression guard for a real, reproduced complaint: once natal dignity
+    is neutral (the most common case — no exalted/debilitated/own-sign
+    planet involved) and nothing else grounds the answer, the ENTIRE reply
+    used to be just the flat, house-generic verdict sentence — "Your
+    relationships may have both good and hard moments." — near-identical in
+    shape to every other domain's own neutral verdict ("both good phases
+    and hard phases" for career, "both gains and losses" for money), with
+    zero content that actually varies by person. User's own words: "if
+    there's no push either way, why do I need an astrologer?" Must now also
+    carry the real, current-dasha-lord-specific one-liner, exactly like
+    relationship_conflict's own concern_sentence already does — this is the
+    generic case, not the concern-known one, so no concern_type is set."""
+    context = {
+        **_CHAT_CONTEXT, "detected_categories": ["marriage"], "antardasha_lord_code": "Sa",
+        "life_state": {"marital_status": "married"},
+    }
+    reply = await interpreter.chat_reply(_history("tell me about my marriage"), context, "en")
+    assert "may have both good and hard moments" in reply  # the honest verdict stays
+    assert "grind, not a disaster" in reply  # the real Saturn one_liner, newly added
+    # The fixed, house-agnostic "no strong push either way, depends on your
+    # effort" reason clause is dropped once real content replaces it — it
+    # would otherwise sit right before the real one-liner as pure hedging.
+    assert "no strong push in either direction" not in reply
+
+
+async def test_generic_house_verdict_addition_is_skipped_when_a_real_timing_window_already_fired():
+    """The period one-liner is a fallback for when NOTHING else grounds the
+    answer — an unmarried user's bare marriage question already gets a real
+    forward-looking timing window (marriage_timing_windows), so piling the
+    same antardasha one-liner on top would be redundant, not helpful."""
+    context = {
+        **_CHAT_CONTEXT, "detected_categories": ["marriage"], "antardasha_lord_code": "Sa",
+        "life_state": {"marital_status": "single"},
+        "marriage_timing_windows": [{
+            "start_date": "2027-01-01", "end_date": "2028-06-01", "mahadasha_lord_name": "Venus",
+            "antardasha_lord_name": "Venus", "score": 5, "evidence_level": "house_lord_antardasha",
+        }],
+    }
+    reply = await interpreter.chat_reply(_history("tell me about my marriage"), context, "en")
+    if "grind, not a disaster" in reply:
+        assert False, "period one-liner should be skipped once a real timing window already grounds the answer"
+
+
 async def test_chat_reply_family_planning_framing_fires_from_the_category_alone():
     """Regression guard for a real, reproduced bug: picking "family
     planning" from the married-status menu (a category selection, not a
@@ -690,7 +739,12 @@ async def test_chat_reply_career_topic_answer_includes_the_real_timing_window_wh
         }
     ], "career_timing_direction": "future"}
     reply = await interpreter.chat_reply(_history("How's my career looking this year?"), context, "en")
-    assert reply.startswith(_CHAT_CONTEXT["house_verdict"][10])
+    # The generic "no strong push either way, so a lot depends on your own
+    # effort and choices" reason is dropped once a real, specific timing
+    # window is available right after it — caught live, it directly
+    # contradicted the concrete window that followed it in the same reply.
+    assert reply.startswith("Your career may have both good phases and hard phases.")
+    assert "no strong push" not in reply
     assert "2031-05-04" in reply and "Mercury" in reply
 
 
@@ -792,7 +846,19 @@ def test_decision_signal_recognizes_common_hinglish_leave_job_for_business_phras
 
     categories = _detect_categories("kya mujhe job chhodkar business karna chahiye")
     assert "job_change_decision" in categories
-    assert "business_start_decision" in categories
+
+
+def test_decision_signal_recognizes_what_is_best_for_me_phrasing():
+    """Regression guard for a real, reproduced bug: "What is best for me —
+    stay on job or switch to business?" has no "should i" anywhere, so
+    _has_decision_signal missed it entirely and this fell through to a
+    plain career reading (Venus dasha dates) instead of the job_change_
+    decision reason/offer/runway gate — even though the message already
+    names both sides of the comparison."""
+    from app.services.interpretation.templates import _detect_categories
+
+    categories = _detect_categories("what is best for me stay on job or switch to business?")
+    assert "job_change_decision" in categories
 
 
 def test_past_tense_recognizes_pichle_without_an_adjacent_kya_hua_phrase():

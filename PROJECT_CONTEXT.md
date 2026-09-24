@@ -2,6 +2,19 @@
 
 Reviewed 2026-09-23. This is a repository orientation and implementation baseline for subsequent requirements, not a claim that every code path or astrological rule has been independently audited. Recheck affected files before making changes. No application code was changed during this review.
 
+Implementation update 2026-09-24: memory relevance and question strategy are now
+handled in `backend/app/services/question_strategy.py`, integrated before chat
+clarification and interpretation. Historical concerns must not select current
+intent. Relevance derives from existing fact status/last-confirmation timestamps;
+rejected facts become inactive, while explicitly confirmed facts refresh their
+timestamp. Current-focus choices are persisted per user/Rishi and expire after
+24 hours. Native decision replies compare options and risks, retain computed
+timing, and include practical next steps and missing-information questions.
+Business follow-up slots cover funding, market, contacts, and transition mode.
+See `backend/README.md` and `backend/tests/test_question_strategy.py` for policy
+boundaries and regression scenarios. Existing independent workspace changes
+were preserved; astrology calculation code was not changed for this update.
+
 ## Working rules
 
 - Root `AGENTS.md` requires reading https://docs.expo.dev/versions/v57.0.0/ before writing code. The exact versioned reference was read during this review.
