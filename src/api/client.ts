@@ -6,6 +6,7 @@ import {
   BirthChart,
   BirthData,
   ChartType,
+  ChatMessage,
   CurrentDasha,
   DailyReading,
   DashaPeriod,
@@ -883,6 +884,26 @@ export async function postChatMessage(message: string, lang: AppLanguage, rishiI
     body: { message, language: lang, rishi_id: rishiId },
   });
   return { reply: res.reply, answeredByRishiId: res.answered_by_rishi_id ?? undefined };
+}
+
+// Chat messages have always been persisted server-side (chat_astro writes
+// every turn to chat_messages) but nothing ever read them back — each
+// device's own useChatStore (AsyncStorage on native, localStorage on web)
+// was the only place a conversation lived, so a phone and a browser signed
+// into the same account saw two completely separate conversations. This
+// fetches the real, shared history for one Rishi so both can hydrate from
+// the same source of truth instead of starting cold on a new device.
+export async function getChatHistory(rishiId: string): Promise<ChatMessage[]> {
+  const res = await apiRequest<{ messages: { id: number; role: 'user' | 'assistant'; text: string; created_at: string }[] }>(
+    '/chat/history',
+    { query: { rishi_id: rishiId } },
+  );
+  return res.messages.map((m) => ({
+    id: `history-${m.id}`,
+    role: m.role,
+    text: m.text,
+    createdAt: new Date(m.created_at).getTime(),
+  }));
 }
 
 // `uri` is a local file:// path from expo-audio's recorder (see

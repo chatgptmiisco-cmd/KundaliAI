@@ -6,7 +6,9 @@ from sqlalchemy import select
 
 from app.db.models.conversation_state import ConversationState
 from app.services.chat_understanding import ContextUpdate
-from app.services.native_understanding import choose, detect_intents, is_question
+from app.services.native_understanding import (
+    choose, detect_intents, extract_bare_suitability_query, is_navigational_reply, is_question,
+)
 from app.services.interpretation.templates import message_is_affirmative_reply, message_is_negative_reply
 
 # A one-word reply to native_understanding.understand()'s own generic
@@ -36,6 +38,65 @@ _DOMAIN_WORDS = {
     "business": ("business", "vyapar", "व्यापार", "व्यवसाय"),
     "family": ("family", "parivar", "परिवार"),
 }
+
+
+# Phrases that signal a DELIBERATE topic change even in a short message —
+# checked before the pending-answer heuristic below overrides a fresh
+# category match, so a genuine "let's talk about marriage instead" is never
+# swallowed as an answer to an unrelated pending business/career question.
+_NEW_TOPIC_MARKERS = (
+    "instead", "actually", "forget that", "forget it", "never mind", "nevermind",
+    "what about", "let's talk about", "lets talk about", "i want to talk about",
+    "can you tell me about", "tell me about", "i want to know about",
+    "भूल जाओ", "बात करते हैं",
+)
+
+
+# Caught live: a bare "yes" answering "What would you sell, and have you
+# tested demand with customers?" got bound verbatim as business.goal="yes"
+# — a content-free acknowledgement accepted as if it named an actual
+# business type. Most DECISION_SLOTS questions are open-ended, where a bare
+# acknowledgement can never be a genuine answer — but a few ("contacts":
+# "Do you already have suppliers or potential customers?") are genuinely
+# yes/no-answerable, and a bare "yes"/"no" IS a real, complete answer to
+# those specifically (caught live in the OTHER direction too: rejecting a
+# real "no" there and re-asking the same yes/no question forever is exactly
+# the "no reset to a bare acknowledgement" failure this guards against, just
+# from the opposite side). Checked against this allowlist below, not applied
+# blanket to every pending slot.
+_NON_SUBSTANTIVE_REPLIES = {
+    "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "fine", "alright",
+    "no", "nope", "nah", "haan", "han", "nahi", "nahin", "हाँ", "हां", "नहीं",
+}
+_YES_NO_ANSWERABLE_SLOTS = {"contacts"}
+
+
+def _is_substantive_answer(value: str, slot: str | None = None) -> bool:
+    if slot in _YES_NO_ANSWERABLE_SLOTS:
+        return True
+    return value.strip().lower().strip(" .!?") not in _NON_SUBSTANTIVE_REPLIES
+
+
+def _looks_like_pending_answer(message: str, is_new_question: bool) -> bool:
+    """Caught live: a short, plain-text answer to a pending slot's own
+    question (e.g. "Yes, alongside my job" answering transition_mode's
+    "alongside your job or full-time?") got read as switching topic to
+    "career" purely because it contains the word "job" — an incidental
+    keyword match `detect_intents` has no way to tell apart from a real new
+    topic. A pending question's answer takes priority over a fresh category
+    match unless the message is itself a genuine new question or explicitly
+    signals a topic change — this is the deterministic floor for that;
+    chat_gpt_mediator.assess_and_generate_question's own is_confirmation
+    judgment can additionally corroborate it when that layer is enabled, but
+    must never be required for this to work."""
+    if is_new_question:
+        return False
+    text = message.strip().lower()
+    if any(marker in text for marker in _NEW_TOPIC_MARKERS):
+        return False
+    if message_is_affirmative_reply(message) or message_is_negative_reply(message):
+        return True
+    return len(text.split()) <= 8
 
 
 def _resolve_domain_word(message: str) -> str | None:
@@ -144,6 +205,16 @@ DECISION_SLOTS = {
     # business_goal/funding questions already ask for that flow. Reuses the
     # SAME two slots rather than inventing new question text.
     "business": ("business_goal", "funding"),
+    # Deliberately NOT a DECISION_SLOTS entry here (unlike every other
+    # decision category): "will clothing business work for me" is itself a
+    # hypothetical "should I" style ask, not a first-person factual
+    # assertion (native_understanding.extract_knowledge correctly never
+    # stores a fact for it) — but the business TYPE it names is still real,
+    # useful information for THIS turn's answer. chat.py re-extracts it
+    # fresh from the current message every time (native_understanding.
+    # extract_business_category_query) rather than routing through a
+    # DECISION_SLOTS question that would otherwise wrongly re-ask "what
+    # would you sell" even when the message just named it inline.
 }
 
 
@@ -326,6 +397,12 @@ async def save_state(db, user_id, rishi_id, data):
 def resume(understanding, message, state, language):
     """Bind only a follow-up answer to a pending slot; new questions switch topic."""
     pending = state.get("pending", [])
+    # A GPT-generated question (chat_gpt_mediator.assess_and_generate_
+    # question) targeting a concept outside the QUESTIONS catalogue — chat.py
+    # sets this (and clears `pending`) instead of a slot id when the concept
+    # is genuinely novel. Bound below exactly like a single pending slot,
+    # just written to this domain/key directly instead of via QUESTIONS[slot].
+    pending_dynamic = state.get("pending_dynamic")
     direct = detect_intents(message)
     # A business retraction (see native_understanding.extract_knowledge's
     # retractions list — e.g. "I don't have a business, it was just an
@@ -345,18 +422,34 @@ def resume(understanding, message, state, language):
     # so an unrelated pending question (e.g. mid a separate job-change
     # decision asked the same turn) is untouched.
     if any(domain == "business" for domain, _ in getattr(understanding, "retracted_facts", ())):
+        # A stale business slot (business_goal/funding/...) is invalid
+        # either way a business retraction happens — clear it regardless.
         pending = state["pending"] = [s for s in pending if QUESTIONS[s][0] != "business"]
-        state["categories"] = [c for c in state.get("categories", []) if c not in ("business", "business_start_decision")]
-        direct = [c for c in direct if c not in ("business", "business_start_decision")]
-        # classify_message already set understanding.categories (from its
-        # OWN, unfiltered detect_intents call) before resume() ever runs —
-        # every branch below either overwrites it with the filtered
-        # `direct`/`state["categories"]` or leaves it alone, and the final
-        # `if understanding.categories: state["categories"] = understanding.
-        # categories` line re-derives state from THIS value either way. Left
-        # unfiltered here, that stale "business" would survive straight
-        # through to the end even though every other path was just cleared.
-        understanding.categories = [c for c in understanding.categories if c not in ("business", "business_start_decision")]
+        # Whether the CATEGORY itself is also cleared depends on WHICH
+        # retraction this is, per correction 13 (personal-astrologer chat
+        # upgrade plan) — "I don't have a business, it was just an idea"
+        # abandons the idea entirely (business_state becomes "none", see
+        # native_understanding.extract_knowledge) and should reset the
+        # topic; "I changed my plan" retracts only the specific type/goal
+        # WITHOUT touching business_state (still "considering") and must
+        # stay ON the business topic so the very next question can ask what
+        # actually changed, per chat.py's own naming-clarification hook —
+        # clearing the category here would hide the stale value from
+        # question_strategy.usable_facts' own category-relevance filtering
+        # before that hook ever gets a chance to read it.
+        abandoned_business = bool(understanding.life_state_update and understanding.life_state_update.business_state == "none")
+        if abandoned_business:
+            state["categories"] = [c for c in state.get("categories", []) if c not in ("business", "business_start_decision")]
+            direct = [c for c in direct if c not in ("business", "business_start_decision")]
+            # classify_message already set understanding.categories (from its
+            # OWN, unfiltered detect_intents call) before resume() ever runs —
+            # every branch below either overwrites it with the filtered
+            # `direct`/`state["categories"]` or leaves it alone, and the final
+            # `if understanding.categories: state["categories"] = understanding.
+            # categories` line re-derives state from THIS value either way. Left
+            # unfiltered here, that stale "business" would survive straight
+            # through to the end even though every other path was just cleared.
+            understanding.categories = [c for c in understanding.categories if c not in ("business", "business_start_decision")]
     # "dasha" is a bare, topic-agnostic "what period am I in?" meta-question
     # — detect_intents matches it on generic timing phrasing alone ("when
     # will be the right time?") with no domain word of its own. Caught
@@ -366,10 +459,18 @@ def resume(understanding, message, state, language):
     # — and since `direct` was non-empty, it bypassed the "inherit the
     # active topic" handling below entirely. Treated as no signal (exactly
     # like an empty `direct`) whenever a DIFFERENT, more specific topic is
-    # already active — a real dasha-only ask ("what dasha am I running?")
-    # with nothing else going on is unaffected, since there's no other
-    # active category to prefer over it.
-    if direct == ["dasha"] and state.get("categories") and state["categories"] != ["dasha"]:
+    # already active. Caught live again later: this originally fired for
+    # ANY message matching detect_intents' generic dasha pattern, including
+    # an EXPLICIT "What dasha am I running?" — a real, unambiguous dasha
+    # question that must always win over a stale active topic, not just a
+    # vague vague timing phrase with no domain word of its own. Narrowed to
+    # the vague-phrasing case only (no literal "dasha"/"mahadasha"/
+    # "antardasha" word in the message) — an explicit mention is always
+    # treated as its own real topic, active or not.
+    if (
+        direct == ["dasha"] and not re.search(r"\b(?:maha|antar)?dasha\b", message.lower())
+        and state.get("categories") and state["categories"] != ["dasha"]
+    ):
         direct = []
     is_new_question = is_question(message)
     numbered_answer = bool(re.match(r"\s*1[.)]", message))
@@ -386,7 +487,11 @@ def resume(understanding, message, state, language):
         d == s or s.startswith(d) or d.startswith(s)
         for d in direct for s in state.get("categories", [])
     )
-    switched_topic = direct and not numbered_answer and not same_family and not set(direct).intersection(state.get("categories", []))
+    switched_topic = (
+        direct and not numbered_answer and not same_family
+        and not set(direct).intersection(state.get("categories", []))
+        and not ((pending or pending_dynamic) and _looks_like_pending_answer(message, is_new_question))
+    )
 
     # Two more short-reply bindings, both caught live off a real transcript
     # where they fell through to the generic clarifying question instead —
@@ -534,6 +639,59 @@ def resume(understanding, message, state, language):
         # A real free-text category IS present — let the normal
         # switched_topic handling below route to it.
 
+    if pending_dynamic and not pending and not is_new_question and not switched_topic:
+        value = message.strip()
+        if value and len(value) > 1:
+            understanding.context_updates.append(
+                ContextUpdate(pending_dynamic["domain"], pending_dynamic["key"], value[:240], "high", "user_stated")
+            )
+        understanding.categories = state.get("categories", direct)
+        understanding.needs_clarification = False
+        understanding.clarifying_question = None
+        state["pending_dynamic"] = None
+        return understanding
+
+    if pending == ["business_goal"] and not switched_topic:
+        # "Will clothing work for me?" answering "What would you sell?" is
+        # BOTH naming the type AND asking a genuine business-category-
+        # suitability question in one message — a real, reproduced live
+        # case. Bind the named type as the answer (same fact key
+        # business_goal's question always writes) AND route THIS reply to
+        # the dedicated suitability capability instead of continuing to ask
+        # for funding, per correction 18 (personal-astrologer chat upgrade
+        # plan): the first substantive part of the answer must address what
+        # was actually asked. Deliberately narrow — only fires while this
+        # SPECIFIC slot is pending, never as a topic-agnostic pattern (see
+        # extract_bare_suitability_query's own docstring).
+        suitability_type = extract_bare_suitability_query(message)
+        if suitability_type:
+            domain, key = QUESTIONS["business_goal"][:2]
+            understanding.context_updates.append(ContextUpdate(domain, key, suitability_type, "high", "user_stated"))
+            understanding.categories = ["business_category_suitability"] + [
+                c for c in state.get("categories", direct) if c != "business_category_suitability"
+            ]
+            understanding.needs_clarification = False
+            understanding.clarifying_question = None
+            state["pending"] = []
+            state["categories"] = understanding.categories
+            return understanding
+
+    if pending and not is_new_question and not switched_topic and len(pending) == 1 and message.strip() and not _is_substantive_answer(message, pending[0]):
+        # A bare "yes"/"no"/"ok" is never a real answer to any DECISION_
+        # SLOTS question (none of them are yes/no questions) — re-ask the
+        # SAME question rather than silently binding the acknowledgement as
+        # if it named something real. Also drops this slot from `asked` —
+        # otherwise chat.py's OWN separate questions_for() call later this
+        # same request (which runs regardless of what resume() decided)
+        # would see the slot as "already asked" and silently skip straight
+        # to the NEXT one, so the very next turn's real answer would bind to
+        # the wrong slot even though this one was genuinely never answered.
+        state["asked"] = [s for s in state.get("asked", []) if s != pending[0]]
+        understanding.categories = state.get("categories", direct)
+        understanding.needs_clarification = True
+        understanding.clarifying_question = choose(language, *QUESTIONS[pending[0]][2:])
+        return understanding
+
     if pending and not is_new_question and not switched_topic:
         numbered = dict(re.findall(r"(?:^|\n|;|\s)([1-3])[.)]\s*(.*?)(?=(?:\s[1-3][.)])|\n|;|$)", message))
         # Real users very often type a numbered multi-part reply WITHOUT a
@@ -656,7 +814,7 @@ def _stale_fact(facts: dict, domain: str, key: str, hours: int = 24) -> dict | N
     return None
 
 
-def questions_for(categories, facts, life_state, state, language):
+def questions_for(categories, facts, life_state, state, language, message=""):
     # Intent-menu gates checked first (relationship/career/week — the 3
     # highest-ambiguity asks, see the module docstring above _marriage_menu).
     # Widened from "marriage_timing" only: a bare "tell me about my
@@ -716,7 +874,23 @@ def questions_for(categories, facts, life_state, state, language):
     # it fired anyway and re-asked "what do you want to focus on?" with
     # "starting a business" literally offered as one of the options the
     # user had just already picked in plain words.
-    if "career" in categories and "business" not in categories and not career_known and not state.get("career_clarified"):
+    # Caught live, direct product feedback: a real, contentful question
+    # ("How will we do financially?", "What about my career?") was getting
+    # the SAME "which angle do you mean?" menu a bare, ambiguous one-word
+    # mention ("career") genuinely needs — the astrology engine already has
+    # everything it needs (the birth chart) to answer an outlook question
+    # directly via the real house-based reading below; asking first when the
+    # question is already answerable is exactly the "ask only when required"
+    # violation this menu was never meant to cause. Gated to a genuinely
+    # bare topic mention (is_navigational_reply's existing 1-2-word check,
+    # already used elsewhere for exactly this "how ambiguous is this
+    # message" judgment) — a real question always bypasses straight to a
+    # direct answer instead.
+    if (
+        "career" in categories and "business" not in categories
+        and "business_category_suitability" not in categories
+        and not career_known and not state.get("career_clarified") and (not message or is_navigational_reply(message))
+    ):
         lead, options = _career_menu(language)
         state["pending_intent_menu"] = {"gate": "career", "base_category": "career", "options": [o[0] for o in options]}
         state["pending"] = []
@@ -729,7 +903,7 @@ def questions_for(categories, facts, life_state, state, language):
     money_known = bool(
         facts.get("money") or life_state.get("business_state") not in (None, "none")
     )
-    if "money" in categories and not money_known and not state.get("money_clarified"):
+    if "money" in categories and not money_known and not state.get("money_clarified") and (not message or is_navigational_reply(message)):
         lead, options = _money_menu(language)
         state["pending_intent_menu"] = {"gate": "money", "base_category": "money", "options": [o[0] for o in options]}
         state["pending"] = []
@@ -742,7 +916,7 @@ def questions_for(categories, facts, life_state, state, language):
     # even when genuinely unknown, so it can't distinguish "known: no kids"
     # from "never asked"; the structured fact store doesn't have that gap.
     family_known = bool(facts.get("family"))
-    if "family" in categories and not family_known and not state.get("family_clarified"):
+    if "family" in categories and not family_known and not state.get("family_clarified") and (not message or is_navigational_reply(message)):
         lead, options = _family_menu(language)
         state["pending_intent_menu"] = {"gate": "family", "base_category": "family", "options": [o[0] for o in options]}
         state["pending"] = []
@@ -753,7 +927,7 @@ def questions_for(categories, facts, life_state, state, language):
     # week_ahead comment). Asked once per conversation; a specific area
     # mentioned in a LATER week question is handled by normal category
     # detection, not re-gated here.
-    if "week_ahead" in categories and not state.get("week_clarified"):
+    if "week_ahead" in categories and not state.get("week_clarified") and (not message or is_navigational_reply(message)):
         lead, options = _week_menu(language)
         state["pending_intent_menu"] = {"gate": "week", "base_category": "week_ahead", "options": [o[0] for o in options]}
         state["pending"] = []
@@ -775,13 +949,29 @@ def questions_for(categories, facts, life_state, state, language):
     for category in categories:
         slots.extend(s for s in DECISION_SLOTS.get(category, ()) if not known_slot(s, facts))
     asked = set(state.get("asked", []))
-    slots = list(dict.fromkeys(s for s in slots if s not in asked))[:3]
+    # One question per turn, not up to 3 bundled into a single numbered
+    # list — caught live, direct product feedback: dumping "1. What would
+    # you sell... 2. How would you fund it... 3. Do you have suppliers..."
+    # all at once read as a form, not a conversation. Capped to 1 here is
+    # the whole fix: the single-slot branch right below already renders a
+    # plain question with no numbering, and resume()'s slot-binding
+    # (len(pending) == 1) already binds a bare, un-numbered answer straight
+    # to it — both existed already for the "only 1 slot left" case, which
+    # is now just every case. The next call naturally asks the next slot,
+    # since `asked`/`known_slot` above already track what's been covered.
+    candidates = list(dict.fromkeys(s for s in slots if s not in asked))
+    # Stashed alongside the deterministic pick below (never replacing it) so
+    # chat.py's OPTIONAL dynamic-question layer (chat_gpt_mediator.
+    # choose_next_slot, gated behind chat_dynamic_questions_enabled) can pick
+    # a DIFFERENT one of these SAME real candidates when more than one is
+    # available — it can only choose among slots that already exist here,
+    # never invent a new question. Every existing caller of this function
+    # only reads state["pending"]/the return value, so this addition changes
+    # nothing about current behavior.
+    state["pending_candidates"] = candidates
+    slots = candidates[:1]
     state["pending"] = slots
     state["asked"] = list(asked | set(slots))
     if not slots:
         return None
-    lines = [choose(language, *QUESTIONS[s][2:]) for s in slots]
-    if len(lines) == 1:
-        return lines[0]
-    lead = choose(language, "These details would change the advice. You can answer by number:", "इन बातों से सलाह बदलेगी। आप क्रमांक के अनुसार उत्तर दे सकते हैं:", "In details se advice badlegi. Aap number ke hisaab se jawab de sakte hain:")
-    return lead + "\n\n" + "\n".join(f"{i}. {q}" for i, q in enumerate(lines, 1))
+    return choose(language, *QUESTIONS[slots[0]][2:])

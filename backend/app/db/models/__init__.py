@@ -13,11 +13,13 @@ from app.db.models.cache import (
 )
 from app.db.models.chat import ChatMessage
 from app.db.models.conversation_state import ConversationState
+from app.db.models.dynamic_question_log import DynamicQuestionLog
 from app.db.models.important_date import ImportantDate
 from app.db.models.life_context import LifeContextItem, LifeDecision, LifeEvent
 from app.db.models.life_state import LifeState
 from app.db.models.prediction_feedback import PredictionFeedback
 from app.db.models.prediction_query_log import PredictionQueryLog
+from app.db.models.question_pattern_stats import QuestionPatternStats
 from app.db.models.subscription import Subscription
 from app.db.models.user import OtpRequest, User
 
@@ -33,6 +35,7 @@ __all__ = [
     "UsageCounter",
     "ChatMessage",
     "ConversationState",
+    "DynamicQuestionLog",
     "ImportantDate",
     "LifeContextItem",
     "LifeDecision",
@@ -40,6 +43,7 @@ __all__ = [
     "LifeState",
     "PredictionFeedback",
     "PredictionQueryLog",
+    "QuestionPatternStats",
     "Subscription",
     "OtpRequest",
     "User",

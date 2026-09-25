@@ -13,7 +13,7 @@ from app.db.base import get_db
 from app.db.models.birth_profile import BirthProfile
 from app.db.models.chat import ChatMessage
 from app.db.models.user import User
-from app.schemas.voice import ChatMessageIn, ChatMessageOut
+from app.schemas.voice import ChatHistoryMessageOut, ChatHistoryOut, ChatMessageIn, ChatMessageOut
 from app.services import (
     chat_memory_service, important_date_service, life_context_service, life_pattern_service,
     prediction_feedback_service, prediction_service, user_service,
@@ -23,11 +23,16 @@ from app.services.chat_understanding import classify_message, compute_out_of_dom
 from app.services.daily_reading_service import get_daily_reading
 from app.services.dasha_service import get_current_dasha
 from app.services import conversation_engine, user_context_engine, native_response, chat_beautifier, chat_gpt_mediator, question_strategy
+from app.services import business_suitability_service, dynamic_question_service
+from app.services.conversation_state import get_focus as get_conversation_focus
+from app.services.native_understanding import choose, extract_business_category_query
 from app.core.config import get_settings
 from app.services.interpretation.factory import native_chat
 from app.services.interpretation.templates import (
     _RISHI_DOMAIN_EN,
     _RISHI_DOMAIN_HI,
+    _SUB_INTENT_HOUSE_ALIAS,
+    _TOPIC_HOUSE,
     _TOPIC_TIMING_COUNTERPART,
     build_greeting_reply,
     build_returning_greeting_reply,
@@ -170,6 +175,48 @@ def _long_term_peak_context(peak) -> dict:
         "end_date": peak.end_date.isoformat(),
         "antardasha_lord_name": peak.antardasha_lord_name,
     }
+
+
+def _build_structured_interpretation_context(categories: list[str], context: dict) -> dict:
+    """Assembles the REAL engine signals behind the active category into a
+    clean, small dict for chat_gpt_mediator.compose_final_reply to
+    interpret — not the deterministic reply's rendered sentences. Covers
+    every shape this app's categories actually come in: a decision verdict
+    (business_start_decision, ...), a timing-window list (wealth_timing,
+    career_timing, ... via _LIFE_EVENT_CHECKS' *_windows/_direction/_note
+    keys), business_category_suitability's own structured result, or — for a
+    bare topic category (career/money/family/...) with none of the above —
+    the real house verdict/technical placement behind its generic reading.
+    Deliberately generous: giving the interpretation layer more real signal
+    only helps it explain the result better; compose_final_reply's own
+    post-hoc validation (facts_to_preserve + no-fabricated-token checks) is
+    what prevents invention, not withholding data from the prompt."""
+    result: dict = {}
+    for category in categories:
+        if isinstance(context.get(category), dict):
+            result[category] = context[category]
+        windows = context.get(f"{category}_windows")
+        if windows:
+            result[f"{category}_timing"] = {
+                "direction": context.get(f"{category}_direction"),
+                "windows": windows,
+                "note": context.get(f"{category}_note"),
+                "long_term_peak": context.get(f"{category}_long_term_peak"),
+            }
+        house_category = _SUB_INTENT_HOUSE_ALIAS.get(category, category)
+        house = _TOPIC_HOUSE.get(house_category)
+        if house is not None:
+            result.setdefault("house_signal", {})[category] = {
+                "verdict": context.get("house_verdict", {}).get(house),
+                "verdict_bucket": context.get("house_verdict_bucket", {}).get(house),
+                "ruling_planet": context.get("house_technical", {}).get(house, {}),
+            }
+    if context.get("mahadasha_lord") or context.get("antardasha_lord"):
+        result["current_period"] = {
+            "mahadasha_lord": context.get("mahadasha_lord"),
+            "antardasha_lord": context.get("antardasha_lord"),
+        }
+    return result
 
 
 # Product spec §13/§17 — a vague "what happened in my past" defaults to the
@@ -336,6 +383,37 @@ def _planet_technical(chart, planet_code: str, hi: bool) -> dict:
     }
 
 
+@router.get("/history", response_model=ChatHistoryOut)
+async def chat_history(
+    rishi_id: str,
+    limit: int = 50,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Chat history has always been written to `chat_messages` (see
+    chat_astro's own history_rows query below, used for conversation
+    context) but never read back by anything — the frontend's own
+    conversation state lives ONLY in on-device storage (see useChatStore),
+    which is why a phone and a browser signed into the same account see
+    two completely different conversations. This is the missing read side:
+    same per-user, per-Rishi scoping and `id`-order-not-`created_at`
+    tie-breaking as chat_astro already relies on, just without the
+    `_HISTORY_LIMIT` cap meant for keeping an LLM-facing context window
+    small — a person reopening the app wants to actually see their past
+    messages, not just the last 20."""
+    result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.user_id == user.id, ChatMessage.rishi_id == rishi_id)
+        .order_by(ChatMessage.id.desc())
+        .limit(min(max(limit, 1), 200))
+    )
+    rows = list(reversed(result.scalars().all()))
+    return ChatHistoryOut(messages=[
+        ChatHistoryMessageOut(id=r.id, role=r.role, text=r.content, created_at=r.created_at.isoformat())
+        for r in rows
+    ])
+
+
 @router.post("/astro", response_model=ChatMessageOut)
 @limiter.limit("10/minute")
 @native_chat
@@ -385,11 +463,20 @@ async def chat_astro(
              else chart.planet_themes[natal_insights.strongest_planet].name_en)
             if natal_insights.strongest_planet else None
         ),
+        # Raw planet code (e.g. "Ma", "Ve"), not the display name above —
+        # native_response._business_industry_suggestion (templates.py's
+        # _INDUSTRY_SUGGESTIONS) looks up a suited-industry hint by this
+        # code once business_start_decision's own questions are answered.
+        "strongest_planet_code": natal_insights.strongest_planet,
         "weakest_planet": (
             (chart.planet_themes[natal_insights.weakest_planet].name_hi if hi
              else chart.planet_themes[natal_insights.weakest_planet].name_en)
             if natal_insights.weakest_planet else None
         ),
+        # Raw planet code counterpart to weakest_planet above — same reason
+        # strongest_planet_code exists alongside strongest_planet:
+        # business_suitability_service needs the code, not the display name.
+        "weakest_planet_code": natal_insights.weakest_planet,
         "decision_style": natal_insights.decision_style,
         # A chart with no real affliction has no genuine blind spot to
         # report — never invented just to fill the field (see
@@ -437,6 +524,14 @@ async def chat_astro(
         # chat answer.
         "house_verdict": {
             h.house: (h.verdict_hi if hi else h.verdict_en) for h in chart.house_breakdown
+        },
+        # The raw favorable/unfavorable/mixed bucket behind house_verdict's
+        # prose sentence above — clean data for anything that needs to
+        # COMBINE house signals programmatically (e.g.
+        # business_suitability_service) instead of parsing rendered text.
+        # None for an old cached chart row from before this field existed.
+        "house_verdict_bucket": {
+            h.house: h.verdict_bucket for h in chart.house_breakdown
         },
         # The real, chart-specific technical facts behind each house's ruling
         # planet — its name, which house(s) it itself rules, and which house/
@@ -676,9 +771,44 @@ async def chat_astro(
     confirmed, inactive = question_strategy.resolve_focus(understanding, body.message, conversation_state, body.language)
     for fact in inactive:
         await life_context_service.deactivate_fact(db, user.id, fact["id"])
+    # Captured before resume() may clear it, so a GPT-generated dynamic
+    # question (see the assess_and_generate_question block below) that just
+    # got answered THIS turn can have its DynamicQuestionLog row updated.
+    pending_dynamic_before = conversation_state.get("pending_dynamic")
+    dynamic_question_id_before = conversation_state.get("pending_dynamic_question_id")
     if not (had_focus and (confirmed or inactive or conversation_state.get("focus_confirmed"))):
         understanding = conversation_engine.resume(understanding, classification_message, conversation_state, body.language)
     categories = understanding.categories
+    # Caught live: once question_strategy.resolve_focus() sets
+    # focus_confirmed="career" (the user picked "Current job growth" from a
+    # recall menu), usable_facts()'s OWN focus_confirmed=="career"
+    # suppression silently strips EVERY business-domain fact from
+    # context["life_context"] for the rest of the conversation — including
+    # business.goal/business.funding stated on THIS SAME turn, after the
+    # user explicitly said "I want to switch to business" and answered both
+    # DECISION_SLOTS questions. Nothing else ever clears that flag once set
+    # (relevance_question() only clears it when IT re-fires, which a plain
+    # "information"-type message like this never triggers), so every later
+    # business reply silently fell back to the bare, unpersonalized career
+    # reading forever. Correction 10 (personal-astrologer chat upgrade
+    # plan): the CURRENT message must never be overridden by stale context —
+    # an explicit business mention always outranks an old confirmed focus.
+    if conversation_state.get("focus_confirmed") in ("career", "job_change_decision") and any(
+        c == "business" or c.startswith("business") for c in categories
+    ):
+        for key in ("focus_confirmed", "focus_confirmed_at", "confirmed_fact_ids", "excluded_fact_ids"):
+            conversation_state.pop(key, None)
+    if pending_dynamic_before and not conversation_state.get("pending_dynamic") and dynamic_question_id_before:
+        answer_update = next(
+            (u for u in understanding.context_updates
+             if u.domain == pending_dynamic_before["domain"] and u.key == pending_dynamic_before["key"]),
+            None,
+        )
+        if answer_update:
+            await dynamic_question_service.record_answer(
+                db, dynamic_question_id_before, answer_update.value, answer_update.value, "medium",
+            )
+        conversation_state["pending_dynamic_question_id"] = None
     # Deterministic fallback for a plain yes/no reply to the career-
     # employment gate question this endpoint itself may have just asked
     # (see prediction_service.get_life_event_timing's career_promotion_
@@ -775,6 +905,15 @@ async def chat_astro(
     # Applied BEFORE the upsert loop below so a same-turn re-assertion of
     # the same fact still wins (upsert_fact only supersedes a currently-
     # active row, so retracting first just means a fresh one gets inserted).
+    # Captured BEFORE retraction below actually removes it from the DB — the
+    # personal-astrologer chat upgrade plan's "changed my plan" naming hook
+    # (further down this function) needs the OLD value to name the specific
+    # prior plan, and by design (see the comment above) this loop runs
+    # before context["life_context"] is even fetched.
+    prior_business_type_before_retraction = None
+    if ("business", "business_type") in understanding.retracted_facts:
+        prior_business_facts = await life_context_service.get_active_context(db, user.id, ["business"])
+        prior_business_type_before_retraction = prior_business_facts.get("business", {}).get("business_type", {}).get("value")
     for domain, key in understanding.retracted_facts:
         await life_context_service.retract_fact(db, user.id, domain, key)
     # Every extracted fact gets recorded as structured Life Context (see
@@ -888,15 +1027,112 @@ async def chat_astro(
         body.message, categories, context, conversation_state, body.language, understanding.context_updates,
     )
     context["life_context"] = question_strategy.usable_facts(context, conversation_state, understanding.context_updates)
+    # "I changed my plan" (correction 13) must resolve against the ACTIVE
+    # decision, never reset to a generic topic menu — name the SPECIFIC
+    # prior plan (prior_business_type_before_retraction, captured earlier in
+    # this function before the retraction loop actually removed it from the
+    # DB) rather than asking a generic re-elicitation question.
+    # `detect_intents` finds no category at all for a bare "I changed my
+    # plan" (no domain word of its own), so native_understanding.understand()
+    # has ALREADY set the fully generic "work, relationships, money,
+    # business, or family?" clarifying question by this point — deliberately
+    # overridden here, not skipped, since this specific, named question is
+    # always strictly more useful than that generic one.
+    if prior_business_type_before_retraction:
+        understanding.needs_clarification = True
+        understanding.clarifying_question = choose(
+            body.language,
+            f"You were previously considering a {prior_business_type_before_retraction} business. Have you "
+            f"changed the type of business, or your plan about starting a business altogether?",
+            f"आप पहले {prior_business_type_before_retraction} व्यवसाय पर विचार कर रहे थे। क्या आपने व्यवसाय का प्रकार "
+            f"बदला है, या व्यवसाय शुरू करने की पूरी योजना ही बदल गई है?",
+        )
     # Historical goals remain available for explicit recall, not current advice.
     if categories != ["memory_recall"]:
         context["goal_history"] = []
     for category in categories:
         if category in conversation_engine.DECISION_SLOTS and not understanding.decision_update:
             await life_context_service.upsert_decision(db, user.id, category, body.message)
-    gap_question = None if relevance_prompt or inactive else conversation_engine.questions_for(
-        categories, context["life_context"], context["life_state"], conversation_state, body.language,
+    # Caught live: once "business_category_suitability" is the active ask
+    # (e.g. "Will clothing work for me?" answering a pending business_goal
+    # question inline — see conversation_engine.resume()), the STILL-
+    # unanswered "business"/business_start_decision DECISION_SLOTS (funding,
+    # market, ...) kept generating a gap_question for a completely different
+    # follow-up — which, worse, then silently short-circuited the ENTIRE
+    # reply before native_response.compose() ever ran (question_type() only
+    # treats a message as "decision" when a "_decision"-suffixed category is
+    # present; a suitability-only turn doesn't have one, so the leftover
+    # gap_question was read as this "information"-type message's own
+    # clarification and returned directly, dropping the suitability answer
+    # entirely). Suitability already has everything it needs the moment a
+    # type is known — it doesn't need funding/market answered first — so
+    # those slots are excluded from THIS turn's question computation only;
+    # `categories`/state["categories"] themselves are untouched, so a later
+    # turn can still continue business_start_decision's own flow normally.
+    # Same reasoning applies to "financial_stability" ("I am asking about
+    # the financial stability of my business.") — a real, already-answerable
+    # astrology outlook question (house-2/wealth-angle reading) that a
+    # co-occurring bare "business" category's own unanswered DECISION_SLOTS
+    # question (business_goal/funding) kept commandeering instead, per
+    # section 3/4 (personal-astrologer chat upgrade correction): ask only
+    # when the engine genuinely needs the information, never just because a
+    # DECISION_SLOTS entry happens to exist for a co-detected category.
+    _outlook_categories_active = any(c in ("business_category_suitability", "financial_stability") for c in categories)
+    questions_for_categories = (
+        [c for c in categories if c not in ("business", "business_start_decision")]
+        if _outlook_categories_active else categories
     )
+    gap_question = None if relevance_prompt or inactive else conversation_engine.questions_for(
+        questions_for_categories, context["life_context"], context["life_state"], conversation_state, body.language, body.message,
+    )
+    # Dynamic information-discovery — explicitly opted-into product decision:
+    # when a decision-critical question is pending, GPT assesses answer-
+    # sufficiency and may propose a DIFFERENT question — either one of the
+    # SAME real DECISION_SLOTS candidates, or a genuinely new information
+    # requirement outside that catalogue entirely, bounded to VALID_DOMAINS
+    # with a sanitized key (see chat_gpt_mediator.assess_and_generate_
+    # question). Off by default, skipped for engine_only, and fails closed
+    # to the deterministic question questions_for() already computed on any
+    # disagreement/timeout/error — this can only ever ask for MORE than that
+    # deterministic floor requires, never less; it never waives a fact
+    # known_slot/questions_for() itself treats as still missing.
+    if gap_question and not body.engine_only and get_settings().chat_dynamic_questions_enabled:
+        focus = get_conversation_focus(conversation_state, context["life_context"])
+        prior_rows = await dynamic_question_service.get_recent_for_user(db, user.id, limit=5)
+        prior_questions_text = "; ".join(
+            f"{r['question_text']} -> {r['answer_text']}" for r in prior_rows if r.get("answer_text")
+        )
+        complete_context_text = chat_gpt_mediator.build_priority_context(
+            body.message, focus, context["life_context"], prior_questions_text,
+        )
+        active_category = categories[0] if categories else ""
+        assessment = await chat_gpt_mediator.assess_and_generate_question(
+            active_category, complete_context_text, prior_questions_text, body.message, "", body.language,
+        )
+        if assessment and assessment.get("next_question_required"):
+            target_domain, target_key = assessment["target_domain"], assessment["target_key"]
+            matching_slot = next(
+                (sid for sid, spec in conversation_engine.QUESTIONS.items() if spec[0] == target_domain and spec[1] == target_key),
+                None,
+            )
+            gap_question = assessment["question"]
+            if matching_slot:
+                conversation_state["asked"] = list(set(conversation_state.get("asked", [])) | {matching_slot})
+                conversation_state["pending"] = [matching_slot]
+                conversation_state["pending_dynamic"] = None
+            else:
+                # A genuinely new information requirement — resume() binds
+                # the very next plain-text reply to this domain/key via
+                # pending_dynamic, the same ContextUpdate path every other
+                # fact already goes through (see conversation_engine.resume).
+                conversation_state["pending"] = []
+                conversation_state["pending_dynamic"] = {"domain": target_domain, "key": target_key}
+            logged = await dynamic_question_service.log_question(
+                db, user.id, body.rishi_id, active_category or "unknown",
+                active_category if active_category == "business_category_suitability" else None,
+                gap_question, target_domain, target_key, matching_slot is None, "gpt_generated",
+            )
+            conversation_state["pending_dynamic_question_id"] = logged.id if matching_slot is None else None
     await conversation_engine.save_state(db, user.id, body.rishi_id, conversation_state)
     context["follow_up_questions"] = gap_question if context["question_type"] == "decision" else None
     clarification = relevance_prompt or (
@@ -1004,6 +1240,53 @@ async def chat_astro(
             # above, so a LATER conversation can reference "last time you
             # were exploring this" instead of re-deriving it from scratch.
             await life_context_service.upsert_decision(db, user.id, category, body.message)
+
+    # "Will clothing business work for me?" — a real, distinct question from
+    # business_start_decision's "is now a good time to start a business"
+    # above (which this loop may or may not also have computed this same
+    # turn, depending on phrasing) — see business_suitability_service. The
+    # business type is read from THIS message first (a first-time ask
+    # usually names it inline) and falls back to an already-known fact only
+    # when the message itself doesn't name one.
+    if "business_category_suitability" in categories:
+        business_type_text = (
+            extract_business_category_query(body.message)
+            or context["life_context"].get("business", {}).get("business_type", {}).get("value")
+            or context["life_context"].get("business", {}).get("goal", {}).get("value")
+        )
+        # Suitability (category fit) and timing (is now a good moment) are
+        # deliberately different astrology questions (section 12,
+        # personal-astrologer chat upgrade correction) — but a suitability
+        # answer is more useful when it can ALSO name the timing signal
+        # rather than staying silent on it. business_start_decision's own
+        # get_decision() verdict may not have been computed this turn if
+        # "business_start_decision" itself isn't a detected category (e.g.
+        # "I want to switch to business" resolves to bare "business") — so
+        # it's computed here too, gated the exact same way _DECISION_CHECKS
+        # above gates it (get_decision internally checks LifeState.
+        # business_state, so this is a no-op read, not a new prediction rule).
+        if context.get("business_start_decision") is None:
+            timing_decision = await prediction_service.get_decision(
+                db, profile, birth, "business_start", body.language,
+                include_mechanics=wants_technical_detail(body.message),
+            )
+            context["business_start_decision"] = {
+                "verdict": timing_decision.verdict,
+                "reasoning": timing_decision.reasoning,
+                "current_period": timing_decision.current_period.model_dump(mode="json") if timing_decision.current_period else None,
+                "better_window": timing_decision.better_window.model_dump(mode="json") if timing_decision.better_window else None,
+                "history_nudge": timing_decision.history_nudge,
+                "note": timing_decision.note,
+            }
+        suitability = business_suitability_service.assess_business_category_suitability(
+            business_type_text or "",
+            strongest_planet_code=context.get("strongest_planet_code"),
+            house_verdict_bucket=context.get("house_verdict_bucket", {}),
+            yogas=context.get("yogas", []),
+            business_start_decision=context.get("business_start_decision"),
+            weakest_planet_code=context.get("weakest_planet_code"),
+        )
+        context["business_category_suitability"] = {**suitability, "business_type_text": business_type_text}
 
     # "Should I relocate?" — relocation_decision has no get_decision verdict
     # engine behind it (see life_context_service._DECISION_TYPE_BY_CATEGORY's
@@ -1188,7 +1471,21 @@ async def chat_astro(
     # spanning two domains both get answered for real), but the interpreter
     # is told which ones to keep to one line + redirect for.
     out_of_domain_redirects = compute_out_of_domain_redirects(categories, body.rishi_id, body.language)
-    context["detected_categories"] = categories
+    # Once business_category_suitability/financial_stability is the active
+    # ask, the co-occurring bare "career" category's only contribution is
+    # its GENERIC house-10 reading — which only ever duplicated/diluted the
+    # specific verdict ("mixed picture... Also, your career may have good
+    # and bad phases...") instead of adding anything. "business"/business_
+    # start_decision are deliberately KEPT here (unlike questions_for_
+    # categories above) — their own practical_framing()/_named_facts_
+    # sentence sentence (naming the actual business type/funding) is real,
+    # useful, non-redundant content, not generic filler. Section 12/17
+    # (personal-astrologer chat upgrade correction): a specific outlook and
+    # generic career filler are different things — don't blend the generic
+    # one in just because it exists.
+    context["detected_categories"] = (
+        [c for c in categories if c != "career"] if _outlook_categories_active else categories
+    )
     context["out_of_domain_redirects"] = out_of_domain_redirects
     context["rishi_domain"] = (_RISHI_DOMAIN_HI if hi else _RISHI_DOMAIN_EN).get(body.rishi_id)
     # Structured facts remembered about this user from earlier conversations
@@ -1224,8 +1521,39 @@ async def chat_astro(
             quote for quote in context["retrieved_history"]
             if not any(value.casefold() in quote.get("text", "").casefold() for value in dismissed)
         ]
+    # Caught live, direct product feedback: personal_context() (native_
+    # response.py) was restating a stable fact like "your work: Job in IT
+    # sector" on EVERY career-related turn for the whole conversation, not
+    # just the turn it was first established. `shown_facts` persists which
+    # "domain:key:value" identities have already been surfaced at least
+    # once this conversation (personal_context mutates the set in place);
+    # saved back into conversation_state right after so the next turn sees
+    # the update.
+    context["shown_facts"] = set(conversation_state.get("shown_facts", []))
     native_reply = await native_response.compose(history, context, body.language)
+    conversation_state["shown_facts"] = list(context["shown_facts"])
+    await conversation_engine.save_state(db, user.id, body.rishi_id, conversation_state)
     reply = await chat_beautifier.beautify(native_reply, body.language, body.engine_only)
+    # The final GPT interpretation layer (chat_gpt_mediator.
+    # compose_final_reply) — a separate, stricter, opt-in capability from
+    # chat_beautifier/chat_gpt_mediator.beautify_reply above (both stay
+    # disabled independently of this flag). Reconstructs the reply from the
+    # STRUCTURED engine result for the active category, not this function's
+    # own rendered wording, and fails closed to `reply` unchanged on any
+    # violation/timeout/error — so this is purely additive when off, failing,
+    # or disabled.
+    if get_settings().chat_interpretation_layer_enabled and not body.engine_only and reply.strip():
+        structured_result = _build_structured_interpretation_context(categories, context)
+        interpretation_focus = get_conversation_focus(conversation_state, context.get("life_context", {}))
+        # Every date/number/name already in the deterministic reply is what
+        # MUST survive in substance — this is what lets compose_final_reply
+        # freely reword/restructure/drop filler while still being caught if
+        # it silently loses (or fabricates a NEW) concrete fact.
+        facts_to_preserve = chat_gpt_mediator.build_facts_to_preserve(reply)
+        reply = await chat_gpt_mediator.compose_final_reply(
+            body.message, interpretation_focus, json.dumps(context.get("life_context", {}), default=str),
+            structured_result, facts_to_preserve, reply, body.language,
+        )
     # Product spec fix — a past QUESTION is filtered out of retrieved_history
     # entirely (see retrieve_native_turns), so anything that survives here
     # with source "user_quote" is a genuine stated fact native_response.
@@ -1236,8 +1564,13 @@ async def chat_astro(
     # Marking it surfaced stops the SAME callback repeating every turn the
     # topic recurs, and tracking it as pending lets a bare "yes"/"no" reply
     # actually be understood next turn (see conversation_engine.resume).
+    # Reuses compose()'s own cached result (see native_response.compose's
+    # "_personal_context_result") rather than calling personal_context()
+    # again — a second call would incorrectly see every fact as "already
+    # shown" (shown_facts' dedup mutates on the first call) and always
+    # report empty, regardless of whether this reply was actually personalized.
     retrieved_history = context.get("retrieved_history") or []
-    if retrieved_history and retrieved_history[0].get("source") == "user_quote" and not native_response.personal_context(context, body.language):
+    if retrieved_history and retrieved_history[0].get("source") == "user_quote" and not context.get("_personal_context_result"):
         quote_id = retrieved_history[0]["id"]
         surfaced = set(conversation_state.get("surfaced_quote_ids", []))
         surfaced.add(quote_id)

@@ -182,7 +182,7 @@ def _dict_to_response(data: dict, cached: bool) -> ChartResponse:
 # (keyed only on birth_profile version, which doesn't change just because
 # the app's explanation text changed) keeps serving stale text forever. Same
 # pattern as prediction_service._TIMING_ALGO_VERSION.
-_CHART_EXPLANATION_ALGO_VERSION = 8
+_CHART_EXPLANATION_ALGO_VERSION = 9
 
 
 def _select_stmt(profile: BirthProfile, chart_type: ChartType):

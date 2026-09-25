@@ -12,12 +12,34 @@ from app.services.chat_understanding import classify_message
 from app.services.conversation_engine import questions_for, resume
 
 
-def test_questions_are_material_and_do_not_loop():
-    state = {"categories": ["job_change_decision"]}
-    question = questions_for(["job_change_decision"], {}, {}, state, "en")
-    assert "1." in question and "2." in question and "3." in question
-    assert state["pending"] == ["reason", "offer", "runway"]
-    assert questions_for(["job_change_decision"], {}, {}, state, "en") is None
+def test_questions_are_asked_one_at_a_time_and_do_not_loop():
+    """Caught live, direct product feedback: bundling up to 3 questions into
+    one numbered list ("1. What would you sell... 2. How would you fund
+    it... 3. Do you have suppliers...") read as a form being filled out,
+    not a conversation. questions_for now surfaces exactly one slot per
+    call — the next call naturally advances to the next slot once the
+    current one is answered (known_slot sees it in `facts`), same as
+    answering used to advance past a whole bundle at once."""
+    state: dict = {"categories": ["job_change_decision"]}
+    facts: dict = {}
+
+    question = questions_for(["job_change_decision"], facts, {}, state, "en")
+    assert "1." not in question and "2." not in question
+    assert state["pending"] == ["reason"]
+
+    # Simulate the "reason" slot getting answered (see known_slot's own
+    # domain/key lookup) — the NEXT call asks the next slot, not the same
+    # one again, and never re-bundles multiple slots into one message.
+    facts["career"] = {"change_reason": {"value": "stress", "confidence": "high"}}
+    question = questions_for(["job_change_decision"], facts, {}, state, "en")
+    assert state["pending"] == ["offer"]
+
+    facts["career"]["alternative_opportunity"] = {"value": "another offer", "confidence": "high"}
+    question = questions_for(["job_change_decision"], facts, {}, state, "en")
+    assert state["pending"] == ["runway"]
+
+    facts["money"] = {"savings": {"value": "six months", "confidence": "high"}}
+    assert questions_for(["job_change_decision"], facts, {}, state, "en") is None
 
 
 async def test_numbered_answers_resolve_original_intent():
@@ -53,6 +75,103 @@ async def test_numbered_answers_without_a_period_still_resolve_correctly():
     # Nothing from the SECOND numbered item ever leaks into the first slot's
     # value, or vice versa — the exact shape of the original bug.
     assert "savings" not in saved["business", "goal"]
+
+
+async def test_pending_answer_is_not_discarded_as_a_topic_switch_on_incidental_keyword_overlap():
+    """Caught live: "Yes, alongside my job" answering transition_mode's own
+    "alongside your job or full-time?" question contains the word "job",
+    which detect_intents maps to category "career" — an unrelated category
+    to the pending "business" slot's own domain. Since business/career don't
+    share a prefix (same_family) and don't literally intersect
+    state["categories"], switched_topic used to fire on that incidental
+    overlap alone, discarding the answer entirely instead of binding it to
+    transition_mode. A pending question's answer now takes priority over a
+    fresh, unrelated keyword match for a short, non-question reply with no
+    explicit topic-change marker."""
+    state = {"categories": ["business_start_decision"], "pending": ["transition_mode"]}
+    message = "Yes, alongside my job"
+    result = await classify_message([{"role": "user", "content": message}], "vyasa", 1990, "en")
+    result = resume(result, message, state, "en")
+    saved = {(f.domain, f.key): f.value for f in result.context_updates}
+    assert saved["business", "transition_mode"] == "Yes, alongside my job"
+    assert state["pending"] == []
+    assert state["categories"] == ["business_start_decision"]
+
+
+async def test_pending_answer_priority_does_not_swallow_a_genuine_topic_change():
+    """The fix above must not make EVERY short reply during a pending
+    question bind to that question — a message that explicitly signals a
+    deliberate topic change (an explicit "let's talk about X instead" style
+    marker) still switches topic normally, same as before this fix."""
+    state = {"categories": ["business_start_decision"], "pending": ["transition_mode"]}
+    message = "actually let's talk about marriage instead"
+    result = await classify_message([{"role": "user", "content": message}], "vyasa", 1990, "en")
+    result = resume(result, message, state, "en")
+    saved = {(f.domain, f.key): f.value for f in result.context_updates}
+    assert ("business", "transition_mode") not in saved
+    assert "marriage" in result.categories
+
+
+async def test_bare_acknowledgement_is_rejected_and_the_same_question_is_re_asked():
+    """Caught live: "yes" answering "What would you sell, and have you
+    tested demand with customers?" got bound verbatim as business.goal=
+    "yes" — a content-free acknowledgement accepted as if it named an
+    actual business type. None of DECISION_SLOTS' own questions are yes/no
+    questions, so a bare "yes"/"no"/"ok" must never bind — the same
+    question is re-asked instead, and the slot must NOT be dropped from
+    `asked` in a way that makes the NEXT real answer bind to the wrong slot."""
+    state = {"categories": ["business_start_decision"], "pending": ["business_goal"], "asked": ["business_goal"]}
+    for message in ("yes", "No.", "Ok!"):
+        result = await classify_message([{"role": "user", "content": message}], "vyasa", 1990, "en")
+        result = resume(result, message, state, "en")
+        assert result.context_updates == [], message
+        assert result.needs_clarification
+        assert "sell" in result.clarifying_question.lower()
+        assert state["pending"] == ["business_goal"]
+        assert "business_goal" not in state["asked"]
+
+
+async def test_yes_no_is_a_real_answer_for_a_genuinely_yes_no_question():
+    """The rejection above must not become a blanket "never accept yes/no"
+    rule — "contacts"' own question ("Do you already have suppliers or
+    potential customers?") IS genuinely yes/no-answerable, and rejecting a
+    real "no" there would re-ask the same yes/no question forever, exactly
+    the kind of broken-feeling loop this whole feature exists to avoid."""
+    state = {"categories": ["business_start_decision"], "pending": ["contacts"], "asked": ["contacts"]}
+    message = "No"
+    result = await classify_message([{"role": "user", "content": message}], "vyasa", 1990, "en")
+    result = resume(result, message, state, "en")
+    saved = {(f.domain, f.key): f.value for f in result.context_updates}
+    assert saved["business", "customer_supplier_contacts"] == "No"
+    assert not result.needs_clarification
+    assert state["pending"] == []
+
+
+async def test_pending_dynamic_binds_a_plain_text_answer_to_a_domain_key_outside_questions():
+    """chat_gpt_mediator.assess_and_generate_question can propose a concept
+    genuinely outside the QUESTIONS catalogue (e.g. "weekly_hours") —
+    chat.py sets state["pending_dynamic"] instead of a slot id, and the very
+    next plain-text reply must bind to that domain/key via the normal
+    ContextUpdate path, exactly like every other fact."""
+    state = {"categories": ["business_category_suitability"], "pending": [], "pending_dynamic": {"domain": "business", "key": "weekly_hours"}}
+    message = "about 10 hours a week"
+    result = await classify_message([{"role": "user", "content": message}], "vyasa", 1990, "en")
+    result = resume(result, message, state, "en")
+    saved = {(f.domain, f.key): f.value for f in result.context_updates}
+    assert saved["business", "weekly_hours"] == "about 10 hours a week"
+    assert state["pending_dynamic"] is None
+
+
+async def test_pending_dynamic_answer_is_not_discarded_on_incidental_keyword_overlap():
+    """Same fix as the transition_mode regression above, applied to the new
+    pending_dynamic path — an incidental keyword match must not discard a
+    short, non-question answer to a GPT-generated question either."""
+    state = {"categories": ["business_category_suitability"], "pending": [], "pending_dynamic": {"domain": "business", "key": "weekly_hours"}}
+    message = "Yes, alongside my job"
+    result = await classify_message([{"role": "user", "content": message}], "vyasa", 1990, "en")
+    result = resume(result, message, state, "en")
+    saved = {(f.domain, f.key): f.value for f in result.context_updates}
+    assert saved["business", "weekly_hours"] == "Yes, alongside my job"
 
 
 async def test_business_retraction_clears_pending_business_slots_so_the_next_topic_isnt_swallowed():
@@ -309,6 +428,29 @@ def test_career_menu_gates_a_bare_career_ask_when_nothing_is_known():
     assert questions_for(["career"], {}, {}, state3, "en") is None
 
 
+def test_ambiguity_menus_are_bypassed_for_a_real_question_not_a_bare_topic_word():
+    """Caught live (URGENT CORRECTION, section 2/23): "How will we do
+    financially?" and "What about my career?" are already-answerable
+    astrology outlook questions — the astrology engine has everything it
+    needs (the birth chart) to answer directly — but the career/money/
+    family ambiguity menus fired on ANY message resolving to that bare
+    category, a real, contentful question included, not just a genuinely
+    bare "career"/"money" mention. Gated on is_navigational_reply (an
+    existing 1-2-word bare-mention check) so a real question always bypasses
+    straight to a direct answer, while a truly bare mention still gets the
+    disambiguation menu it genuinely needs."""
+    assert questions_for(["career"], {}, {}, {}, "en", "How will we do financially?") is None
+    assert questions_for(["career"], {}, {}, {}, "en", "What about my career?") is None
+    assert questions_for(["money"], {}, {}, {}, "en", "How will we do financially?") is None
+    assert questions_for(["family"], {}, {}, {}, "en", "What about my family?") is None
+    assert questions_for(["week_ahead"], {}, {}, {}, "en", "How's my week looking?") is None
+    # A genuinely bare mention still gets the menu — this isn't a blanket
+    # disable, and the default (no message passed) keeps every existing
+    # caller's behavior unchanged.
+    assert questions_for(["career"], {}, {}, {}, "en", "career") is not None
+    assert questions_for(["career"], {}, {}, {}, "en") is not None
+
+
 def test_career_menu_is_skipped_when_business_is_already_the_specific_answer():
     """Regression guard for a real, reproduced bug: "I want to switch to
     business" resolves to categories ["business", "career"] — "business"
@@ -352,7 +494,9 @@ async def test_career_menu_numbered_pick_routes_into_an_existing_decision_flow()
     assert state["career_clarified"] is True
     follow_up = questions_for(result.categories, {}, {}, state, "en")
     assert follow_up is not None
-    assert state["pending"] == ["reason", "offer", "runway"]
+    # One slot per turn now (see test_questions_are_asked_one_at_a_time_and_do_not_loop) —
+    # the first of the 3 job_change_decision slots, not all 3 bundled at once.
+    assert state["pending"] == ["reason"]
 
 
 def test_money_menu_gates_a_bare_money_ask_when_nothing_is_known():
@@ -522,7 +666,8 @@ def test_career_confusion_asks_what_the_problem_and_direction_are_before_answeri
     question = questions_for(["career_confusion"], {}, {}, state, "en")
     assert question is not None
     assert "career" in question.lower()
-    assert set(state["pending"]) == {"career_problem", "career_direction"}
+    # One slot per turn now (see test_questions_are_asked_one_at_a_time_and_do_not_loop).
+    assert set(state["pending"]) == {"career_problem"}
     # Once both are known, there's nothing left to ask.
     facts = {"career": {"main_concern": {"value": "not growing fast enough", "confidence": "high"},
                          "transition_intent": {"value": "considering business", "confidence": "high"}}}
@@ -596,6 +741,20 @@ async def test_bare_dasha_question_defers_to_a_more_specific_active_topic():
     result2 = await classify_message([{"role": "user", "content": "when will be the right time?"}], "vyasa", 1990, "en")
     result2 = resume(result2, "when will be the right time?", state2, "en")
     assert result2.categories == ["dasha"]
+
+
+async def test_an_explicit_dasha_question_always_wins_over_a_stale_active_topic():
+    """Caught live: the "defer to a more specific active topic" heuristic
+    above was too broad — it fired for ANY message detect_intents mapped to
+    bare "dasha", including an EXPLICIT "What dasha am I running?" (not just
+    a vague "when will be the right time?" with no domain word of its own).
+    An explicit dasha mention is a real, unambiguous question and must
+    always resolve to dasha, regardless of what topic was active before."""
+    state = {"categories": ["business_start_decision", "business", "career"]}
+    for message in ("What dasha am I running?", "What dasha am I in?", "Which mahadasha is active?"):
+        result = await classify_message([{"role": "user", "content": message}], "vyasa", 1990, "en")
+        result = resume(result, message, state, "en")
+        assert result.categories == ["dasha"], message
 
 
 async def test_a_genuine_question_with_no_independent_category_also_continues_the_topic():

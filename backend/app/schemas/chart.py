@@ -59,6 +59,13 @@ class HouseBreakdown(BaseModel):
     # my chart say about X" answers use this instead of the detailed text.
     verdict_en: str
     verdict_hi: str
+    # The raw favorable/unfavorable/mixed bucket _dignity_bucket computed
+    # BEFORE it was folded into verdict_en/hi's prose sentence — surfaced
+    # separately so callers that need a clean signal to combine with others
+    # (e.g. business_suitability_service) don't have to parse rendered text
+    # back out into an enum. Optional/defaulted so an old cached chart row
+    # from before this field existed still deserializes.
+    verdict_bucket: str | None = None
     # The classical planet ruling this house's sign, and a real, chart-
     # specific sentence blending what THAT planet rules elsewhere with where
     # it's actually placed (see chart_explanation_service.build_planet_theme_

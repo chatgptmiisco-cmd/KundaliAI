@@ -7,6 +7,7 @@ interface ChatState {
   messagesByRishi: Record<string, ChatMessage[]>;
   initConversation: (rishiId: string, greeting: string) => void;
   addMessage: (rishiId: string, message: ChatMessage) => void;
+  hydrateHistory: (rishiId: string, messages: ChatMessage[]) => void;
   reset: () => void;
 }
 
@@ -38,6 +39,21 @@ export const useChatStore = create<ChatState>()(
             ...state.messagesByRishi,
             [rishiId]: [...(state.messagesByRishi[rishiId] ?? []), message],
           },
+        }));
+      },
+
+      // The server's own chat_messages table (see api/client.ts's
+      // getChatHistory) is the real, shared source of truth across devices
+      // — this replaces whatever this one device's local cache had for the
+      // Rishi with what the server actually has, so a phone and a browser
+      // signed into the same account converge on the SAME conversation
+      // instead of each keeping its own local-only copy. A no-op when the
+      // server has nothing yet (a brand-new conversation) — initConversation's
+      // locally-seeded greeting is left standing rather than wiped to empty.
+      hydrateHistory: (rishiId, messages) => {
+        if (messages.length === 0) return;
+        set((state) => ({
+          messagesByRishi: { ...state.messagesByRishi, [rishiId]: messages },
         }));
       },
 

@@ -24,6 +24,7 @@ import json
 import re
 
 from app.core.config import get_settings
+from app.services.life_context_service import VALID_DOMAINS
 
 # --- A. Input normalization ------------------------------------------------
 
@@ -223,7 +224,146 @@ async def simplify_question(question_text: str, language: str) -> str:
         return question_text
 
 
-# --- D. Unknown-message intent rescue (classification only, never an answer) --
+# --- D. Priority-ordered GPT context assembly (pure, no provider call) -----
+
+def build_priority_context(message: str, focus: dict, facts: dict, prior_questions_text: str = "") -> str:
+    """Assembles the plain-language text every GPT call in this module
+    receives, in strict priority order: current message > conversation focus
+    (app.services.conversation_state.get_focus) > intent-relevant facts.
+    `facts` is expected to already be question_strategy.usable_facts()'s OWN
+    output — the existing category-relevance filter that already excludes an
+    unrelated topic's facts outright (e.g. an old relationship-conflict
+    thread when the current message is about career) — this function does
+    NOT re-filter, only assembles in priority order. Cross-user
+    QuestionPatternStats patterns are deliberately never included here —
+    advisory-only inclusion happens separately inside
+    assess_and_generate_question's own prompt, never anything the
+    interpretation layer sees."""
+    lines = [f"Current message: {message}"]
+    if focus.get("topic"):
+        sub = f" ({focus['sub_intent']})" if focus.get("sub_intent") else ""
+        lines.append(f"Current topic/intent: {focus['topic']}{sub}")
+    if focus.get("active_decision"):
+        lines.append(f"Active decision: {focus['active_decision']}")
+    if focus.get("known_for_decision"):
+        known = "; ".join(f"{k}={v}" for k, v in focus["known_for_decision"].items() if v)
+        if known:
+            lines.append(f"Already known for this decision: {known}")
+    if focus.get("missing_for_decision"):
+        lines.append(f"Still missing for this decision: {', '.join(focus['missing_for_decision'])}")
+    for domain, keys in (facts or {}).items():
+        for key, info in keys.items():
+            value = info.get("value") if isinstance(info, dict) else info
+            if value:
+                lines.append(f"{domain}.{key}: {value}")
+    if prior_questions_text:
+        lines.append(f"Previously asked this user: {prior_questions_text}")
+    return "\n".join(lines)
+
+
+# --- E. Answer-sufficiency gate + GPT-generated questions -------------------
+
+_TARGET_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+_ASSESS_SYSTEM_PROMPT = (
+    "You are the information-discovery layer of an astrology-chat app. You are given the user's "
+    "COMPLETE relevant context (current message, conversation focus, and known facts, already "
+    "filtered to what's relevant — never invent or assume anything beyond it), the active decision "
+    "category, and a short summary of what this user was previously asked. Decide TWO things "
+    "together: (1) answer-sufficiency — a 0-100 confidence score for whether there is enough "
+    "information to answer the CURRENT question well (this is NOT astrology confidence and is "
+    "never shown to the user); (2) if not sufficient, ONE single follow-up question to ask next. "
+    "You may propose a genuinely new information requirement beyond an existing fixed question "
+    "catalogue when none of them fit, but target_domain MUST be exactly one of: "
+    + ", ".join(sorted(VALID_DOMAINS)) + " — pick the closest bucket, never invent a new one. "
+    "target_key must be a short snake_case identifier for the SPECIFIC missing fact (e.g. "
+    "\"weekly_hours\", \"existing_customers\") reusing an existing name where an equivalent concept "
+    "was already asked about this user. Never include any astrology content (no planets, houses, "
+    "dasha, predictions) — you are gathering information, not answering. Never ask about something "
+    "already listed as known. If a special case is flagged (a 'changed my plan' retraction with a "
+    "named active_decision), ask a confirmation question naming that specific prior decision instead "
+    "of a generic one, and set is_confirmation true. Return only JSON matching: "
+    "{\"answer_ready\": bool, \"confidence\": int (0-100), \"missing_information\": [string, ...], "
+    "\"next_question_required\": bool, \"question\": string or null, \"target_domain\": string or "
+    "null, \"target_key\": string or null, \"is_confirmation\": bool}."
+)
+
+
+def _valid_assessment(data: dict) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if not isinstance(data.get("answer_ready"), bool) or not isinstance(data.get("next_question_required"), bool):
+        return False
+    confidence = data.get("confidence")
+    if not isinstance(confidence, int) or not (0 <= confidence <= 100):
+        return False
+    if not isinstance(data.get("missing_information"), list) or not all(isinstance(m, str) for m in data["missing_information"]):
+        return False
+    if not data.get("next_question_required"):
+        return True
+    question, domain, key = data.get("question"), data.get("target_domain"), data.get("target_key")
+    if not isinstance(question, str) or not question.strip():
+        return False
+    if domain not in VALID_DOMAINS:
+        return False
+    if not isinstance(key, str) or not _TARGET_KEY_RE.match(key):
+        return False
+    return True
+
+
+async def assess_and_generate_question(
+    category: str, complete_context_text: str, prior_questions_text: str, message: str,
+    conversation_snippet: str, language: str,
+) -> dict | None:
+    """Part of the explicitly opted-into "dynamic questioning" product
+    decision (chat_dynamic_questions_enabled) — replaces the earlier, more
+    constrained choose_next_slot (which could only pick among candidates
+    conversation_engine.questions_for() had already computed). This can
+    additionally propose a genuinely new information requirement, bounded to
+    VALID_DOMAINS with a sanitized target_key, and returns an
+    answer-sufficiency verdict alongside it so both decisions come from one
+    round-trip and stay consistent with each other.
+
+    `next_question_required=True` can only ever ask for MORE than the
+    deterministic system's own required-fact checks — the caller
+    (app.api.v1.chat) never lets this WAIVE a fact conversation_engine.
+    known_slot treats as mandatory; it only ever adds to it. Fails closed to
+    None (caller falls back to the deterministic questions_for() question/
+    gate already computed) on any invalid field, timeout, disagreement, or
+    error — same contract every function in this module uses."""
+    settings = get_settings()
+    if not settings.chat_dynamic_questions_enabled or not settings.openai_api_key or not message.strip():
+        return None
+    from openai import AsyncOpenAI
+    try:
+        async with AsyncOpenAI(
+            api_key=settings.openai_api_key, max_retries=0,
+            timeout=settings.chat_gpt_mediator_timeout_seconds,
+        ) as client:
+            response = await asyncio.wait_for(client.chat.completions.create(
+                model=settings.openai_model, max_tokens=300,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": _ASSESS_SYSTEM_PROMPT},
+                    {"role": "user", "content": json.dumps({
+                        "category": category,
+                        "context": complete_context_text,
+                        "prior_questions": prior_questions_text,
+                        "message": message,
+                        "conversation_snippet": conversation_snippet,
+                        "language": language,
+                    })},
+                ],
+            ), timeout=settings.chat_gpt_mediator_timeout_seconds)
+        data = json.loads(response.choices[0].message.content)
+        if not _valid_assessment(data):
+            return None
+        return data
+    except Exception:
+        return None
+
+
+# --- E. Unknown-message intent rescue (classification only, never an answer) --
 
 # The exact category strings the deterministic engine already knows how to
 # handle (DECISION_SLOTS / native_understanding.detect_intents /
@@ -294,7 +434,7 @@ async def classify_unmapped_intent(message: str, previous_categories: list[str],
         return None
 
 
-# --- E. Genuinely unanswerable fallback (direct GPT reply, no astrology) ---
+# --- F. Genuinely unanswerable fallback (direct GPT reply, no astrology) ---
 
 _UNANSWERABLE_SYSTEM_PROMPT = (
     "You are a short, warm conversational fallback for an astrology-chat app, used ONLY after the "
@@ -350,3 +490,236 @@ async def answer_unmapped(message: str, language: str) -> str | None:
         return reply
     except Exception:
         return None
+
+
+# --- G. Final GPT interpretation layer (reconstructs, never paraphrases) ---
+
+# Internal terminology the interpretation layer must never surface to the
+# user — a rewrite that leaks any of these is discarded outright, regardless
+# of how natural the rest of it reads.
+_INTERNAL_TERM_RE = re.compile(
+    r"\b(?:confidence score|slot[_ ]?id|target_domain|target_key|answer_ready|"
+    r"missing_information|decision_slots?|dynamicquestionlog|questionpatternstats)\b", re.IGNORECASE,
+)
+
+_INTERPRETATION_SYSTEM_PROMPT = (
+    "You are the final interpretation layer of a personal astrology-chat app — a real astrologer "
+    "explaining a chart, not a system pasting outputs together. You are given: the user's actual "
+    "current question, their conversation focus, relevant saved context about their life, a "
+    "STRUCTURED result the astrology engine already computed, a list of specific facts that MUST "
+    "appear in your answer, and a fallback answer already written by the deterministic engine (for "
+    "reference only — do not imitate its sentence structure, ordering, or filler phrasing).\n\n"
+    "THE ENGINE DETERMINES WHAT IS TRUE. YOU DETERMINE HOW TO EXPLAIN IT. Never calculate, invent, "
+    "modify, or contradict an astrological fact — never change a date, a planet, a verdict, or add a "
+    "timing window, placement, or event the structured result doesn't contain. Every fact in "
+    "facts_to_preserve must appear in substance (not the same words, the same MEANING).\n\n"
+    "SUCCESS CRITERION: the user must understand what the engine's result means SPECIFICALLY for "
+    "their question. Good grammar or a warmer tone is not success if the answer doesn't actually "
+    "explain the signal. For every important engine signal (a verdict, a window, a planetary "
+    "period), translate it into what it MEANS, not just what it IS — 'financial_signal=positive' "
+    "becomes something like 'this points to a period where improving your financial position is "
+    "supported', not 'this is good for your money'. A date window becomes what that window is FOR "
+    "and why it matters, not just the two dates. Do not overload the user with house numbers, "
+    "planet names, lordships, nakshatras, dignity, yoga names, or dasha terminology unless they "
+    "explicitly asked which planet/house is responsible — translate the mechanism into its meaning "
+    "instead (e.g. a period lord becomes 'a phase your chart associates with X', not 'Mercury "
+    "Antardasha').\n\n"
+    "ANSWER THE ACTUAL QUESTION, NOT AN ADJACENT ONE — identify which sub-intent the current message "
+    "actually maps to and lead with that; only after that may you mention a closely related optional "
+    "topic. Never concatenate engine templates end to end — reconstruct one coherent explanation. Use "
+    "relevant saved context only when it genuinely improves this specific answer (a business owner's "
+    "financial question can reference their business; don't invent context that isn't given, and "
+    "don't force in a stored fact that isn't relevant here). Never repeat a fact already explained "
+    "earlier in this conversation just because it's known. Ask a follow-up question only when it "
+    "would genuinely add a useful next level of analysis — never a generic 'what do you want to talk "
+    "about next?', and never automatically after every answer.\n\n"
+    "REMOVE, do not merely reword, generic filler that doesn't convey real information: 'good times "
+    "and tough times', 'no strong push either way', 'this period is a grind, not a disaster', 'at "
+    "this stage, X questions often involve...', 'looking at your real chart...', 'based on what "
+    "you've shared...'. If the engine genuinely has no meaningful signal for some part of the "
+    "question, say so honestly in plain words — never manufacture a personalized-sounding sentence "
+    "to fill the space.\n\n"
+    "NEVER expose internal mechanics: no confidence scores, domain/key identifiers, \"slot\", "
+    "\"template\", database-sounding field names, or any internal terminology. Keep the SAME "
+    "language and script as the original (English, Hindi, or Hinglish) — never translate or switch. "
+    "Before answering, check silently: did I answer the actual question, using the real engine "
+    "result, in language a normal person understands with zero astrology background? If not, "
+    "rewrite. Return only JSON matching {\"reply\": \"...\"}."
+)
+
+
+def _values_present(text: str, values: list[str]) -> bool:
+    lowered = text.lower()
+    return all(str(v).lower() in lowered for v in values if str(v).strip())
+
+
+# compose_final_reply is explicitly allowed (and expected — see its own
+# system prompt) to reformat an ISO date into natural language ("2027-03-18"
+# -> "March 2027") for readability. A plain substring check would reject
+# that as if it dropped the fact, and _NUMBER_RE's own date-agnostic
+# tokenizing would ALSO flag "March" (a real word, not a number) or the
+# date's own digit fragments as a "new, unexplained token" once reformatted
+# — caught live: this genuinely rejected a correct, well-reworded reply.
+_MONTH_NAMES_EN = (
+    "january", "february", "march", "april", "may", "june", "july",
+    "august", "september", "october", "november", "december",
+)
+
+
+def _date_components(date_str: str) -> set[str]:
+    try:
+        year, month, day = date_str.split("-")
+    except ValueError:
+        return set()
+    return {year, month, day, month.lstrip("0") or "0", day.lstrip("0") or "0", _MONTH_NAMES_EN[int(month) - 1]}
+
+
+def _date_expressed(date_str: str, text: str) -> bool:
+    """A date survives if it appears verbatim, OR the same year and month
+    are both expressed in the text somehow (digits or the month's name) —
+    it just can't turn into a DIFFERENT date."""
+    if date_str in text:
+        return True
+    try:
+        year, month, _day = date_str.split("-")
+    except ValueError:
+        return False
+    lowered = text.lower()
+    month_name = _MONTH_NAMES_EN[int(month) - 1]
+    return year in text and (month_name in lowered or month.lstrip("0") in text or month in text)
+
+
+def build_facts_to_preserve(text: str) -> list[str]:
+    """The list of facts compose_final_reply's caller (app.api.v1.chat)
+    should pass as `facts_to_preserve` — full dates and names, plus any
+    NUMBER that isn't just a date's own internal digit fragment. Caught
+    live: passing raw _fact_tokens(text) directly included "03"/"05" as
+    their OWN required facts (since _NUMBER_RE matches every digit run,
+    including inside an already-captured "2027-03-18") — rejecting a
+    reply that correctly reformatted the date to "March 2027" as if it had
+    dropped a fact, when the actual date was fully preserved."""
+    dates = set(_DATE_RE.findall(text))
+    date_fragments: set[str] = set()
+    for d in dates:
+        date_fragments |= _date_components(d)
+    numbers = {n for n in _NUMBER_RE.findall(text) if n not in date_fragments}
+    names = set(_MIDSENTENCE_CAP_RE.findall(text))
+    return sorted(dates | numbers | names)
+
+
+def _interpretation_facts_preserved(reply: str, facts_to_preserve: list[str]) -> bool:
+    for fact in facts_to_preserve:
+        fact = str(fact).strip()
+        if not fact:
+            continue
+        if _DATE_RE.fullmatch(fact):
+            if not _date_expressed(fact, reply):
+                return False
+        elif fact.lower() not in reply.lower():
+            return False
+    return True
+
+
+_JSON_CAPITALIZED_WORD_RE = re.compile(r"[A-Z][a-z]+")
+
+
+def _interpretation_has_no_fabricated_facts(
+    reply: str, deterministic_fallback_text: str, facts_to_preserve: list[str], source_text: str,
+) -> bool:
+    """`source_text` is everything real GPT was actually given (the
+    structured engine result + relevant saved context, serialized) — a
+    genuine, legitimate signal can live there without ever having made it
+    into the deterministic template's own narrower rendering (e.g. the
+    fallback text only mentions the FUTURE window's period lord, but the
+    structured result also names the CURRENT period's lord — GPT correctly
+    using that is a strictly BETTER answer, not fabrication). Only a token
+    traceable to NEITHER the fallback text, facts_to_preserve, NOR this
+    source data counts as invented.
+
+    Names in `source_text` are matched with a plain capitalized-word scan,
+    not _fact_tokens' own prose-oriented _MIDSENTENCE_CAP_RE — that pattern
+    requires a preceding "letter/comma + space" to avoid flagging a
+    sentence's own first word, but `source_text` is serialized JSON, where a
+    real value like "Venus" always sits right after a quote character
+    (`"Venus"`), never after a natural-language word boundary — so the
+    prose heuristic silently found nothing there at all."""
+    allowed = (
+        {str(f) for f in facts_to_preserve}
+        | _fact_tokens(deterministic_fallback_text)
+        | set(_DATE_RE.findall(source_text)) | set(_NUMBER_RE.findall(source_text))
+        | set(_JSON_CAPITALIZED_WORD_RE.findall(source_text))
+    )
+    for date_str in (
+        _DATE_RE.findall(deterministic_fallback_text) + _DATE_RE.findall(source_text)
+        + [f for f in facts_to_preserve if _DATE_RE.fullmatch(str(f))]
+    ):
+        allowed |= _date_components(date_str)
+    allowed_lower = {a.lower() for a in allowed}
+    for token in _fact_tokens(reply):
+        if token in allowed or token.lower() in allowed_lower:
+            continue
+        return False
+    return True
+
+
+async def compose_final_reply(
+    user_message: str, focus_state: dict, relevant_context_text: str, structured_result: dict,
+    facts_to_preserve: list[str], deterministic_fallback_text: str, language: str,
+) -> str:
+    """The mandatory-when-enabled final interpretation layer — a distinct,
+    stricter capability from the disabled chat_gpt_mediator.beautify_reply
+    (which only checked date/number/name token survival against the
+    deterministic TEXT and could silently drop other content). This
+    validates at the FACT level against `facts_to_preserve` and
+    `structured_result`, never the sentence level, and is explicitly allowed
+    to fully restructure the reply rather than paraphrase
+    deterministic_fallback_text's own wording/ordering.
+
+    Always returns a usable string: deterministic_fallback_text unchanged on
+    any disabled/no-key/invalid/fabricated-content/timeout/error condition,
+    so the app is always fully correct with this layer off, failing, or
+    disabled — same fail-closed contract every function in this module uses."""
+    settings = get_settings()
+    if not settings.chat_interpretation_layer_enabled or not settings.openai_api_key or not deterministic_fallback_text.strip():
+        return deterministic_fallback_text
+    from openai import AsyncOpenAI
+    try:
+        async with AsyncOpenAI(
+            api_key=settings.openai_api_key, max_retries=0,
+            timeout=settings.chat_gpt_mediator_timeout_seconds,
+        ) as client:
+            response = await asyncio.wait_for(client.chat.completions.create(
+                model=settings.openai_model, max_tokens=500,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": _INTERPRETATION_SYSTEM_PROMPT},
+                    {"role": "user", "content": json.dumps({
+                        "user_message": user_message,
+                        "focus": focus_state,
+                        "context": relevant_context_text,
+                        "structured_result": structured_result,
+                        "facts_to_preserve": facts_to_preserve,
+                        "fallback_answer": deterministic_fallback_text,
+                        "language": language,
+                    }, default=str)},
+                ],
+            ), timeout=settings.chat_gpt_mediator_timeout_seconds)
+        reply = json.loads(response.choices[0].message.content).get("reply")
+        if not isinstance(reply, str) or not reply.strip():
+            return deterministic_fallback_text
+        # Fail closed: every required fact must survive IN SUBSTANCE (a date
+        # may be reformatted, e.g. "2027-03-18" -> "March 2027", but must
+        # stay the SAME date — see _date_expressed), no internal term may
+        # leak, and no NEW fact (date/number/name) beyond what the fallback
+        # already carries may appear — this is what stops fabrication while
+        # still allowing a fully reworded reply.
+        if not _interpretation_facts_preserved(reply, facts_to_preserve):
+            return deterministic_fallback_text
+        if _INTERNAL_TERM_RE.search(reply):
+            return deterministic_fallback_text
+        source_text = relevant_context_text + " " + json.dumps(structured_result, default=str)
+        if not _interpretation_has_no_fabricated_facts(reply, deterministic_fallback_text, facts_to_preserve, source_text):
+            return deterministic_fallback_text
+        return reply
+    except Exception:
+        return deterministic_fallback_text

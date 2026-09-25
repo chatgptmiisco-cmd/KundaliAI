@@ -69,6 +69,33 @@ class Settings(BaseSettings):
     # mechanism above, by design, per explicit product decision.
     chat_gpt_mediator_enabled: bool = False
     chat_gpt_mediator_timeout_seconds: float = 4.0
+    # Dynamic information-discovery (chat_gpt_mediator.assess_and_generate_
+    # question) — explicit, opted-into product decision: GPT determines
+    # whether there's enough information to answer the CURRENT question
+    # (an answer-sufficiency confidence score, separate from astrology
+    # confidence and never shown to the user) and, if not, can propose a
+    # follow-up question — bounded to VALID_DOMAINS with a sanitized
+    # target_key, so it can only choose or extend, never invent an
+    # unbounded field. conversation_engine.questions_for()'s own
+    # deterministic question/gate is computed FIRST regardless and is what
+    # ships if this is off, fails, times out, or disagrees invalidly — this
+    # can only ever ask for MORE than that deterministic floor requires,
+    # never less. A separate flag from chat_gpt_mediator_enabled above
+    # (which rewrites the whole reply).
+    chat_dynamic_questions_enabled: bool = False
+    # The final GPT interpretation layer (chat_gpt_mediator.
+    # compose_final_reply) — reconstructs the final reply from the
+    # STRUCTURED engine result (not the deterministic composer's own
+    # sentence wording), validated at the fact level so it can freely
+    # restructure phrasing/ordering while never adding, dropping, or
+    # contradicting a fact. Runs on every real reply when on, so this is a
+    # deliberate, separate cost/product decision from every other flag here
+    # — off by default. A distinct, stricter capability from the disabled
+    # chat_beautification_enabled/chat_gpt_mediator_enabled's beautify_reply
+    # (which only checked date/number/name token survival against rendered
+    # text and could silently drop other content) — re-enabling either of
+    # those is a separate decision from this one.
+    chat_interpretation_layer_enabled: bool = False
     # Chat memory retrieval (see app.services.chat_memory_service) — reuses
     # openai_api_key above, no separate key needed. text-embedding-3-small
     # is cheap (~$0.02/1M tokens) and more than accurate enough for

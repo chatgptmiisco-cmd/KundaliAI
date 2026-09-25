@@ -75,6 +75,14 @@ def is_navigational_reply(text: str) -> bool:
     return bool(1 <= len(words) <= 2 and all(w in _NAVIGATIONAL_WORDS or w.isdigit() for w in words))
 
 
+# Guards the adjective-noun "a {type} business" extraction below from
+# capturing a filler word as if it were the actual business type.
+_BUSINESS_TYPE_STOPWORDS = {
+    "a", "an", "my", "the", "this", "that", "some", "any", "new", "own",
+    "small", "online", "local", "another", "different", "same",
+}
+
+
 # The literal tokens extract_knowledge's own patterns below depend on as
 # EXACT words — caught live: "i am alrady married" (typo for "already")
 # silently failed to extract anything at all, because the marital-status
@@ -105,6 +113,14 @@ _FACT_ANCHOR_WORDS = [
     # is a problem in my marrige" matched only the generic "marriage" topic
     # instead of relationship_conflict's "problem in my marriage" pattern.
     "marriage",
+    # Caught live (personal-astrologer chat upgrade, language-quality
+    # correction): "i wnt to start clthing buisness" — "buisness" was
+    # already corrected (an existing anchor), but "wnt" (-> "want") and
+    # "clthing" (-> "clothing") weren't anchor words, so the adjective-noun
+    # business_type extraction below (which requires the literal word
+    # "want") never fired at all for a message that's otherwise a clean,
+    # ordinary "I want to start a clothing business" statement.
+    "want", "clothing",
 ]
 
 
@@ -175,6 +191,16 @@ _SUB_INTENT_PATTERNS = (
      # even immediately after a relationship topic was already the subject.
      r"|\b(?:we|i) (?:both )?(?:do not|don't|dont|doesn't|doesnt|does not) get along\b"
      r"|\bnot getting along\b|nahi bante\b|nahi bantee\b|nahi patt rahi\b|नहीं बनती\b|नहीं बनते\b"
+     # "Par hamari ladayi bahut hoti hai" (our fights happen a lot) — caught
+     # live: no English "fight"/"conflict"/"problem" word and no "with/in
+     # marriage" structure, so this matched nothing at all and the reply
+     # just repeated the same generic married-life reframe turn after turn
+     # instead of picking up the new, concrete concern. Tied to a possessive
+     # ("hamari"/"humari"/"meri"/"mera") or a habitual verb ("hoti"/"hota"/
+     # "rehti"/"rehta") right next to the fight word so a passing, unrelated
+     # mention of "ladai"/"jhagda" (a fight with a boss, say) doesn't misfire.
+     r"|\b(?:hamari|humari|meri|mera)\b.{0,15}\b(?:ladai|ladayi|ladaai|jhagda|jhagde)\b"
+     r"|\b(?:ladai|ladayi|ladaai|jhagda|jhagde)\b.{0,15}\b(?:hoti|hota|hote|rehti|rehta)\b"
      r"|दुखी.*शादी|शादी.*दुखी|परेशान.*शादी|शादी.*परेशान",
      "relationship_conflict"),
     (r"\b(?:bonding|connection|compatibility|understanding) with (?:my )?(?:spouse|wife|husband|partner)\b"
@@ -193,7 +219,69 @@ _SUB_INTENT_PATTERNS = (
      "debt"),
     (r"\bfinancial stability\b|\bfinancially stable\b|आर्थिक स्थिरता",
      "financial_stability"),
+    # A distinct capability from business_start_decision/"business" (generic
+    # timing) — "will clothing business work for me" asks whether THAT
+    # SPECIFIC category suits this chart, not whether now is a good time to
+    # start any business at all. See business_suitability_service. Checked
+    # ahead of the plain "business" catch-all below so this never collapses
+    # into the generic career-timing path.
+    (r"\bwill (?:a |an |my )?[\w\s-]{2,40}? business work (?:for|out for) me\b"
+     r"|\bis (?:a |an |my )?[\w\s-]{2,40}? business (?:suitable|good|right) for me\b"
+     r"|\bshould i (?:do|start|try|open) (?:a |an )?[\w\s-]{2,40}? business\b"
+     r"|\bwhat (?:type of |kind of )?business should i (?:choose|do|start|pick)\b"
+     r"|\bwhich business (?:is|would be) (?:good|best|suitable) for me\b"
+     r"|kaunsa business.*(?:achha|sahi|suitable)|कौनसा व्यवसाय.*(?:अच्छा|सही)",
+     "business_category_suitability"),
 )
+
+# Extracts the SPECIFIC business type text named directly in a message like
+# "will clothing business work for me" — used by chat.py so a
+# business_category_suitability ask is answered against the type actually
+# named in THIS message, not only a type already stored as a durable fact
+# (the two overlap often, but a first-time ask names the type inline).
+_BUSINESS_CATEGORY_QUERY_PATTERNS = (
+    r"\bwill (?:a |an |my )?([\w\s-]{2,40}?) business work (?:for|out for) me\b",
+    r"\bis (?:a |an |my )?([\w\s-]{2,40}?) business (?:suitable|good|right) for me\b",
+    r"\bshould i (?:do|start|try|open) (?:a |an )?([\w\s-]{2,40}?) business\b",
+)
+
+
+def extract_business_category_query(message: str) -> str | None:
+    text = message.strip().lower()
+    for pattern in _BUSINESS_CATEGORY_QUERY_PATTERNS:
+        match = re.search(pattern, text)
+        if match and match[1].strip() not in _BUSINESS_TYPE_STOPWORDS:
+            return match[1].strip()
+    return None
+
+
+# A bare "Will clothing work for me?" (no literal "business" word) is only
+# safe to read as a business-suitability ask + inline type-naming when a
+# business question is ALREADY the thing being asked about (checked by the
+# caller, conversation_engine.resume() — only when a business_goal-style
+# slot is pending) — unlike extract_business_category_query above, this is
+# deliberately NOT used as a topic-agnostic, always-on pattern, since "will
+# X work for me" alone says nothing about which domain X belongs to (compare
+# "will meditation work for me", a health question). Excludes a message that
+# also hedges with "or"/"should" ("...or should I look for other options?")
+# — that phrasing is asking about the broader DECISION, not this specific
+# category, and continuing the existing active topic is the correct read.
+_BARE_SUITABILITY_QUERY_RE = re.compile(
+    r"\bwill (?:a |an |my )?([\w\s-]{2,30}?) work (?:for|out for) me\b"
+    r"|\bis (?:a |an |my )?([\w\s-]{2,30}?) (?:suitable|good|right) for me\b"
+)
+_BARE_SUITABILITY_HEDGE_RE = re.compile(r"\b(?:or|should)\b")
+
+
+def extract_bare_suitability_query(message: str) -> str | None:
+    text = message.strip().lower()
+    if _BARE_SUITABILITY_HEDGE_RE.search(text):
+        return None
+    match = _BARE_SUITABILITY_QUERY_RE.search(text)
+    if not match:
+        return None
+    candidate = (match[1] or match[2] or "").strip()
+    return candidate if candidate and candidate not in _BUSINESS_TYPE_STOPWORDS else None
 
 # Extra topic categories a sub-intent is a genuine superset of, BEYOND its
 # own _SUB_INTENT_HOUSE_ALIAS parent — caught live: "family planning" (the
@@ -396,19 +484,65 @@ def extract_knowledge(message):
         # that only ever mean something if a business is actually real.
         if re.search(
             r"\bi (?:don't|do not|dont)(?: actually)? (?:have|run|own) (?:a |my |any )?(?:business|company)\b"
-            r"|\b(?:business|company)\b.{0,25}\b(?:was|is) (?:just|only) an idea\b",
+            r"|\b(?:business|company)\b.{0,25}\b(?:was|is) (?:just|only) an idea\b"
+            # Hinglish equivalents, caught live: "maine abhi business start
+            # nhi kiya hai" and "mujhe business krna hi nhi hai abhi" both
+            # extracted nothing at all (the patterns above are English-only),
+            # so the same stale business.stage fact kept being echoed back
+            # even after both of these direct denials. Tight adjacency
+            # (only a business-verb optionally sits between "business" and
+            # the negation) on purpose — a LOOSE "business...nahi anywhere
+            # nearby" version also matched "business chal raha hai, growth
+            # nahi utni achi hai" (business is fine, growth isn't great),
+            # which would have wrongly retracted a real, current business.
+            # "nahi"/"nhi"/"nai"/"nahin" spelled out rather than relying on
+            # fuzzy-correction — "nahi" isn't a protected anchor word the
+            # way "business" is (see _FACT_ANCHOR_WORDS), so the raw typo
+            # survives normalization untouched.
+            r"|\bbusiness\b\s+(?:abhi\s+)?(?:start\s+|shuru\s+|karna\s+|krna\s+)?(?:hi\s+)?(?:nahi|nhi|nai|nahin)\b",
             clause,
         ):
             state["business_state"] = "none"
             retractions.extend((
                 ("business", "stage"), ("business", "transition_intent"), ("business", "business_type"),
             ))
+        # "I changed my plan" (correction 13, personal-astrologer chat
+        # upgrade plan) — deliberately a DIFFERENT signal from the "it was
+        # just an idea" retraction above: the person hasn't abandoned the
+        # idea of a business altogether (business_state is left untouched,
+        # still "considering"), only the SPECIFIC type/goal previously
+        # stated is no longer current, so the next question should ask what
+        # actually changed rather than silently reusing the stale plan.
+        if re.search(
+            r"\bi(?:'ve| have)? changed my (?:plan|mind)\b|\bmy plan (?:has |had )?changed\b"
+            r"|maine (?:apna )?plan badal (?:diya|liya)|मैंने.*प्लान.*बदल",
+            clause,
+        ):
+            retractions.extend((("business", "business_type"), ("business", "goal")))
         if "ecommerce" in clause or "e-commerce" in clause:
             if re.search(r"\bi\b|\bmy\b", clause) and not re.search(r"\b(?:not|don't|never)\b", clause):
                 put("business", "business_type", "ecommerce")
         product = re.search(r"\bi (?:want|plan|am planning|am thinking).*?(?:business (?:selling|in|of)|sell(?:ing) )\s*(.+?)(?=\band i\b|$)", clause)
         if product and not re.search(r"\b(?:don't|do not|no longer)\b", clause):
             put("business", "business_type", product[1])
+        # Caught live: "I want to start a clothing business" extracted
+        # transition_intent but never business_type at all — the pattern
+        # above only matches "business selling/in/of X" or "selling X", not
+        # this adjective-noun form ("a {type} business"). A bare filler word
+        # ("a new business", "my own business") must NOT be captured as the
+        # type, so a small stoplist of non-type words guards the match.
+        adjective_business = re.search(
+            r"\bi (?:want|plan|am planning|am thinking).*?\bstart(?:ing)?\s+(?:a |an |my )?"
+            r"(?:new |own |small |online |local )*([\w-]+)\s+business\b",
+            clause,
+        )
+        if (
+            adjective_business
+            and not product
+            and adjective_business[1] not in _BUSINESS_TYPE_STOPWORDS
+            and not re.search(r"\b(?:don't|do not|no longer)\b", clause)
+        ):
+            put("business", "business_type", adjective_business[1])
         if re.search(r"\bmy job has no growth|\bi (?:am|'m) (?:stuck|stressed) (?:at|with|in) (?:my )?(?:job|work)\b|job mein growth nahi|नौकरी में.*विकास नहीं", clause):
             put("career", "main_concern", "lack of job growth" if "growth" in clause or "विकास" in clause else "work stress")
         if re.search(r"\b(?:my partner and i|we) (?:fight|are fighting)\b", clause):

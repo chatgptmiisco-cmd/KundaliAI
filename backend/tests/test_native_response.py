@@ -47,6 +47,44 @@ def test_personal_context_title_cases_spouse_name_for_display():
     assert "priya:" not in result.lower().replace("your spouse: priya", "")
 
 
+def test_personal_context_does_not_repeat_a_fact_already_shown_this_conversation():
+    """Direct product feedback: "your work: Job in IT sector" got restated
+    on EVERY career-related turn for a whole conversation, not just the
+    turn it was first established. `shown_facts` (persisted turn to turn
+    by chat.py via ConversationState) tracks which facts have already been
+    surfaced at least once; a fact whose exact "domain:key:value" identity
+    is already there is skipped on later turns."""
+    context = {
+        "life_context": {"career": {"occupation": _fact("developer")}},
+        "shown_facts": {"career:occupation:developer"},
+    }
+    result = personal_context(context, "en")
+    assert result == ""
+
+
+def test_personal_context_shows_a_fact_once_and_records_it_as_shown():
+    """The FIRST time a fact appears, it still shows — and shown_facts (a
+    plain set, mutated in place) picks up its identity so the NEXT call
+    with the same set knows to suppress it."""
+    shown_facts = set()
+    context = {"life_context": {"career": {"occupation": _fact("developer")}}, "shown_facts": shown_facts}
+    first = personal_context(context, "en")
+    assert "developer" in first
+    assert "career:occupation:developer" in shown_facts
+
+    second = personal_context(context, "en")
+    assert second == ""
+
+
+def test_personal_context_without_shown_facts_key_always_shows_every_call():
+    """None (the default when a caller doesn't pass shown_facts at all —
+    e.g. a one-shot call with no conversation state) disables the dedup
+    entirely, preserving the original always-show behavior."""
+    context = {"life_context": {"career": {"occupation": _fact("developer")}}}
+    assert "developer" in personal_context(context, "en")
+    assert "developer" in personal_context(context, "en")
+
+
 def test_personal_context_never_leaks_a_raw_internal_slot_key_as_a_label():
     """Caught live, reproducing the exact leak this whole function exists to
     prevent: DECISION_SLOTS writes free-text answers under internal slot
@@ -69,8 +107,8 @@ def test_personal_context_never_leaks_a_raw_internal_slot_key_as_a_label():
     result = personal_context(context, "en")
     assert "goal:" not in result.lower()
     assert "funding:" not in result.lower()
-    # A key that DOES have an authored label still renders normally.
-    assert "business stage: has customers" in result.lower()
+    # A key that DOES have an authored clause template still renders normally.
+    assert "your business already has customers" in result.lower()
 
 
 def test_practical_framing_names_the_actual_collected_job_change_facts():
@@ -118,6 +156,95 @@ def test_practical_framing_synthesizes_bare_business_the_same_as_business_start_
     result = practical_framing(context, "en")
     assert "clothing" in result
     assert "my own savings" in result
+
+
+def test_personal_context_suppresses_the_redundant_career_transition_intent_clause():
+    """Caught live: "I want to switch to business" writes career.
+    transition_intent="business" AND business.transition_intent="start a
+    business" — two DIFFERENT literal values for the same underlying
+    concept, so the value/clause-level dedupe can't catch it. Rendered back
+    to back this read "You've mentioned that you're considering business and
+    you're considering start a business" — an awkward near-duplicate.
+    business's own (more specific) clause should be the only one shown."""
+    context = {
+        "life_context": {
+            "career": {"transition_intent": _fact("business")},
+            "business": {"transition_intent": _fact("start a business")},
+        },
+    }
+    result = personal_context(context, "en")
+    assert result.count("considering") == 1
+    assert "start a business" in result
+
+
+def test_practical_framing_synthesizes_business_type_stated_as_a_plain_assertion_too():
+    """Caught live (Scenario E, personal-astrologer chat upgrade plan): "I
+    want to start a clothing business" extracts to business.business_type,
+    a DIFFERENT key from business.goal (only ever written by answering the
+    business_goal QUESTION). conversation_engine.known_slot already treats
+    the two as equivalent for gating (the question is correctly never
+    re-asked) — but _named_facts_sentence read "goal" only, so the type was
+    silently never named back to the user even though it was genuinely
+    known. Must fall back to business_type when goal itself is unset."""
+    context = {
+        "detected_categories": ["business"],
+        "life_context": {"business": {"business_type": _fact("clothing"), "funding": _fact("my own savings")}},
+    }
+    result = practical_framing(context, "en")
+    assert "clothing" in result
+    assert "my own savings" in result
+
+
+def test_practical_framing_names_a_suited_industry_once_business_questions_are_answered():
+    """Direct product ask: once business_start_decision's own goal/funding
+    questions are both answered, name a SPECIFIC suited industry from the
+    chart (classical planet significations) instead of only restating what
+    the person already said back to them — "it's up to you which business
+    you continue, but astrologically you have a good hand for X"."""
+    context = {
+        "detected_categories": ["business_start_decision"],
+        "life_context": {"business": {"goal": _fact("clothing"), "funding": _fact("my own savings")}},
+        "strongest_planet_code": "Ma",
+    }
+    result = practical_framing(context, "en")
+    assert "clothing" in result
+    assert "engineering, electricals, machinery" in result
+    assert "up to you" in result.lower()
+
+
+def test_practical_framing_names_the_suited_industry_only_once_per_conversation():
+    """Direct follow-up feedback: the industry suggestion re-stated on
+    EVERY later business-related turn once goal+funding were known — "add
+    it for the situation, not every chat." Its own shown_facts gate (a
+    synthetic identity, separate from the goal/funding restatement above,
+    which is left as-is) suppresses it on the second call."""
+    shown_facts = set()
+    context = {
+        "detected_categories": ["business_start_decision"],
+        "life_context": {"business": {"goal": _fact("clothing"), "funding": _fact("my own savings")}},
+        "strongest_planet_code": "Ma",
+        "shown_facts": shown_facts,
+    }
+    first = practical_framing(context, "en")
+    assert "engineering, electricals, machinery" in first
+
+    second = practical_framing(context, "en")
+    assert "engineering, electricals, machinery" not in second
+    # The combination sentence itself (goal/funding) is untouched by this
+    # gate — only the industry clause is suppressed.
+    assert "clothing" in second
+
+
+def test_practical_framing_industry_suggestion_is_omitted_without_a_strongest_planet():
+    """No astrology data available (strongest_planet_code missing/None) —
+    the sentence must never guess or fall back to a generic industry."""
+    context = {
+        "detected_categories": ["business_start_decision"],
+        "life_context": {"business": {"goal": _fact("clothing"), "funding": _fact("my own savings")}},
+    }
+    result = practical_framing(context, "en")
+    assert "clothing" in result
+    assert "up to you" not in result.lower()
 
 
 def test_practical_framing_never_states_the_fixed_decision_framework_disclaimer():
@@ -171,12 +298,33 @@ def test_personal_context_skips_relationship_status_when_a_reframe_will_state_it
     # A category with no marital reframe (e.g. plain career) still shows it.
     other_context = {**context, "detected_categories": ["career"]}
     other_result = personal_context(other_context, "en")
-    assert "relationship status" in other_result.lower()
+    assert "you are married" in other_result.lower()
 
     # Not married — nothing to reframe around, so the fact still shows.
     single_context = {**context, "life_state": {"marital_status": "single"}}
     single_result = personal_context(single_context, "en")
-    assert "relationship status" in single_result.lower()
+    assert "you are married" in single_result.lower()
+
+
+async def test_compose_caches_its_personal_context_result_for_chat_py_to_reuse():
+    """chat.py calls personal_context() a SECOND time after compose()
+    returns, to decide whether to gate its own quote-callback (see
+    chat.py's `_personal_context_result` usage). With shown_facts' dedup
+    mutating state on every call, a literal second call would always see
+    everything as already-shown and report empty — wrongly signaling "not
+    personalized" even when compose() genuinely did personalize the reply.
+    compose() must cache the real result on the context for reuse instead."""
+    from app.services.native_response import compose
+
+    context = {
+        "detected_categories": ["career"],
+        "life_context": {"career": {"occupation": _fact("developer")}},
+        "shown_facts": set(),
+        "house_verdict": {10: "Your career may have both good and hard phases."},
+    }
+    await compose([{"role": "user", "content": "career"}], context, "en")
+    assert context["_personal_context_result"]
+    assert "developer" in context["_personal_context_result"]
 
 
 async def test_compose_quote_callback_is_not_shown_twice_as_hard_when_a_reframe_already_personalizes():
@@ -199,6 +347,29 @@ async def test_compose_quote_callback_is_not_shown_twice_as_hard_when_a_reframe_
         "house_verdict": {7: "Your relationships may have both good and hard moments."},
     }
     reply = await compose([{"role": "user", "content": "tell me about my relationship"}], context, "en")
+    assert "in an earlier related conversation" not in reply.lower()
+
+
+async def test_compose_quote_callback_is_not_shown_twice_when_the_business_reframe_already_personalizes():
+    """Same bug as the marital-reframe regression above, caught live for
+    the OTHER _context_lead_in reframe: a "career" turn with a known
+    business fact got BOTH "Kyunki aap apne business par dhyaan de rahe
+    hain..." (the business-focused reframe) AND, right after it, "Pichli
+    baat-cheet mein aapne kaha tha: '1 clothings and yes i have
+    costumenrs...'" — the quote-callback verbatim-repeating the SAME old
+    business message the reframe had just referenced. _has_marital_reframe
+    only ever covered the marital case; the business one needs the same
+    "already personalized, don't also quote-back" suppression."""
+    from app.services.native_response import compose
+
+    context = {
+        "detected_categories": ["career"],
+        "life_state": {"business_state": "running"},
+        "life_context": {"business": {"business_type": _fact("clothing")}},
+        "retrieved_history": [{"source": "user_quote", "text": "1 clothings and yes i have costumenrs", "id": 1}],
+        "house_verdict": {10: "Your career may have both good and hard phases."},
+    }
+    reply = await compose([{"role": "user", "content": "career"}], context, "en")
     assert "in an earlier related conversation" not in reply.lower()
 
 

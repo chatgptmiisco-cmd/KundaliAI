@@ -26,6 +26,33 @@ def _unlock_strategy_tier(monkeypatch):
     monkeypatch.setattr("app.api.deps.get_settings", lambda: Settings(all_features_free=True))
 
 
+def test_build_structured_interpretation_context_covers_every_category_shape():
+    """chat_gpt_mediator.compose_final_reply (the GPT interpretation layer)
+    must be given the REAL engine signals, not the deterministic reply's
+    rendered sentences — this covers the three shapes a category's real
+    data actually comes in: a decision verdict dict, a timing-window list
+    (wealth_timing/career_timing/...), and a bare topic category's house
+    verdict/technical placement."""
+    context = {
+        "business_start_decision": {"verdict": "favorable", "reasoning": "..."},
+        "wealth_timing_windows": [{"start_date": "2027-03-18", "end_date": "2029-10-05"}],
+        "wealth_timing_direction": "future",
+        "wealth_timing_note": None,
+        "house_verdict": {2: "Your finances read favorably.", 10: "Career carries weight."},
+        "house_verdict_bucket": {2: "favorable", 10: "mixed"},
+        "house_technical": {2: {"house_sign": "Taurus"}, 10: {"house_sign": "Leo"}},
+        "mahadasha_lord": "Rahu", "antardasha_lord": "Mercury",
+    }
+    result = chat_module._build_structured_interpretation_context(
+        ["business_start_decision", "wealth_timing", "money", "career"], context,
+    )
+    assert result["business_start_decision"]["verdict"] == "favorable"
+    assert result["wealth_timing_timing"]["windows"][0]["start_date"] == "2027-03-18"
+    assert result["house_signal"]["money"]["verdict_bucket"] == "favorable"
+    assert result["house_signal"]["career"]["verdict_bucket"] == "mixed"
+    assert result["current_period"] == {"mahadasha_lord": "Rahu", "antardasha_lord": "Mercury"}
+
+
 async def test_chat_astro_mid_conversation_greeting_gets_a_short_nudge_not_the_generic_fallback(client, monkeypatch):
     """Regression guard for a real, reproduced bug: a bare "hi" sent LATER
     in an existing conversation (not the opening message) used to fall
@@ -157,6 +184,55 @@ async def test_chat_astro_answers_a_real_question_and_persists_history(client, m
     )
     assert resp2.status_code == 200, resp2.text
     assert resp2.json()["reply"]
+
+
+async def test_chat_history_returns_persisted_messages_in_order(client, monkeypatch):
+    """New GET endpoint (chat.py's chat_history) — chat messages have
+    always been written to the DB (see chat_astro's own history_rows query,
+    used for conversation context) but nothing ever read them back, so a
+    phone and a browser signed into the same account saw two completely
+    separate conversations (each device's own local-only useChatStore).
+    This is the missing read side."""
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "How's my career looking?", "language": "en", "rishi_id": "vyasa"},
+    )
+    await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "What about money?", "language": "en", "rishi_id": "vyasa"},
+    )
+
+    resp = await client.get("/api/v1/chat/history", headers=headers, params={"rishi_id": "vyasa"})
+    assert resp.status_code == 200, resp.text
+    messages = resp.json()["messages"]
+    # 2 user turns + 2 assistant replies, oldest first.
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+    assert messages[0]["text"] == "How's my career looking?"
+    assert messages[2]["text"] == "What about money?"
+    assert all(m["id"] for m in messages)
+    assert all(m["created_at"] for m in messages)
+
+
+async def test_chat_history_is_scoped_per_rishi_and_per_user(client, monkeypatch):
+    _unlock_strategy_tier(monkeypatch)
+    headers = await _signup_and_set_birth_data(client)
+
+    await client.post(
+        "/api/v1/chat/astro", headers=headers,
+        json={"message": "How's my career looking?", "language": "en", "rishi_id": "vyasa"},
+    )
+
+    # A different Rishi's history is empty — this message never went to Gargi.
+    resp = await client.get("/api/v1/chat/history", headers=headers, params={"rishi_id": "gargi"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["messages"] == []
+
+    # An unauthenticated request is rejected, never returns another user's rows.
+    resp = await client.get("/api/v1/chat/history", params={"rishi_id": "vyasa"})
+    assert resp.status_code in (401, 403)
 
 
 async def test_chat_astro_answers_in_hindi_when_requested(client, monkeypatch):

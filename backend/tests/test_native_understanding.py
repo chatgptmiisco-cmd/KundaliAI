@@ -12,7 +12,8 @@ import pytest
 from app.services.chat_understanding import classify_message
 from app.services.interpretation.templates import _detect_categories
 from app.services.native_understanding import (
-    _capability_refusal, detect_intents, extract_knowledge, is_navigational_reply, is_question,
+    _capability_refusal, detect_intents, extract_business_category_query, extract_knowledge,
+    is_navigational_reply, is_question,
 )
 
 
@@ -31,6 +32,67 @@ def test_explicit_knowledge_not_questions_hypotheticals_or_other_people():
         facts, state, _ = facts_for(message)
         assert ("career", "occupation") not in facts
         assert state is None or state.marital_status != "married"
+
+
+def test_adjective_noun_business_type_is_extracted():
+    """Caught live: "I want to start a clothing business" extracted
+    transition_intent but never business_type at all — the pre-existing
+    product regex only matched "business selling/in/of X" or "selling X",
+    not this adjective-noun form. known_slot("business_goal", ...) already
+    aliases to business_type, so this alone stops the system re-asking
+    "what would you sell" for a fact it was already told."""
+    facts, _, _ = facts_for("I want to start a clothing business")
+    assert facts["business", "business_type"] == "clothing"
+
+
+def test_adjective_noun_business_type_survives_spelling_mistakes():
+    """URGENT CORRECTION section 27/28 (test #17): "i wnt to start clthing
+    buisness" must normalize correctly — "buisness" was already a corrected
+    anchor word, but "wnt"/"clthing" weren't, so the extraction above never
+    fired at all for an otherwise ordinary, clean statement."""
+    facts, _, _ = facts_for("i wnt to start clthing buisness")
+    assert facts["business", "business_type"] == "clothing"
+
+
+def test_adjective_noun_business_type_ignores_filler_words():
+    facts, _, _ = facts_for("I want to start a new business")
+    assert ("business", "business_type") not in facts
+    facts, _, _ = facts_for("I want to start my own business")
+    assert ("business", "business_type") not in facts
+
+
+def test_business_category_suitability_is_detected_as_a_distinct_intent_from_generic_business_timing():
+    """"Will clothing business work for me" asks whether THIS SPECIFIC
+    category suits the chart — a real, distinct capability from
+    business_start_decision/"business" (is now a good time to start any
+    business). Must resolve to business_category_suitability, never
+    silently fall back to the generic career-timing path."""
+    for message in (
+        "Will clothing business work for me?",
+        "Is a steel manufacturing business suitable for me?",
+        "What business should I choose?",
+        "Which business would be best for me?",
+    ):
+        assert "business_category_suitability" in detect_intents(message), message
+
+
+def test_business_category_query_extracts_the_type_named_in_the_current_message():
+    assert extract_business_category_query("Will clothing business work for me?") == "clothing"
+    assert extract_business_category_query("Is a steel manufacturing business suitable for me?") == "steel manufacturing"
+    assert extract_business_category_query("Should I start a clothing business?") == "clothing"
+    assert extract_business_category_query("What business should I choose?") is None
+
+
+def test_changed_my_plan_retracts_business_type_without_abandoning_business_state():
+    """Correction 13 (personal-astrologer chat upgrade plan): "I changed my
+    plan" is a DIFFERENT signal from "it was just an idea" — the person
+    hasn't abandoned the idea of a business altogether (business_state must
+    stay untouched, not become "none"), only the specific type/goal
+    previously stated is no longer current."""
+    for message in ("I changed my plan.", "I've changed my mind.", "My plan has changed."):
+        facts, state, _, _, retractions = extract_knowledge(message)
+        assert set(retractions) == {("business", "business_type"), ("business", "goal")}, message
+        assert state is None or state.business_state != "none", message
 
 
 def test_business_retraction_clears_business_state_and_flags_facts_for_retraction():
@@ -65,6 +127,36 @@ def test_no_business_retraction_for_an_unrelated_message():
     _, state, _, _, retractions = extract_knowledge("I already have paying customers for my business.")
     assert retractions == []
     assert state.business_state == "running"
+
+
+def test_business_retraction_recognizes_hinglish_phrasing():
+    """Caught live: "But maine abhi buisness start nhi kiya hai" and
+    "Mujhe business Krna hi nhi hai abhi" both extracted NOTHING at all —
+    the retraction patterns above only covered English negation ("i don't
+    have a business"), so the stale business.stage fact from an earlier
+    turn kept being echoed back even after the user denied it twice, in
+    Hinglish, in the same conversation."""
+    for message in (
+        "but maine abhi buisness start nhi kiya hai",
+        "mujhe business krna hi nhi hai abhi",
+        "mera abhi koi business nahi hai",
+    ):
+        _, state, _, _, retractions = extract_knowledge(message)
+        assert state.business_state == "none", message
+        assert ("business", "stage") in retractions, message
+
+
+def test_business_retraction_does_not_misfire_on_a_real_running_business():
+    """The Hinglish pattern above is tight-adjacency ("business" plus an
+    optional business-verb directly before the negation) specifically so it
+    does NOT fire on a message merely mentioning both "business" and
+    "nahi" for unrelated reasons — a real, reproduced risk with a looser
+    "business...nahi anywhere nearby" version: this describes a business
+    that IS running, just with a different, unrelated complaint."""
+    _, _, _, _, retractions = extract_knowledge(
+        "mera business chal raha hai, growth nahi utni achi hai"
+    )
+    assert retractions == []
 
 
 async def test_credentials_cannot_enable_remote_understanding(monkeypatch):
@@ -296,6 +388,20 @@ def test_dont_get_along_is_recognized_as_relationship_conflict_with_no_other_key
     same way family_planning already suppresses bare "family"."""
     for message in ("we both do not get along", "we dont get along", "i dont get along with him", "hum dono nahi bante"):
         assert detect_intents(message) == ["relationship_conflict"]
+
+
+def test_hinglish_fight_phrasing_is_recognized_as_relationship_conflict():
+    """Caught live: "Par hamari ladayi bahut hoti hai" (our fights happen a
+    lot), sent as a direct follow-up right after a married-life reframe,
+    matched NOTHING — no English "fight"/"conflict"/"problem" word, and no
+    "with/in marriage" structure — so the reply just repeated the exact
+    same generic married-life text turn after turn instead of picking up
+    on this new, concrete concern. Tied to a possessive or a habitual verb
+    next to the fight word so an unrelated "ladai"/"jhagda" mention (a
+    fight with a boss, say) doesn't misfire."""
+    for message in ("par hamari ladayi bahut hoti hai", "humari roz jhagda hoti hai", "meri ladai hoti rehti hai"):
+        assert "relationship_conflict" in detect_intents(message), message
+    assert "relationship_conflict" not in detect_intents("i had a fight with my boss about the project")
 
 
 def test_not_sure_about_career_is_confusion_not_a_timing_question():

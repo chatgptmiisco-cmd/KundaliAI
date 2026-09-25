@@ -483,6 +483,7 @@ def build_house_breakdown(chart: ChartResult) -> list[dict]:
                 "explanation_hi": explanation_hi,
                 "verdict_en": f"{_VERDICT_BY_HOUSE_EN[house][verdict_bucket]} {_VERDICT_REASON_EN[verdict_bucket]}",
                 "verdict_hi": f"{_VERDICT_BY_HOUSE_HI[house][verdict_bucket]} {_VERDICT_REASON_HI[verdict_bucket]}",
+                "verdict_bucket": verdict_bucket,
                 "lord": this_house_lord,
                 "lord_theme_en": lord_theme_en,
                 "lord_theme_hi": lord_theme_hi,

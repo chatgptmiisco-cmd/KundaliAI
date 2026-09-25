@@ -28,6 +28,17 @@ class ExplainChartRequest(BaseModel):
     mode: Literal["simple", "detailed"] = "simple"
 
 
+class ChatHistoryMessageOut(BaseModel):
+    id: int
+    role: Literal["user", "assistant"]
+    text: str
+    created_at: str  # ISO 8601 — the frontend only ever needs to sort/display it
+
+
+class ChatHistoryOut(BaseModel):
+    messages: list[ChatHistoryMessageOut]
+
+
 class ChatMessageIn(BaseModel):
     message: str
     language: Literal["en", "hi", "hinglish"] = "en"

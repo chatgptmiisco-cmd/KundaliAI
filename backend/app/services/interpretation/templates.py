@@ -1259,6 +1259,7 @@ _RISHI_SPECIALTY: dict[str, set[str]] = {
         "job_change_decision", "business_start_decision", "house_purchase_decision",
         "property_sale_intent", "property_inheritance_intent", "property_relocation_intent",
         "workplace_problem", "career_confusion", "debt", "financial_stability",
+        "business_category_suitability",
     },
 }
 _CATEGORY_RISHI: dict[str, str] = {
@@ -1787,6 +1788,30 @@ _SUB_INTENT_LEAD_IN_HI: dict[str, str] = {
 # Returns None — never a guess — when nothing is actually known; the plain
 # verdict that follows is the honest answer in that case.
 def _context_lead_in(category: str, context: dict[str, Any], hi: bool) -> str | None:
+    """Thin wrapper around _context_lead_in_text: direct product feedback,
+    caught live — "Since you're focused on ecommerce, here's how that
+    reads rather than a generic career answer" (and the married-life/
+    family-planning/money variants below) repeated on EVERY later turn in
+    the same category, not just the turn it first became relevant. Gated
+    the same way native_response.personal_context's shown_facts already
+    is: shown once per category per conversation, then suppressed — a
+    real astrologer doesn't re-explain the same framing every time you
+    speak. `context["shown_facts"]` being None (a caller with no
+    conversation state, e.g. most of this module's own tests) disables
+    the gate entirely, same always-show fallback as personal_context."""
+    text = _context_lead_in_text(category, context, hi)
+    if text is None:
+        return None
+    shown_facts = context.get("shown_facts")
+    if shown_facts is not None:
+        identity = f"lead_in:{category}"
+        if identity in shown_facts:
+            return None
+        shown_facts.add(identity)
+    return text
+
+
+def _context_lead_in_text(category: str, context: dict[str, Any], hi: bool) -> str | None:
     life_state: dict[str, Any] = context.get("life_state") or {}
     # native_response.compose() blanks the regular "life_context" key here to
     # stop the older _life_context_hint mechanism repeating personal_context's
@@ -2160,6 +2185,101 @@ def _detect_categories(message: str, birth_year: int | None = None) -> list[str]
     return found[:_MAX_CATEGORIES_PER_REPLY]
 
 
+# "Will clothing business work for me" is a real, distinct question from
+# business_start_decision's "is now a good time to start a business" —
+# app.services.business_suitability_service.assess_business_category_
+# suitability combines several already-computed signals (strongest-planet
+# industry fit, 2nd/7th/11th house verdicts, a supportive yoga if present)
+# into a structured, multi-signal verdict; this renders that structured data
+# into a distinct sentence, never the generic career-timing paragraph and
+# never a single-planet binary claim.
+_SUITABILITY_OPENER_EN = {
+    "supportive": "lines up well with what your chart shows",
+    "challenging": "looks like a harder fit based on your chart",
+    "mixed": "shows a mixed picture in your chart",
+}
+_SUITABILITY_OPENER_HI = {
+    "supportive": "आपकी कुंडली के हिसाब से अच्छा बैठता है",
+    "challenging": "आपकी कुंडली के हिसाब से थोड़ा मुश्किल लग रहा है",
+    "mixed": "को लेकर आपकी कुंडली मिला-जुला संकेत देती है",
+}
+
+
+def _business_category_suitability_answer(result: dict[str, Any], hi: bool) -> str | None:
+    business_type = (result.get("business_type_text") or "").strip()
+    if not business_type:
+        # Nothing named in this message or already known as a fact — a real
+        # clarifying question, not a silent fall-through to the generic
+        # career house reading (which would answer a completely different,
+        # unasked question).
+        return (
+            "आप किस तरह के व्यवसाय के बारे में सोच रहे हैं? यह पता चलते ही मैं बता सकता/सकती हूं कि यह आपकी कुंडली से "
+            "कितना मेल खाता है।"
+            if hi else
+            "What type of business are you considering? Once I know that, I can tell you how well it lines up "
+            "with your chart."
+        )
+    if not result.get("category_recognized"):
+        timing = result.get("timing_signal")
+        if hi:
+            base = f"मैं आपकी कुंडली से {business_type} के बारे में कोई पक्का निष्कर्ष नहीं निकाल पा रहा/रही हूं।"
+            if timing:
+                base += f" लेकिन व्यवसाय शुरू करने के समय के लिहाज़ से: {timing}।"
+        else:
+            base = f"I can't make a validated call on {business_type} specifically from what your chart shows."
+            if timing:
+                base += f" But here's your broader business-start timing: {timing}."
+        return base
+
+    clauses_en, clauses_hi = [], []
+    if result.get("planet_alignment") == "supportive":
+        clauses_en.append("your strongest planet lines up with this line of work")
+        clauses_hi.append("आपका सबसे मज़बूत ग्रह इस काम से मेल खाता है")
+    elif result.get("planet_alignment") == "challenging":
+        clauses_en.append("your strongest planet doesn't naturally favor this specific line of work")
+        clauses_hi.append("आपका सबसे मज़बूत ग्रह इस खास काम के अनुकूल नहीं दिखता")
+    if result.get("wealth_house_signal") == "supportive":
+        clauses_en.append("your wealth and partnership houses read favorably")
+        clauses_hi.append("आपके धन और साझेदारी से जुड़े भाव अनुकूल दिख रहे हैं")
+    elif result.get("wealth_house_signal") == "challenging":
+        clauses_en.append("your wealth and partnership houses aren't reading favorably right now")
+        clauses_hi.append("अभी आपके धन और साझेदारी से जुड़े भाव अनुकूल नहीं दिख रहे")
+    if result.get("supportive_yoga_present"):
+        clauses_en.append("a supportive yoga is active in your chart")
+        clauses_hi.append("आपकी कुंडली में एक सहायक योग सक्रिय है")
+
+    overall = result["overall"]
+    if hi:
+        opener = f"{business_type} {_SUITABILITY_OPENER_HI[overall]}"
+        joined = "; ".join(clauses_hi) if clauses_hi else "संकेत सीमित हैं"
+        answer = f"{opener} — {joined}।"
+    else:
+        opener = f"{business_type.capitalize()} {_SUITABILITY_OPENER_EN[overall]}"
+        joined = "; ".join(clauses_en) if clauses_en else "the signals available are limited"
+        answer = f"{opener} — {joined}."
+
+    # Suitability (does this CATEGORY fit) and timing (is NOW the moment) are
+    # deliberately kept as two distinct sentences, per section 12
+    # (personal-astrologer chat upgrade correction) — never collapsed into
+    # one blended verdict, so a supportive category with weak timing (or the
+    # reverse) reads honestly as two separate signals, not one muddled one.
+    timing = result.get("timing_signal")
+    if timing == "favorable":
+        timing_en = "On top of that, the current period also supports making a move like this."
+        timing_hi = "इसके साथ ही, मौजूदा समय भी इस तरह के कदम के लिए अनुकूल है।"
+    elif timing in ("unfavorable", "wait_for_better_window"):
+        timing_en = "That said, the current timing isn't the strongest for making the move right now — this is more a question of timing than of the category itself."
+        timing_hi = "हालांकि, अभी का समय इस कदम के लिए सबसे मजबूत नहीं है — यह चिंता व्यवसाय के प्रकार से ज़्यादा समय को लेकर है।"
+    elif timing == "neutral":
+        timing_en = "Timing-wise there's no strong pull either way right now — so the category fit above matters more here than waiting for a specific window."
+        timing_hi = "समय के लिहाज़ से अभी कोई मजबूत संकेत नहीं है — इसलिए यहां व्यवसाय के प्रकार का मेल किसी खास समय का इंतज़ार करने से ज़्यादा मायने रखता है।"
+    else:
+        timing_en = timing_hi = None
+    if timing_en:
+        return f"{answer} {timing_hi}" if hi else f"{answer} {timing_en}"
+    return answer
+
+
 def _compute_answer_for_category(
     category: str,
     context: dict[str, Any],
@@ -2234,6 +2354,12 @@ def _compute_answer_for_category(
 
     if category in _LIFE_EVENT_CONTEXT_KEY:
         return _life_event_chat_answer(category, context, hi)
+
+    if category == "business_category_suitability":
+        result: dict[str, Any] | None = context.get("business_category_suitability")
+        if not result:
+            return None
+        return _business_category_suitability_answer(result, hi)
 
     if category in (
         "job_change_decision", "business_start_decision", "house_purchase_decision", "marriage_decision",
